@@ -1,0 +1,134 @@
+#ifndef ti_msp_dl_config_h
+#define ti_msp_dl_config_h
+
+#define CONFIG_LP_MSPM0G3507
+#define CONFIG_MSPM0G3507
+
+#if defined(__ti_version__) || defined(__TI_COMPILER_VERSION__)
+#define SYSCONFIG_WEAK __attribute__((weak))
+#elif defined(__IAR_SYSTEMS_ICC__)
+#define SYSCONFIG_WEAK __weak
+#elif defined(__GNUC__) || defined(__clang__) || defined(__ARMCC_VERSION)
+#define SYSCONFIG_WEAK __attribute__((weak))
+#endif
+
+#include <ti/devices/msp/msp.h>
+#include <ti/driverlib/driverlib.h>
+#include <ti/driverlib/m0p/dl_core.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define POWER_STARTUP_DELAY                                                (16)
+
+#define CPUCLK_FREQ                                                     32000000
+
+#define UART_0_INST                                                        UART0
+#define UART_0_INST_FREQUENCY                                           32000000
+#define UART_0_INST_IRQHandler                                  UART0_IRQHandler
+#define UART_0_INST_INT_IRQN                                      UART0_INT_IRQn
+#define GPIO_UART_0_RX_PORT                                                GPIOA
+#define GPIO_UART_0_TX_PORT                                                GPIOA
+#define GPIO_UART_0_RX_PIN                                        DL_GPIO_PIN_11
+#define GPIO_UART_0_TX_PIN                                        DL_GPIO_PIN_10
+#define GPIO_UART_0_IOMUX_RX                                     (IOMUX_PINCM22)
+#define GPIO_UART_0_IOMUX_TX                                     (IOMUX_PINCM21)
+#define GPIO_UART_0_IOMUX_RX_FUNC                      IOMUX_PINCM22_PF_UART0_RX
+#define GPIO_UART_0_IOMUX_TX_FUNC                      IOMUX_PINCM21_PF_UART0_TX
+#define UART_0_BAUD_RATE                                                (115200)
+#define UART_0_IBRD_32_MHZ_115200_BAUD                                      (17)
+#define UART_0_FBRD_32_MHZ_115200_BAUD                                      (23)
+
+/* ── UART2 (JY61P 陀螺仪) ── */
+#define UART_2_INST                                                        UART2
+#define UART_2_INST_FREQUENCY                                           32000000
+#define GPIO_UART_2_TX_PORT                                                GPIOA
+#define GPIO_UART_2_TX_PIN                                        DL_GPIO_PIN_21
+#define GPIO_UART_2_TX_IOMUX                                     (IOMUX_PINCM46)
+#define GPIO_UART_2_TX_IOMUX_FUNC                     IOMUX_PINCM46_PF_UART2_TX
+#define GPIO_UART_2_RX_PORT                                                GPIOA
+#define GPIO_UART_2_RX_PIN                                        DL_GPIO_PIN_22
+#define GPIO_UART_2_RX_IOMUX                                     (IOMUX_PINCM47)
+#define GPIO_UART_2_RX_IOMUX_FUNC                     IOMUX_PINCM47_PF_UART2_RX
+#define UART_2_BAUD_RATE                                                  (9600)
+#define UART_2_IBRD_32_MHZ_9600_BAUD                                       (208)
+#define UART_2_FBRD_32_MHZ_9600_BAUD                                       (21)
+
+#define PWM_0_INST                                                         TIMA1
+#define PWM_0_INST_IRQHandler                                   TIMA1_IRQHandler
+#define PWM_0_INST_INT_IRQN                                     (TIMA1_INT_IRQn)
+#define PWM_0_INST_CLK_FREQ                                             32000000
+
+#define GPIO_PWM_0_C0_PORT                                                 GPIOB
+#define GPIO_PWM_0_C0_PIN                                          DL_GPIO_PIN_2
+#define GPIO_PWM_0_C0_IOMUX                                      (IOMUX_PINCM15)
+#define GPIO_PWM_0_C0_IOMUX_FUNC                     IOMUX_PINCM15_PF_TIMA1_CCP0
+#define GPIO_PWM_0_C0_IDX                                    DL_TIMER_CC_0_INDEX
+
+#define GPIO_PWM_0_C1_PORT                                                 GPIOB
+#define GPIO_PWM_0_C1_PIN                                          DL_GPIO_PIN_3
+#define GPIO_PWM_0_C1_IOMUX                                      (IOMUX_PINCM16)
+#define GPIO_PWM_0_C1_IOMUX_FUNC                     IOMUX_PINCM16_PF_TIMA1_CCP1
+#define GPIO_PWM_0_C1_IDX                                    DL_TIMER_CC_1_INDEX
+
+#define AIN_PORT                                                         (GPIOA)
+#define AIN_AIN1_PIN                                            (DL_GPIO_PIN_14)
+#define AIN_AIN1_IOMUX                                           (IOMUX_PINCM36)
+#define AIN_AIN2_PIN                                            (DL_GPIO_PIN_13)
+#define AIN_AIN2_IOMUX                                           (IOMUX_PINCM35)
+
+#define BIN_PORT                                                         (GPIOA)
+#define BIN_BIN1_PIN                                            (DL_GPIO_PIN_16)
+#define BIN_BIN1_IOMUX                                           (IOMUX_PINCM38)
+#define BIN_BIN2_PIN                                            (DL_GPIO_PIN_17)
+#define BIN_BIN2_IOMUX                                           (IOMUX_PINCM39)
+
+#define ENC_A_PORT                                                       (GPIOA)
+#define ENC_A_E1A_PIN                                            (DL_GPIO_PIN_8)
+#define ENC_A_E1A_IOMUX                                         (IOMUX_PINCM19)
+#define ENC_A_E1B_PIN                                            (DL_GPIO_PIN_9)
+#define ENC_A_E1B_IOMUX                                         (IOMUX_PINCM20)
+
+#define ENC_B_PORT                                                       (GPIOB)
+#define ENC_B_E2A_PIN                                            (DL_GPIO_PIN_8)
+#define ENC_B_E2A_IOMUX                                         (IOMUX_PINCM25)
+#define ENC_B_E2B_PIN                                            (DL_GPIO_PIN_9)
+#define ENC_B_E2B_IOMUX                                         (IOMUX_PINCM26)
+
+/* ── 八路灰度传感器 ── */
+#define GRAY_AD0_PORT                                                   (GPIOA)
+#define GRAY_AD0_PIN                                            (DL_GPIO_PIN_23)
+#define GRAY_AD0_IOMUX                                          (IOMUX_PINCM53)
+#define GRAY_AD1_PORT                                                   (GPIOA)
+#define GRAY_AD1_PIN                                            (DL_GPIO_PIN_24)
+#define GRAY_AD1_IOMUX                                          (IOMUX_PINCM54)
+#define GRAY_AD2_PORT                                                   (GPIOA)
+#define GRAY_AD2_PIN                                            (DL_GPIO_PIN_26)
+#define GRAY_AD2_IOMUX                                          (IOMUX_PINCM59)
+#define GRAY_OUT_PORT                                                   (GPIOA)
+#define GRAY_OUT_PIN                                            (DL_GPIO_PIN_25)
+#define GRAY_OUT_IOMUX                                          (IOMUX_PINCM55)
+
+#define TIMER_ENC_INST                                                    TIMG12
+#define TIMER_ENC_INST_IRQHandler                             TIMG12_IRQHandler
+#define TIMER_ENC_INST_INT_IRQN                               (TIMG12_INT_IRQn)
+#define TIMER_ENC_INST_LOAD_VALUE                                       (31999)
+
+void SYSCFG_DL_init(void);
+void SYSCFG_DL_TIMER_ENC_init(void);
+void SYSCFG_DL_initPower(void);
+void SYSCFG_DL_GPIO_init(void);
+void SYSCFG_DL_SYSCTL_init(void);
+void SYSCFG_DL_UART_0_init(void);
+void SYSCFG_DL_UART_2_init(void);
+void SYSCFG_DL_PWM_0_init(void);
+
+bool SYSCFG_DL_saveConfiguration(void);
+bool SYSCFG_DL_restoreConfiguration(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

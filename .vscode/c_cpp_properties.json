@@ -1,0 +1,26 @@
+{
+    "configurations": [
+        {
+            "name": "TI MSPM0",
+            "includePath": [
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/syscfg",
+                "${workspaceFolder}/Hardware",
+                "${workspaceFolder}/Control",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/include/ti/devices/msp",
+                "${workspaceFolder}/include/ti/driverlib",
+                "${workspaceFolder}/include/ti/driverlib/m0p",
+                "${workspaceFolder}/include/third_party/CMSIS/Core/Include"
+            ],
+            "defines": [
+                "__MSPM0G3507__",
+                "DeviceFamily_MSPM0G3507"
+            ],
+            "compilerPath": "D:/keil_5/ARM/ARMCLANG/bin/armclang.exe",
+            "cStandard": "c11",
+            "intelliSenseMode": "windows-msvc-x64"
+        }
+    ],
+    "version": 4
+}

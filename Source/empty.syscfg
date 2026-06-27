@@ -1,0 +1,30 @@
+{
+    "metadata": {
+        "version": "1.26.2",
+        "device": "MSPM0G3507",
+        "deviceFamily": "MSPM0"
+    },
+    "peripherals": [
+        {
+            "name": "GPIOA",
+            "pins": [
+                {
+                    "pin": 0,
+                    "name": "LED",
+                    "direction": "output",
+                    "initialState": "low"
+                },
+                {
+                    "pin": 1,
+                    "name": "BUTTON",
+                    "direction": "input",
+                    "pullup": true
+                }
+            ]
+        }
+    ],
+    "clocks": {
+        "hfclk": "HFXT",
+        "sysclk": "HFCLK"
+    }
+}

@@ -1,0 +1,37 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build (Keil)",
+            "type": "shell",
+            "command": "C:/Keil_v5/UV4/UV4.exe",
+            "args": [
+                "-b",
+                "${workspaceFolder}/keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx",
+                "-j0",
+                "-o",
+                "${workspaceFolder}/keil/build.log"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "detail": "使用 Keil 命令行编译工程"
+        },
+        {
+            "label": "clean",
+            "type": "shell",
+            "command": "cmd",
+            "args": [
+                "/c",
+                "del /q",
+                "${workspaceFolder}/keil/Objects/*.o",
+                "${workspaceFolder}/keil/*.lst",
+                "${workspaceFolder}/keil/*.dep"
+            ],
+            "group": "build",
+            "detail": "清理编译中间文件"
+        }
+    ]
+}

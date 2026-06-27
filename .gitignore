@@ -1,0 +1,45 @@
+# ── 第三方参考资料（不入库；见 参考资料/README.md）──
+参考资料/
+
+# ── Keil MDK 编译产物 ──
+keil/Objects/
+*.o
+*.d
+*.crf
+*.iex
+*.axf
+*.hex
+*.bin
+*.lst
+*.map
+*.htm
+*.lnp
+*.dep
+*.build_log.htm
+*.scvd
+build.log
+build_log.htm
+
+# ── Keil 用户/机器相关状态（每人不同，不入库）──
+*.uvguix.*
+*.uvoptx
+*.bak
+DebugConfig/
+RTE/_*/
+JLinkLog.txt
+*.JLink
+
+# ── 编辑器 / 操作系统 ──
+.vs/
+.vscode/ipch/
+*.suo
+*.user
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ── 其它 ──
+*.tmp
+*.log

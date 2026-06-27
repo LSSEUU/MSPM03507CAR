@@ -1,0 +1,29 @@
+/*
+ * grayscale.h  —  八路灰度传感器 (数字模式)
+ */
+#ifndef GRAYSCALE_H
+#define GRAYSCALE_H
+#include "board.h"
+
+#define GRAYSCALE_CHANNEL_COUNT  8U
+#define GRAY_SAMPLE_COUNT        5U
+#define GRAY_DEBOUNCE_COUNT      3U
+#define GRAY_POSITION_SCALE      1000
+#define GRAY_LINE_LOST           (-1)
+#define GRAY_MIN_LINE_BITS       3U     /* 最少需要几个通道检测到黑才认为有线 */
+
+typedef struct {
+    uint8_t  raw_state;
+    uint8_t  filtered_state;
+    int32_t  position;
+    uint8_t  debounce_cnt[GRAYSCALE_CHANNEL_COUNT];
+    uint8_t  min_bits;       /* 最少检测通道数, 默认3 */
+} Grayscale_t;
+
+extern Grayscale_t Gray;
+
+void Grayscale_Init(void);
+void Grayscale_Update(void);
+void Grayscale_SetMinBits(uint8_t bits);
+
+#endif
