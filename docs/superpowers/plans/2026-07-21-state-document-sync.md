@@ -294,6 +294,12 @@ Use evidence-based status terms. Do not claim target compilation from a host syn
 Do not bypass, disable, delete, or weaken `.githooks/pre-commit` to avoid updating `STATE.md`. New clones must run `scripts/setup_git_hooks.ps1` once.
 
 Preserve unrelated user files and changes. In particular, never stage unrelated untracked documentation while updating project state.
+
+## Workflow defaults
+
+- The user authorizes creation of isolated Git worktrees by default for planned implementation work. Do not ask for worktree consent again unless the target path or operation introduces a new material risk.
+- After a design and implementation plan are approved, proceed directly with implementation when no genuine blocker or material user decision remains. Do not ask the user to choose an execution style merely as a formality.
+- Stop and ask only when required information cannot be discovered safely, a verification repeatedly fails, or proceeding would materially expand scope or risk.
 ```
 
 - [ ] **Step 3: Create `.githooks/pre-commit` with this complete content**

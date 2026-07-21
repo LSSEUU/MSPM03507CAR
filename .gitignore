@@ -43,3 +43,6 @@ desktop.ini
 # ── 其它 ──
 *.tmp
 *.log
+
+# Codex isolated implementation worktrees
+/.worktrees/
