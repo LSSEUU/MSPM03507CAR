@@ -121,6 +121,7 @@ int main(void)
                               TASK_100MS_PERIOD_MS);
         }
 
+        OLED_Service();
         __WFI();
     }
 }

@@ -8,11 +8,20 @@
 #define OLED_ADDRESS_SECONDARY     0x3DU
 #define OLED_I2C_DELAY_CYCLES      80U
 
+typedef enum {
+    OLED_REFRESH_SET_PAGE = 0,
+    OLED_REFRESH_SET_COLUMN_LOW,
+    OLED_REFRESH_SET_COLUMN_HIGH,
+    OLED_REFRESH_WRITE_DATA
+} OLED_RefreshPhase_t;
+
 static uint8_t OLED_Buffer[OLED_WIDTH * OLED_HEIGHT / 8];
 static OLED_Stats_t oled_stats;
 static uint8_t oled_address = OLED_ADDRESS_PRIMARY;
 static bool oled_refresh_pending;
 static uint8_t oled_refresh_page;
+static uint8_t oled_refresh_column;
+static OLED_RefreshPhase_t oled_refresh_phase;
 
 static void OLED_I2CDelay(void) { delay_cycles(OLED_I2C_DELAY_CYCLES); }
 
@@ -98,6 +107,8 @@ void OLED_Init(void)
     memset(&oled_stats, 0, sizeof(oled_stats));
     oled_refresh_pending = false;
     oled_refresh_page = 0U;
+    oled_refresh_column = 0U;
+    oled_refresh_phase = OLED_REFRESH_SET_PAGE;
     /* Input enable remains active while DOE is toggled for open-drain bit-bang. */
     DL_GPIO_initDigitalInput(OLED_SDA_IOMUX);
     DL_GPIO_initDigitalInput(OLED_SCL_IOMUX);
@@ -136,20 +147,47 @@ void OLED_RequestRefresh(void)
 {
     if (!oled_stats.present) return;
     oled_refresh_page = 0U;
+    oled_refresh_column = 0U;
+    oled_refresh_phase = OLED_REFRESH_SET_PAGE;
     oled_refresh_pending = true;
 }
 
-void OLED_Task100ms(void)
+void OLED_Service(void)
 {
-    uint8_t position[3];
+    uint8_t value;
     if (!oled_refresh_pending || !oled_stats.present) return;
-    position[0] = (uint8_t)(0xB0U + oled_refresh_page);
-    position[1] = 0x00U;
-    position[2] = 0x10U;
-    (void)OLED_WritePacket(0x00U, position, sizeof(position));
-    (void)OLED_WritePacket(0x40U,
-        &OLED_Buffer[(uint16_t)oled_refresh_page * OLED_WIDTH], OLED_WIDTH);
-    oled_refresh_page++;
+
+    switch (oled_refresh_phase) {
+        case OLED_REFRESH_SET_PAGE:
+            value = (uint8_t)(0xB0U + oled_refresh_page);
+            (void)OLED_WritePacket(0x00U, &value, 1U);
+            oled_refresh_phase = OLED_REFRESH_SET_COLUMN_LOW;
+            break;
+        case OLED_REFRESH_SET_COLUMN_LOW:
+            value = (uint8_t)(oled_refresh_column & 0x0FU);
+            (void)OLED_WritePacket(0x00U, &value, 1U);
+            oled_refresh_phase = OLED_REFRESH_SET_COLUMN_HIGH;
+            break;
+        case OLED_REFRESH_SET_COLUMN_HIGH:
+            value = (uint8_t)(0x10U |
+                ((oled_refresh_column >> 4U) & 0x0FU));
+            (void)OLED_WritePacket(0x00U, &value, 1U);
+            oled_refresh_phase = OLED_REFRESH_WRITE_DATA;
+            break;
+        case OLED_REFRESH_WRITE_DATA:
+        default:
+            (void)OLED_WritePacket(0x40U,
+                &OLED_Buffer[(uint16_t)oled_refresh_page * OLED_WIDTH +
+                    oled_refresh_column], 1U);
+            oled_refresh_column++;
+            if (oled_refresh_column >= OLED_WIDTH) {
+                oled_refresh_column = 0U;
+                oled_refresh_page++;
+                oled_refresh_phase = OLED_REFRESH_SET_PAGE;
+            }
+            break;
+    }
+
     if (oled_refresh_page >= OLED_PAGES) {
         oled_refresh_pending = false;
         oled_stats.refresh_count++;

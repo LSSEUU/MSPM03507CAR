@@ -349,7 +349,7 @@ void Diagnostics_Poll(void)
         case 'o': case 'O':
             if (OLED_IsPresent()) {
                 OLED_ShowTestPattern();
-                debug_println("OLED pattern sent; type p=pass or f=fail.");
+                debug_println("OLED refresh queued; wait about 7 s, then type p=pass or f=fail.");
             } else debug_println("OLED FAULT: no ACK.");
             break;
         case 'p': oled_visual_passed = true; break;
@@ -380,7 +380,6 @@ void Diagnostics_Poll(void)
 void Diagnostics_Task100ms(void)
 {
     uint32_t now_ms = SystemTime_Now();
-    OLED_Task100ms();
     if (!boot_reported &&
         ((uint32_t)(now_ms - boot_started_ms) >= BOOT_SELF_TEST_SETTLE_MS)) {
         boot_reported = true;
