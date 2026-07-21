@@ -7,6 +7,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_SYSCTL_init();
     SYSCFG_DL_UART_0_init();
     SYSCFG_DL_UART_2_init();
+    SYSCFG_DL_GRAY_ADC_init();
     SYSCFG_DL_PWM_0_init();
 }
 
@@ -18,11 +19,13 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOB);
     DL_UART_Main_reset(UART_0_INST);
     DL_UART_Main_reset(UART_2_INST);
+    DL_ADC12_reset(GRAY_ADC_INST);
 
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
     DL_UART_Main_enablePower(UART_0_INST);
     DL_UART_Main_enablePower(UART_2_INST);
+    DL_ADC12_enablePower(GRAY_ADC_INST);
     DL_TimerA_enablePower(PWM_0_INST);
     delay_cycles(POWER_STARTUP_DELAY);
 }
@@ -145,6 +148,38 @@ SYSCONFIG_WEAK void SYSCFG_DL_UART_2_init(void)
     DL_UART_Main_setRXFIFOThreshold(UART_2_INST,
         DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_enable(UART_2_INST);
+}
+
+static const DL_ADC12_ClockConfig gGrayADCClockConfig = {
+    .clockSel       = DL_ADC12_CLOCK_ULPCLK,
+    .divideRatio    = DL_ADC12_CLOCK_DIVIDE_8,
+    .freqRange      = DL_ADC12_CLOCK_FREQ_RANGE_32_TO_40,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_GRAY_ADC_init(void)
+{
+    /* ULPCLK is 32 MHz.  The /8 sample clock is 4 MHz, while freqRange
+     * describes the undivided ADC clock source as required by DriverLib. */
+    DL_ADC12_setClockConfig(GRAY_ADC_INST,
+        (DL_ADC12_ClockConfig *)&gGrayADCClockConfig);
+    DL_ADC12_initSingleSample(GRAY_ADC_INST,
+        DL_ADC12_REPEAT_MODE_DISABLED,
+        DL_ADC12_SAMPLING_SOURCE_AUTO,
+        DL_ADC12_TRIG_SRC_SOFTWARE,
+        DL_ADC12_SAMP_CONV_RES_12_BIT,
+        DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED);
+    DL_ADC12_configConversionMem(GRAY_ADC_INST, GRAY_ADC_MEM_IDX,
+        GRAY_ADC_INPUT_CHAN,
+        DL_ADC12_REFERENCE_VOLTAGE_VDDA,
+        DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0,
+        DL_ADC12_AVERAGING_MODE_DISABLED,
+        DL_ADC12_BURN_OUT_SOURCE_DISABLED,
+        DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
+        DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
+    DL_ADC12_setSampleTime0(GRAY_ADC_INST, 32U);
+    DL_ADC12_clearInterruptStatus(GRAY_ADC_INST,
+        DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED);
+    DL_ADC12_enableConversions(GRAY_ADC_INST);
 }
 
 static const DL_TimerA_ClockConfig gPWM_0ClockConfig = {

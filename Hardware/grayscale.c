@@ -1,8 +1,9 @@
-/* Eight-channel digital grayscale sensor selected through a 74HC4051. */
+/* Eight-channel analog grayscale sensor selected through a 74HC4051. */
 #include "grayscale.h"
 
 #define GRAY_CH_SWITCH_DELAY_CYCLES  320U
 #define GRAY_AD0_RISE_TIMEOUT_MS     200U
+#define GRAY_ADC_TIMEOUT_LOOPS        32000U
 
 Grayscale_t Gray;
 
@@ -39,39 +40,51 @@ static bool Gray_SetChannel(uint8_t ch)
     return ad0_ok;
 }
 
-static bool Gray_SampleChannel(uint8_t ch)
+static bool Gray_ReadADC(uint16_t *value)
 {
-    uint8_t low_count = 0U;
-    if (!Gray_SetChannel(ch)) {
-        Gray.error_count++;
+    uint32_t timeout = GRAY_ADC_TIMEOUT_LOOPS;
+
+    DL_ADC12_clearInterruptStatus(GRAY_ADC_INST,
+        DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED);
+    if (!DL_ADC12_isConversionsEnabled(GRAY_ADC_INST)) {
+        DL_ADC12_enableConversions(GRAY_ADC_INST);
+    }
+    DL_ADC12_startConversion(GRAY_ADC_INST);
+    while ((DL_ADC12_getRawInterruptStatus(GRAY_ADC_INST,
+                DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED) == 0U) &&
+           (timeout > 0U)) {
+        timeout--;
+    }
+    if (timeout == 0U) {
+        Gray.adc_status = DL_ADC12_getStatus(GRAY_ADC_INST);
+        Gray.adc_raw_flags = DL_ADC12_getRawInterruptStatus(GRAY_ADC_INST,
+            DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED |
+            DL_ADC12_INTERRUPT_OVERFLOW |
+            DL_ADC12_INTERRUPT_UNDERFLOW |
+            DL_ADC12_INTERRUPT_TRIG_OVF);
+        Gray.adc_powered = DL_ADC12_isPowerEnabled(GRAY_ADC_INST) ? 1U : 0U;
+        Gray.adc_enabled = DL_ADC12_isConversionsEnabled(GRAY_ADC_INST) ? 1U : 0U;
+        Gray.adc_started = DL_ADC12_isConversionStarted(GRAY_ADC_INST) ? 1U : 0U;
+        DL_ADC12_stopConversion(GRAY_ADC_INST);
         return false;
     }
+
+    *value = DL_ADC12_getMemResult(GRAY_ADC_INST, GRAY_ADC_MEM_IDX);
+    return true;
+}
+
+static bool Gray_SampleChannel(uint8_t ch, uint16_t *value)
+{
+    uint32_t sum = 0U;
+    if (!Gray_SetChannel(ch)) return false;
+
     for (uint8_t i = 0U; i < GRAY_SAMPLE_COUNT; i++) {
-        if (DL_GPIO_readPins(GRAY_OUT_PORT, GRAY_OUT_PIN) == 0U) low_count++;
+        uint16_t sample;
+        if (!Gray_ReadADC(&sample)) return false;
+        sum += sample;
     }
-    return (low_count > (GRAY_SAMPLE_COUNT / 2U));
-}
-
-static uint8_t Gray_ScanAll(void)
-{
-    uint8_t mask = 0U;
-    /* Read all even channels first, then all odd channels, so PA23/C44 only
-     * needs one slow low-to-high transition per complete eight-channel scan. */
-    static const uint8_t scan_order[GRAYSCALE_CHANNEL_COUNT] = {
-        0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U
-    };
-    for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++) {
-        uint8_t ch = scan_order[i];
-        if (Gray_SampleChannel(ch)) mask |= (uint8_t)(1U << ch);
-    }
-    return mask;
-}
-
-static uint8_t Gray_CountBits(uint8_t v)
-{
-    uint8_t n = 0U;
-    while (v) { n++; v &= (uint8_t)(v - 1U); }
-    return n;
+    *value = (uint16_t)(sum / GRAY_SAMPLE_COUNT);
+    return true;
 }
 
 void Grayscale_Init(void)
@@ -81,8 +94,15 @@ void Grayscale_Init(void)
     Gray.min_bits = GRAY_MIN_LINE_BITS;
     Gray.scan_count = 0U;
     Gray.error_count = 0U;
-    for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++)
+    Gray.adc_status = 0U;
+    Gray.adc_raw_flags = 0U;
+    Gray.adc_powered = 0U;
+    Gray.adc_enabled = 0U;
+    Gray.adc_started = 0U;
+    for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++) {
         Gray.debounce_cnt[i] = 0U;
+        Gray.analog[i] = 0U;
+    }
 
     /* Enable the input buffer so the open-drain rise check reads the pad,
      * then add HIZ1 to make a high output latch release the pin. */
@@ -97,45 +117,29 @@ void Grayscale_Init(void)
     DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN | GRAY_AD1_PIN | GRAY_AD2_PIN);
     DL_GPIO_enableOutput(GRAY_AD0_PORT, GRAY_AD0_PIN | GRAY_AD1_PIN | GRAY_AD2_PIN);
 
-    /* The installed module provides a thresholded digital OUT signal. */
-    DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX,
-        DL_GPIO_INVERSION_DISABLE,
-        DL_GPIO_RESISTOR_NONE,
-        DL_GPIO_HYSTERESIS_ENABLE,
-        DL_GPIO_WAKEUP_DISABLE);
+    /* PA25 stays disconnected from the digital pad and is sampled as A0_2. */
 }
 
 void Grayscale_Update(void)
 {
-    uint8_t raw = Gray_ScanAll();
-    Gray.scan_count++;
-    Gray.raw_state = raw;
+    /* Read all even channels first, then all odd channels, so PA23/C44 only
+     * needs one slow low-to-high transition per complete eight-channel scan. */
+    static const uint8_t scan_order[GRAYSCALE_CHANNEL_COUNT] = {
+        0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U
+    };
 
-    if (Gray_CountBits(raw) < Gray.min_bits) raw = 0U;
-
-    for (uint8_t ch = 0U; ch < GRAYSCALE_CHANNEL_COUNT; ch++) {
-        uint8_t mask       = (uint8_t)(1U << ch);
-        uint8_t raw_bit    = raw & mask;
-        uint8_t stable_bit = Gray.filtered_state & mask;
-        if (raw_bit == stable_bit) {
-            Gray.debounce_cnt[ch] = 0U;
-        } else if (++Gray.debounce_cnt[ch] >= GRAY_DEBOUNCE_COUNT) {
-            if (raw_bit) Gray.filtered_state |= mask;
-            else         Gray.filtered_state &= (uint8_t)(~mask);
-            Gray.debounce_cnt[ch] = 0U;
-        }
-    }
-
-    int32_t wsum = 0;
-    uint8_t cnt = 0U;
+    bool scan_ok = true;
     for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++) {
-        if (Gray.filtered_state & ((uint8_t)(1U << i))) {
-            wsum += (int32_t)i;
-            cnt++;
-        }
+        uint8_t ch = scan_order[i];
+        uint16_t value;
+        if (Gray_SampleChannel(ch, &value)) Gray.analog[ch] = value;
+        else scan_ok = false;
     }
-    Gray.position = (cnt > 0U) ? (wsum * GRAY_POSITION_SCALE) / (int32_t)cnt
-                               : GRAY_LINE_LOST;
+    Gray.scan_count++;
+    if (!scan_ok) Gray.error_count++;
+    Gray.raw_state = 0U;
+    Gray.filtered_state = 0U;
+    Gray.position = GRAY_LINE_LOST;
 }
 
 void Grayscale_GetSnapshot(GrayscaleSnapshot_t *snapshot)

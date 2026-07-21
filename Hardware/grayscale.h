@@ -4,7 +4,7 @@
 #include "board.h"
 
 #define GRAYSCALE_CHANNEL_COUNT  8U
-#define GRAY_SAMPLE_COUNT        5U
+#define GRAY_SAMPLE_COUNT        8U
 #define GRAY_DEBOUNCE_COUNT      3U
 #define GRAY_POSITION_SCALE      1000
 #define GRAY_LINE_LOST           (-1)
@@ -14,10 +14,16 @@ typedef struct {
     uint8_t raw_state;
     uint8_t filtered_state;
     int32_t position;
+    uint16_t analog[GRAYSCALE_CHANNEL_COUNT];
     uint8_t debounce_cnt[GRAYSCALE_CHANNEL_COUNT];
     uint8_t min_bits;
     uint32_t scan_count;
     uint32_t error_count;
+    uint32_t adc_status;
+    uint32_t adc_raw_flags;
+    uint8_t adc_powered;
+    uint8_t adc_enabled;
+    uint8_t adc_started;
 } Grayscale_t;
 
 typedef Grayscale_t GrayscaleSnapshot_t;

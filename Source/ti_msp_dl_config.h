@@ -9,7 +9,7 @@
  * Do not overwrite it from an unrelated LaunchPad .syscfg file.  Pin and
  * peripheral invariants are guarded by Tests/test_board_configuration.py.
  */
-#define FROZEN_BOARD_CONFIG_REVISION                         (20260721U)
+#define FROZEN_BOARD_CONFIG_REVISION                         (20260722U)
 
 #define CONFIG_LP_MSPM0G3507
 #define CONFIG_MSPM0G3507
@@ -119,6 +119,9 @@ extern "C" {
 #define GRAY_OUT_PORT                                                   (GPIOA)
 #define GRAY_OUT_PIN                                            (DL_GPIO_PIN_25)
 #define GRAY_OUT_IOMUX                                          (IOMUX_PINCM55)
+#define GRAY_ADC_INST                                                    (ADC0)
+#define GRAY_ADC_MEM_IDX                                      (DL_ADC12_MEM_IDX_0)
+#define GRAY_ADC_INPUT_CHAN                                (DL_ADC12_INPUT_CHAN_2)
 
 /* SSD1306 connector: software I2C, address is probed at 0x3C/0x3D. */
 #define OLED_SDA_PORT                                                   (GPIOA)
@@ -143,6 +146,7 @@ void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
 void SYSCFG_DL_UART_0_init(void);
 void SYSCFG_DL_UART_2_init(void);
+void SYSCFG_DL_GRAY_ADC_init(void);
 void SYSCFG_DL_PWM_0_init(void);
 
 bool SYSCFG_DL_saveConfiguration(void);

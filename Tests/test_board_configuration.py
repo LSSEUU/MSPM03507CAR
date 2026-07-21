@@ -42,17 +42,24 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         for pincm in ("IOMUX_PINCM40", "IOMUX_PINCM41", "IOMUX_PINCM42"):
             self.assertNotIn(pincm, combined)
 
-    def test_grayscale_uses_safe_digital_diagnostic_mode(self):
+    def test_grayscale_uses_pa25_adc_with_bounded_polling(self):
         config = CONFIG_SOURCE.read_text(encoding="utf-8")
         driver = (ROOT / "Hardware" / "grayscale.c").read_text(encoding="utf-8")
-        self.assertNotIn("DL_ADC12_", config)
-        self.assertIn("DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX", driver)
+        self.assertIn("DL_ADC12_initSingleSample(GRAY_ADC_INST", config)
+        self.assertIn("GRAY_ADC_INPUT_CHAN", config)
+        self.assertIn("DL_ADC12_INPUT_CHAN_2", HEADER.read_text(encoding="utf-8"))
+        self.assertIn("DL_ADC12_getRawInterruptStatus", driver)
+        self.assertIn("GRAY_ADC_TIMEOUT_LOOPS", driver)
+        read_adc = driver.index("static bool Gray_ReadADC")
+        self.assertIn("DL_ADC12_isConversionsEnabled", driver[read_adc:])
+        self.assertLess(driver.index("DL_ADC12_enableConversions", read_adc),
+                        driver.index("DL_ADC12_startConversion", read_adc))
+        self.assertNotIn("DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX", driver)
         self.assertIn("DL_GPIO_initDigitalInputFeatures(GRAY_AD0_IOMUX", driver)
-        self.assertIn("DL_GPIO_RESISTOR_NONE", driver)
         self.assertIn("DL_GPIO_enableHiZ(GRAY_AD0_IOMUX)", driver)
         self.assertIn("DL_GPIO_RESISTOR_PULL_UP", driver)
         self.assertIn("0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U", driver)
-        self.assertNotIn("GRAY D", driver)
+        self.assertNotIn("while (false ==", driver)
 
     def test_uart2_is_receive_only_to_release_pa21_vref_minus(self):
         config = CONFIG_SOURCE.read_text(encoding="utf-8")
