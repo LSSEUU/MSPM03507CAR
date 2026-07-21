@@ -14,6 +14,7 @@
 #include "uart_debug.h"
 #include "vehicle_config.h"
 #include "watchdog.h"
+#include "wheel_speed.h"
 
 static void Main_EmergencyStopCallback(void)
 {
@@ -47,6 +48,7 @@ int main(void)
     debug_init();
     debug_set_emergency_callback(Main_EmergencyStopCallback);
     Encoder_Init();
+    WheelSpeed_Init();
     Grayscale_Init();
     Gyro_Init();
     LED_Init();
@@ -75,7 +77,35 @@ int main(void)
 
         if (Scheduler_Take(SCHEDULER_TASK_5MS)) {
             uint32_t started = SystemTime_Now();
+            EncoderSnapshot_t encoder;
+            WheelSpeedSnapshot_t wheel;
+
+            Encoder_GetSnapshot(&encoder);
+            WheelSpeed_Update(encoder.count_a, encoder.count_b, started);
+            WheelSpeed_GetSnapshot(&wheel);
+            Safety_SetControlContext(
+                (int16_t)wheel.ramped_mm_s[WHEEL_SPEED_LEFT],
+                (int16_t)wheel.ramped_mm_s[WHEEL_SPEED_RIGHT],
+                (int16_t)wheel.filtered_mm_s[WHEEL_SPEED_LEFT],
+                (int16_t)wheel.filtered_mm_s[WHEEL_SPEED_RIGHT]);
+
+            if (wheel.enabled && !Safety_HasFault() &&
+                ((wheel.fault_bits &
+                  WHEEL_SPEED_FAULT_ENCODER_INVALID) != 0U)) {
+                WheelSpeed_Disable();
+                Safety_RaiseFault(SAFETY_FAULT_ENCODER_INVALID, started);
+            } else if (wheel.enabled && !Safety_HasFault() &&
+                       ((wheel.fault_bits &
+                         WHEEL_SPEED_FAULT_STALL) != 0U)) {
+                WheelSpeed_Disable();
+                Safety_RaiseFault(SAFETY_FAULT_WHEEL_STALL, started);
+            }
             Safety_Evaluate(started);
+            if (wheel.enabled && !Safety_HasFault() &&
+                !Safety_RequestMotor(wheel.pwm[WHEEL_SPEED_LEFT],
+                                     wheel.pwm[WHEEL_SPEED_RIGHT])) {
+                WheelSpeed_Disable();
+            }
             Main_CompleteTask(SCHEDULER_TASK_5MS, started,
                               TASK_5MS_PERIOD_MS);
         }

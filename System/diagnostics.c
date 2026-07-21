@@ -1,5 +1,6 @@
 #include "diagnostics.h"
 
+#include "control_config.h"
 #include "encoder.h"
 #include "grayscale.h"
 #include "gyro.h"
@@ -12,6 +13,7 @@
 #include "system_time.h"
 #include "uart_debug.h"
 #include "vehicle_config.h"
+#include "wheel_speed.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -23,6 +25,16 @@ typedef enum {
     MOTOR_DIAG_ARMED,
     MOTOR_DIAG_RUNNING
 } MotorDiagState_t;
+
+typedef enum {
+    SPEED_DIAG_IDLE = 0,
+    SPEED_DIAG_ARMED,
+    SPEED_DIAG_RUNNING,
+    SPEED_DIAG_RAMP_DOWN
+} SpeedDiagState_t;
+
+#define SPEED_DIAG_LEFT_MASK  (1U << WHEEL_SPEED_LEFT)
+#define SPEED_DIAG_RIGHT_MASK (1U << WHEEL_SPEED_RIGHT)
 
 static DiagReport_t reports[DIAG_PERIPHERAL_COUNT];
 static bool motor_test_passed;
@@ -39,6 +51,15 @@ static bool gray_print_pending;
 static uint32_t gray_requested_scan_count;
 static bool report_pending;
 static uint8_t report_line;
+static SpeedDiagState_t speed_diag_state;
+static uint8_t speed_diag_wheel_mask;
+static uint32_t speed_diag_started_ms;
+static uint32_t speed_diag_deadline_ms;
+static float speed_diag_target_mm_s;
+static float speed_diag_error_sum[WHEEL_SPEED_COUNT];
+static float speed_diag_previous_error[WHEEL_SPEED_COUNT];
+static uint32_t speed_diag_samples[WHEEL_SPEED_COUNT];
+static uint16_t speed_diag_sign_changes[WHEEL_SPEED_COUNT];
 
 #ifdef M2_FAULT_INJECTION_TEST
 static bool fault_injection_stop_watchdog;
@@ -117,6 +138,68 @@ static void Diagnostics_PrintEncoder(void)
         (unsigned long)s.edge_count_b);
 }
 
+static float Diagnostics_Abs(float value)
+{
+    return (value < 0.0f) ? -value : value;
+}
+
+static int32_t Diagnostics_Round(float value)
+{
+    return (int32_t)((value >= 0.0f) ? (value + 0.5f) : (value - 0.5f));
+}
+
+static uint32_t Diagnostics_ScalePositive(float value, float scale)
+{
+    if (value <= 0.0f) return 0U;
+    return (uint32_t)((value * scale) + 0.5f);
+}
+
+static const char *Diagnostics_SpeedSelectionName(void)
+{
+    if (speed_diag_wheel_mask == SPEED_DIAG_LEFT_MASK) return "LEFT";
+    if (speed_diag_wheel_mask == SPEED_DIAG_RIGHT_MASK) return "RIGHT";
+    return "BOTH";
+}
+
+static void Diagnostics_PrintWheelSpeed(void)
+{
+    WheelSpeedSnapshot_t s;
+    float kp_a;
+    float ki_a;
+    float kp_b;
+    float ki_b;
+    WheelSpeed_GetSnapshot(&s);
+    WheelSpeed_GetGains(WHEEL_SPEED_LEFT, &kp_a, &ki_a);
+    WheelSpeed_GetGains(WHEEL_SPEED_RIGHT, &kp_b, &ki_b);
+    debug_printf("WHEEL enabled=%u valid=%u target=%ld,%ld ramp=%ld,%ld speed=%ld,%ld raw=%ld,%ld pwm=%d,%d faults=0x%02lX invalid=%lu\r\n",
+        s.enabled, s.sample_valid,
+        (long)Diagnostics_Round(s.requested_mm_s[WHEEL_SPEED_LEFT]),
+        (long)Diagnostics_Round(s.requested_mm_s[WHEEL_SPEED_RIGHT]),
+        (long)Diagnostics_Round(s.ramped_mm_s[WHEEL_SPEED_LEFT]),
+        (long)Diagnostics_Round(s.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+        (long)Diagnostics_Round(s.filtered_mm_s[WHEEL_SPEED_LEFT]),
+        (long)Diagnostics_Round(s.filtered_mm_s[WHEEL_SPEED_RIGHT]),
+        (long)Diagnostics_Round(s.raw_mm_s[WHEEL_SPEED_LEFT]),
+        (long)Diagnostics_Round(s.raw_mm_s[WHEEL_SPEED_RIGHT]),
+        s.pwm[WHEEL_SPEED_LEFT], s.pwm[WHEEL_SPEED_RIGHT],
+        (unsigned long)s.fault_bits,
+        (unsigned long)s.invalid_sample_count);
+    debug_printf("TUNE selection=%s test=%ldmm/s A(kp_x100=%lu ki_x100=%lu) B(kp_x100=%lu ki_x100=%lu) filter_x100=%lu cpr=%lu/%lu wheel_x10=%lu\r\n",
+        Diagnostics_SpeedSelectionName(),
+        (long)Diagnostics_Round(speed_diag_target_mm_s),
+        (unsigned long)Diagnostics_ScalePositive(kp_a, 100.0f),
+        (unsigned long)Diagnostics_ScalePositive(ki_a, 100.0f),
+        (unsigned long)Diagnostics_ScalePositive(kp_b, 100.0f),
+        (unsigned long)Diagnostics_ScalePositive(ki_b, 100.0f),
+        (unsigned long)Diagnostics_ScalePositive(
+            WHEEL_SPEED_FILTER_ALPHA, 100.0f),
+        (unsigned long)Diagnostics_Round(
+            ENCODER_A_COUNTS_PER_WHEEL_REV),
+        (unsigned long)Diagnostics_Round(
+            ENCODER_B_COUNTS_PER_WHEEL_REV),
+        (unsigned long)Diagnostics_ScalePositive(WHEEL_DIAMETER_MM, 10.0f));
+}
+
 static void Diagnostics_PrintGyro(void)
 {
     static const char hex[] = "0123456789ABCDEF";
@@ -178,6 +261,10 @@ static void Diagnostics_PrintSafety(void)
         (unsigned long)safety.first_fault_ms, (unsigned long)safety.last_fault_ms,
         safety.action_active, (unsigned long)safety.action_deadline_ms,
         safety.applied_motor_a, safety.applied_motor_b);
+    debug_printf("CONTEXT target=%d,%d speed=%d,%d requested_pwm=%d,%d\r\n",
+        safety.target_speed_left_mm_s, safety.target_speed_right_mm_s,
+        safety.measured_speed_left_mm_s, safety.measured_speed_right_mm_s,
+        safety.requested_motor_a, safety.requested_motor_b);
     debug_printf("SCHED release=%lu/%lu/%lu/%lu miss=%lu/%lu/%lu/%lu pending=0x%02lX\r\n",
         (unsigned long)scheduler.release_count[0],
         (unsigned long)scheduler.release_count[1],
@@ -279,6 +366,187 @@ static void Diagnostics_ServiceMotorTest(uint32_t now_ms)
     }
 }
 
+static void Diagnostics_ResetSpeedMetrics(void)
+{
+    memset(speed_diag_error_sum, 0, sizeof(speed_diag_error_sum));
+    memset(speed_diag_previous_error, 0,
+           sizeof(speed_diag_previous_error));
+    memset(speed_diag_samples, 0, sizeof(speed_diag_samples));
+    memset(speed_diag_sign_changes, 0,
+           sizeof(speed_diag_sign_changes));
+}
+
+static void Diagnostics_ArmSpeedTest(uint8_t wheel_mask, uint32_t now_ms)
+{
+    if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
+        (motor_diag_state != MOTOR_DIAG_IDLE)) {
+        debug_println("Speed test rejected: clear faults and return IDLE.");
+        return;
+    }
+    speed_diag_wheel_mask = wheel_mask;
+    speed_diag_state = SPEED_DIAG_ARMED;
+    speed_diag_deadline_ms = now_ms + DIAGNOSTIC_ARM_TIMEOUT_MS;
+    debug_printf("Lift wheels: %s closed-loop %ld mm/s; type uppercase A within 10 s.\r\n",
+        Diagnostics_SpeedSelectionName(),
+        (long)Diagnostics_Round(speed_diag_target_mm_s));
+}
+
+static void Diagnostics_StartSpeedTest(uint32_t now_ms)
+{
+    float left_target;
+    float right_target;
+    if ((speed_diag_state != SPEED_DIAG_ARMED) ||
+        SystemTime_Reached(now_ms, speed_diag_deadline_ms)) {
+        speed_diag_state = SPEED_DIAG_IDLE;
+        debug_println("Speed arm expired or not requested.");
+        return;
+    }
+    if (!SystemState_RequestRun()) {
+        speed_diag_state = SPEED_DIAG_IDLE;
+        debug_println("Speed test rejected: system is not IDLE.");
+        return;
+    }
+
+    left_target = ((speed_diag_wheel_mask & SPEED_DIAG_LEFT_MASK) != 0U) ?
+        speed_diag_target_mm_s : 0.0f;
+    right_target = ((speed_diag_wheel_mask & SPEED_DIAG_RIGHT_MASK) != 0U) ?
+        speed_diag_target_mm_s : 0.0f;
+    Safety_BeginAction(now_ms, SPEED_DIAGNOSTIC_ACTION_TIMEOUT_MS, 0U);
+    WheelSpeed_Enable();
+    WheelSpeed_SetTarget(left_target, right_target);
+    Diagnostics_ResetSpeedMetrics();
+    speed_diag_started_ms = now_ms;
+    speed_diag_deadline_ms = now_ms + SPEED_DIAGNOSTIC_HOLD_MS;
+    speed_diag_state = SPEED_DIAG_RUNNING;
+    debug_println("CSV: M3,time_ms,mode,targetL,targetR,rampedL,rampedR,speedL,speedR,pwmL,pwmR,saturated,faults");
+    debug_println("Closed-loop test running; S/space is immediate emergency stop.");
+}
+
+static void Diagnostics_FinishSpeedTest(void)
+{
+    uint32_t i;
+    WheelSpeed_Disable();
+    Safety_EndAction();
+    (void)SystemState_RequestIdle();
+    for (i = 0U; i < (uint32_t)WHEEL_SPEED_COUNT; i++) {
+        if ((speed_diag_wheel_mask & (1U << i)) == 0U) continue;
+        if (speed_diag_samples[i] == 0U) {
+            debug_printf("M3 RESULT wheel=%c no steady samples\r\n",
+                (i == (uint32_t)WHEEL_SPEED_LEFT) ? 'A' : 'B');
+        } else {
+            float percent = (speed_diag_error_sum[i] * 100.0f) /
+                ((float)speed_diag_samples[i] * speed_diag_target_mm_s);
+            uint32_t percent_x100 = Diagnostics_ScalePositive(
+                percent, 100.0f);
+            debug_printf("M3 RESULT wheel=%c mean_abs_error=%lu.%02lu%% samples=%lu sign_changes=%u target=%ldmm/s\r\n",
+                (i == (uint32_t)WHEEL_SPEED_LEFT) ? 'A' : 'B',
+                (unsigned long)(percent_x100 / 100U),
+                (unsigned long)(percent_x100 % 100U),
+                (unsigned long)speed_diag_samples[i],
+                speed_diag_sign_changes[i],
+                (long)Diagnostics_Round(speed_diag_target_mm_s));
+        }
+    }
+    speed_diag_state = SPEED_DIAG_IDLE;
+}
+
+static void Diagnostics_ServiceSpeedTest(uint32_t now_ms)
+{
+    WheelSpeedSnapshot_t speed_snapshot;
+    if (speed_diag_state == SPEED_DIAG_ARMED) {
+        if (SystemTime_Reached(now_ms, speed_diag_deadline_ms)) {
+            speed_diag_state = SPEED_DIAG_IDLE;
+            debug_println("Speed test arm timed out.");
+        }
+        return;
+    }
+    if ((speed_diag_state != SPEED_DIAG_RUNNING) &&
+        (speed_diag_state != SPEED_DIAG_RAMP_DOWN)) return;
+    if (Safety_HasFault()) {
+        WheelSpeed_Disable();
+        speed_diag_state = SPEED_DIAG_IDLE;
+        debug_println("Speed test aborted by safety fault.");
+        return;
+    }
+    if ((speed_diag_state == SPEED_DIAG_RUNNING) &&
+        SystemTime_Reached(now_ms, speed_diag_deadline_ms)) {
+        WheelSpeed_SetTarget(0.0f, 0.0f);
+        speed_diag_state = SPEED_DIAG_RAMP_DOWN;
+        speed_diag_deadline_ms = now_ms +
+            SPEED_DIAGNOSTIC_STOP_TIMEOUT_MS;
+        return;
+    }
+    if (speed_diag_state != SPEED_DIAG_RAMP_DOWN) return;
+    WheelSpeed_GetSnapshot(&speed_snapshot);
+    if (((Diagnostics_Abs(speed_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]) <
+          0.5f) &&
+         (Diagnostics_Abs(speed_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]) <
+          0.5f) &&
+         (Diagnostics_Abs(speed_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]) <
+          20.0f) &&
+         (Diagnostics_Abs(speed_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]) <
+          20.0f)) ||
+        SystemTime_Reached(now_ms, speed_diag_deadline_ms)) {
+        Diagnostics_FinishSpeedTest();
+    }
+}
+
+static void Diagnostics_RestartSpeedMeasurement(uint32_t now_ms)
+{
+    Diagnostics_ResetSpeedMetrics();
+    speed_diag_started_ms = now_ms;
+    speed_diag_deadline_ms = now_ms + SPEED_DIAGNOSTIC_HOLD_MS;
+    Safety_BeginAction(now_ms, SPEED_DIAGNOSTIC_ACTION_TIMEOUT_MS, 0U);
+}
+
+static void Diagnostics_AdjustSpeedTarget(float delta, uint32_t now_ms)
+{
+    float left_target;
+    float right_target;
+    if (speed_diag_state == SPEED_DIAG_RAMP_DOWN) {
+        debug_println("M3 tuning rejected while stopping.");
+        return;
+    }
+    speed_diag_target_mm_s += delta;
+    if (speed_diag_target_mm_s < 50.0f) speed_diag_target_mm_s = 50.0f;
+    if (speed_diag_target_mm_s > WHEEL_SPEED_MAX_TARGET_MM_S)
+        speed_diag_target_mm_s = WHEEL_SPEED_MAX_TARGET_MM_S;
+    if (speed_diag_state == SPEED_DIAG_RUNNING) {
+        left_target = ((speed_diag_wheel_mask & SPEED_DIAG_LEFT_MASK) != 0U) ?
+            speed_diag_target_mm_s : 0.0f;
+        right_target = ((speed_diag_wheel_mask & SPEED_DIAG_RIGHT_MASK) != 0U) ?
+            speed_diag_target_mm_s : 0.0f;
+        WheelSpeed_SetTarget(left_target, right_target);
+        Diagnostics_RestartSpeedMeasurement(now_ms);
+    }
+    debug_printf("M3 test target=%ld mm/s\r\n",
+        (long)Diagnostics_Round(speed_diag_target_mm_s));
+}
+
+static void Diagnostics_AdjustSpeedGain(bool proportional, float delta,
+                                        uint32_t now_ms)
+{
+    uint32_t i;
+    if (speed_diag_state == SPEED_DIAG_RAMP_DOWN) {
+        debug_println("M3 tuning rejected while stopping.");
+        return;
+    }
+    for (i = 0U; i < (uint32_t)WHEEL_SPEED_COUNT; i++) {
+        float kp;
+        float ki;
+        if ((speed_diag_wheel_mask & (1U << i)) == 0U) continue;
+        WheelSpeed_GetGains((WheelSpeedWheel_t)i, &kp, &ki);
+        if (proportional) kp += delta;
+        else ki += delta;
+        if (kp < 0.0f) kp = 0.0f;
+        if (ki < 0.0f) ki = 0.0f;
+        WheelSpeed_SetGains((WheelSpeedWheel_t)i, kp, ki);
+    }
+    if (speed_diag_state == SPEED_DIAG_RUNNING)
+        Diagnostics_RestartSpeedMeasurement(now_ms);
+    Diagnostics_PrintWheelSpeed();
+}
+
 void Diagnostics_Init(void)
 {
     memset(reports, 0, sizeof(reports));
@@ -291,6 +559,11 @@ void Diagnostics_Init(void)
     gray_print_pending = false;
     report_pending = false;
     report_line = 0U;
+    speed_diag_state = SPEED_DIAG_IDLE;
+    speed_diag_wheel_mask = SPEED_DIAG_LEFT_MASK |
+                            SPEED_DIAG_RIGHT_MASK;
+    speed_diag_target_mm_s = SPEED_DIAGNOSTIC_DEFAULT_MM_S;
+    Diagnostics_ResetSpeedMetrics();
 #ifdef M2_FAULT_INJECTION_TEST
     fault_injection_stop_watchdog = false;
 #endif
@@ -299,7 +572,7 @@ void Diagnostics_Init(void)
 
 void Diagnostics_RunBootSelfTest(void)
 {
-    debug_println("\r\n=== MSPM0 CAR M2 SCHEDULER + SAFETY ===");
+    debug_println("\r\n=== MSPM0 CAR M3 DUAL WHEEL SPEED CONTROL ===");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("*** FAULT INJECTION BUILD - ZERO PWM TESTS ONLY ***");
 #endif
@@ -311,6 +584,8 @@ void Diagnostics_PrintHelp(void)
 {
     debug_println("Commands: h=help s=status d=all e=encoder y=gyro q=grayscale");
     debug_println("          o=OLED pattern p/f=confirm l=LED c=comm m=motor A=arm");
+    debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
+    debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("TEST ONLY: T=action timeout G=gyro disconnect W=stop watchdog");
@@ -383,6 +658,7 @@ void Diagnostics_Poll(void)
     uint32_t now_ms = SystemTime_Now();
     GrayscaleSnapshot_t gray;
     Diagnostics_ServiceMotorTest(now_ms);
+    Diagnostics_ServiceSpeedTest(now_ms);
 
     if (gray_print_pending) {
         Grayscale_GetSnapshot(&gray);
@@ -399,7 +675,7 @@ void Diagnostics_Poll(void)
         case 'd': case 'D':
             Diagnostics_PrintEncoder(); Diagnostics_PrintGyro();
             Diagnostics_PrintGraySnapshot(); Diagnostics_PrintCommunication();
-            Diagnostics_PrintSafety(); break;
+            Diagnostics_PrintWheelSpeed(); Diagnostics_PrintSafety(); break;
         case 'e': case 'E': Diagnostics_PrintEncoder(); break;
         case 'y': case 'Y': Diagnostics_PrintGyro(); break;
         case 'q': case 'Q':
@@ -421,8 +697,26 @@ void Diagnostics_Poll(void)
                 LED_GetConfiguredCount(), (unsigned long)LED_GetErrorCount()); break;
         case 'c': case 'C': Diagnostics_PrintCommunication(); break;
         case 'v': case 'V': Diagnostics_PrintSafety(); break;
+        case 'n': case 'N': Diagnostics_PrintWheelSpeed(); break;
+        case 'j': case 'J':
+            Diagnostics_ArmSpeedTest(SPEED_DIAG_LEFT_MASK, now_ms); break;
+        case 'k': case 'K':
+            Diagnostics_ArmSpeedTest(SPEED_DIAG_RIGHT_MASK, now_ms); break;
+        case 'b': case 'B':
+            Diagnostics_ArmSpeedTest(SPEED_DIAG_LEFT_MASK |
+                                     SPEED_DIAG_RIGHT_MASK, now_ms); break;
+        case '+': Diagnostics_AdjustSpeedTarget(
+                      SPEED_DIAGNOSTIC_STEP_MM_S, now_ms); break;
+        case '-': Diagnostics_AdjustSpeedTarget(
+                      -SPEED_DIAGNOSTIC_STEP_MM_S, now_ms); break;
+        case '[': Diagnostics_AdjustSpeedGain(true, -0.05f, now_ms); break;
+        case ']': Diagnostics_AdjustSpeedGain(true, 0.05f, now_ms); break;
+        case ',': Diagnostics_AdjustSpeedGain(false, -0.25f, now_ms); break;
+        case '.': Diagnostics_AdjustSpeedGain(false, 0.25f, now_ms); break;
         case 'm': case 'M':
-            if (SystemState_Get() != SYSTEM_STATE_IDLE || Safety_HasFault()) {
+            if ((SystemState_Get() != SYSTEM_STATE_IDLE) ||
+                Safety_HasFault() ||
+                (speed_diag_state != SPEED_DIAG_IDLE)) {
                 debug_println("Motor test rejected: clear faults and return IDLE.");
             } else {
                 motor_diag_state = MOTOR_DIAG_ARMED;
@@ -430,7 +724,12 @@ void Diagnostics_Poll(void)
                 debug_println("Lift wheels, then type uppercase A within 10 s.");
             }
             break;
-        case 'A': Diagnostics_StartMotorTest(now_ms); break;
+        case 'A':
+            if (speed_diag_state == SPEED_DIAG_ARMED)
+                Diagnostics_StartSpeedTest(now_ms);
+            else
+                Diagnostics_StartMotorTest(now_ms);
+            break;
 #ifdef M2_FAULT_INJECTION_TEST
         case 'T':
             Diagnostics_StartZeroPwmFaultTest(now_ms, 200U, 0U,
@@ -448,8 +747,16 @@ void Diagnostics_Poll(void)
             break;
 #endif
         case 'x': case 'X':
-            debug_println(Safety_ClearFaults(now_ms) ?
-                "Faults cleared; state=IDLE." : "Fault clear rejected."); break;
+            if (Safety_HasFault()) WheelSpeed_Disable();
+            if (Safety_ClearFaults(now_ms)) {
+                WheelSpeed_ClearFaults();
+                speed_diag_state = SPEED_DIAG_IDLE;
+                motor_diag_state = MOTOR_DIAG_IDLE;
+                debug_println("Faults cleared; state=IDLE.");
+            } else {
+                debug_println("Fault clear rejected.");
+            }
+            break;
         case '\r': case '\n': break;
         default: debug_println("Unknown command; h=help."); break;
     }
@@ -465,6 +772,58 @@ void Diagnostics_Task100ms(void)
         if (!Safety_HasFault()) (void)SystemState_CompleteSelfTest(true);
     }
     Diagnostics_ServiceReport();
+    if ((speed_diag_state == SPEED_DIAG_RUNNING) ||
+        (speed_diag_state == SPEED_DIAG_RAMP_DOWN)) {
+        WheelSpeedSnapshot_t wheel_snapshot;
+        SafetySnapshot_t safety_snapshot;
+        uint32_t i;
+        uint32_t saturated;
+        WheelSpeed_GetSnapshot(&wheel_snapshot);
+        Safety_GetSnapshot(&safety_snapshot);
+        saturated = (wheel_snapshot.saturated[WHEEL_SPEED_LEFT] ? 1U : 0U) |
+            (wheel_snapshot.saturated[WHEEL_SPEED_RIGHT] ? 2U : 0U);
+        debug_printf("M3,%lu,%s,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,%lu,0x%08lX\r\n",
+            (unsigned long)now_ms,
+            (speed_diag_state == SPEED_DIAG_RUNNING) ? "RUN" : "STOP",
+            (long)Diagnostics_Round(
+                wheel_snapshot.requested_mm_s[WHEEL_SPEED_LEFT]),
+            (long)Diagnostics_Round(
+                wheel_snapshot.requested_mm_s[WHEEL_SPEED_RIGHT]),
+            (long)Diagnostics_Round(
+                wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
+            (long)Diagnostics_Round(
+                wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+            (long)Diagnostics_Round(
+                wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
+            (long)Diagnostics_Round(
+                wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
+            wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
+            wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
+            (unsigned long)saturated,
+            (unsigned long)safety_snapshot.fault_bits);
+
+        if ((speed_diag_state == SPEED_DIAG_RUNNING) &&
+            ((uint32_t)(now_ms - speed_diag_started_ms) >=
+             SPEED_DIAGNOSTIC_SETTLE_MS)) {
+            for (i = 0U; i < (uint32_t)WHEEL_SPEED_COUNT; i++) {
+                float error;
+                float deadband;
+                if ((speed_diag_wheel_mask & (1U << i)) == 0U) continue;
+                error = speed_diag_target_mm_s -
+                        wheel_snapshot.filtered_mm_s[i];
+                deadband = speed_diag_target_mm_s * 0.05f;
+                speed_diag_error_sum[i] += Diagnostics_Abs(error);
+                speed_diag_samples[i]++;
+                if ((Diagnostics_Abs(error) > deadband) &&
+                    (speed_diag_previous_error[i] != 0.0f) &&
+                    ((error * speed_diag_previous_error[i]) < 0.0f)) {
+                    speed_diag_sign_changes[i]++;
+                }
+                if (Diagnostics_Abs(error) > deadband)
+                    speed_diag_previous_error[i] = error;
+            }
+        }
+    }
 }
 
 const DiagReport_t *Diagnostics_GetReports(void)

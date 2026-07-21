@@ -111,6 +111,19 @@ void Safety_EmergencyStop(uint32_t now_ms)
     Safety_RaiseFault(SAFETY_FAULT_EMERGENCY_STOP, now_ms);
 }
 
+void Safety_SetControlContext(int16_t target_left_mm_s,
+                              int16_t target_right_mm_s,
+                              int16_t measured_left_mm_s,
+                              int16_t measured_right_mm_s)
+{
+    uint32_t key = Safety_EnterCritical();
+    safety.target_speed_left_mm_s = target_left_mm_s;
+    safety.target_speed_right_mm_s = target_right_mm_s;
+    safety.measured_speed_left_mm_s = measured_left_mm_s;
+    safety.measured_speed_right_mm_s = measured_right_mm_s;
+    Safety_ExitCritical(key);
+}
+
 void Safety_Evaluate(uint32_t now_ms)
 {
     if (safety.fault_bits != 0U) {

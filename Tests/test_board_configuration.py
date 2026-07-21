@@ -83,11 +83,13 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("../System/system_state.c", paths)
         self.assertIn("../System/safety.c", paths)
         self.assertIn("../Hardware/watchdog.c", paths)
+        self.assertIn("../Control/pid.c", paths)
+        self.assertIn("../Control/filter.c", paths)
+        self.assertIn("../Control/wheel_speed.c", paths)
         self.assertIn("../Config", include_paths)
+        self.assertIn("../Control", include_paths)
         self.assertNotIn("../Source/empty.c", paths)
-        self.assertNotIn("../Control", include_paths)
         self.assertFalse((ROOT / "Source" / "empty.c").exists())
-        self.assertEqual(list((ROOT / "Control").glob("*")), [])
         self.assertEqual(root.findtext(".//pCCUsed"), "6220000::V6.22::ARMCLANG")
 
     def test_grayscale_api_exposes_adc_scans_without_stale_line_state(self):

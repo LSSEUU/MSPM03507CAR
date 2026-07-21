@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>__MSPM0G3507__</Define>
               <Undefine></Undefine>
-              <IncludePath>../include,../Source,../Hardware,../System,../Config,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
+              <IncludePath>../include,../Source,../Hardware,../System,../Control,../Config,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -498,6 +498,26 @@
               <FileName>safety.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/safety.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Control</GroupName>
+          <Files>
+            <File>
+              <FileName>pid.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/pid.c</FilePath>
+            </File>
+            <File>
+              <FileName>filter.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/filter.c</FilePath>
+            </File>
+            <File>
+              <FileName>wheel_speed.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/wheel_speed.c</FilePath>
             </File>
           </Files>
         </Group>
