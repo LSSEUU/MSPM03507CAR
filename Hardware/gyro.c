@@ -1,11 +1,10 @@
-/*
- * gyro.c  —  JY61P 陀螺仪 (UART2 中断接收)
- */
 #include "gyro.h"
+#include "board.h"
+#include <stddef.h>
+#include <string.h>
 
-Gyro_t Gyro;
+static Gyro_t gyro_sample;
 
-/* 接收缓冲区 + 索引 */
 static uint8_t  rx_buf[11];
 static uint8_t  rx_idx;
 static volatile uint32_t rx_bytes;
@@ -40,10 +39,9 @@ static void Gyro_DrainRx(void)
                 int16_t roll  = (int16_t)((uint16_t)rx_buf[3] << 8 | rx_buf[2]);
                 int16_t pitch = (int16_t)((uint16_t)rx_buf[5] << 8 | rx_buf[4]);
                 int16_t yaw   = (int16_t)((uint16_t)rx_buf[7] << 8 | rx_buf[6]);
-                Gyro.roll  = (float)roll  * 180.0f / 32768.0f;
-                Gyro.pitch = (float)pitch * 180.0f / 32768.0f;
-                Gyro.yaw   = (float)yaw   * 180.0f / 32768.0f;
-                Gyro.updated = 1U;
+                gyro_sample.roll  = (float)roll  * 180.0f / 32768.0f;
+                gyro_sample.pitch = (float)pitch * 180.0f / 32768.0f;
+                gyro_sample.yaw   = (float)yaw   * 180.0f / 32768.0f;
                 valid_frames++;
             }
             /* Other valid JY61P frame types are expected and ignored. */
@@ -53,10 +51,7 @@ static void Gyro_DrainRx(void)
 
 void Gyro_Init(void)
 {
-    Gyro.yaw   = 0.0f;
-    Gyro.pitch = 0.0f;
-    Gyro.roll  = 0.0f;
-    Gyro.updated = 0;
+    memset(&gyro_sample, 0, sizeof(gyro_sample));
     rx_idx = 0;
     recent_write = 0U;
     memset(recent_bytes, 0, sizeof(recent_bytes));
@@ -87,7 +82,7 @@ void Gyro_GetSnapshot(GyroSnapshot_t *snapshot)
     if (snapshot == NULL) return;
     primask = __get_PRIMASK();
     __disable_irq();
-    snapshot->sample = Gyro;
+    snapshot->sample = gyro_sample;
     snapshot->rx_bytes = rx_bytes;
     snapshot->valid_frames = valid_frames;
     snapshot->checksum_errors = checksum_errors;

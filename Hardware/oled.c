@@ -1,4 +1,8 @@
 #include "oled.h"
+#include "board.h"
+
+#include <stdio.h>
+#include <string.h>
 
 #define OLED_ADDRESS_PRIMARY       0x3CU
 #define OLED_ADDRESS_SECONDARY     0x3DU

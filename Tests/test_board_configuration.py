@@ -74,11 +74,25 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
     def test_keil_target_uses_diagnostic_main_and_system_sources(self):
         root = ET.fromstring(PROJECT.read_text(encoding="utf-8"))
         paths = [node.text for node in root.findall(".//FilePath")]
+        include_paths = root.findtext(".//Cads/VariousControls/IncludePath")
         self.assertIn("../Source/main.c", paths)
         self.assertIn("../System/diagnostics.c", paths)
         self.assertIn("../System/diagnostics_health.c", paths)
         self.assertNotIn("../Source/empty.c", paths)
+        self.assertNotIn("../Control", include_paths)
+        self.assertFalse((ROOT / "Source" / "empty.c").exists())
+        self.assertEqual(list((ROOT / "Control").glob("*")), [])
         self.assertEqual(root.findtext(".//pCCUsed"), "6220000::V6.22::ARMCLANG")
+
+    def test_grayscale_api_exposes_adc_scans_without_stale_line_state(self):
+        header = (ROOT / "Hardware" / "grayscale.h").read_text(encoding="utf-8")
+        self.assertIn("bool Grayscale_Scan(void)", header)
+        self.assertIn("uint16_t adc[GRAYSCALE_CHANNEL_COUNT]", header)
+        for stale_name in (
+            "raw_state", "filtered_state", "position", "debounce_cnt",
+            "min_bits", "Grayscale_SetMinBits", "extern Grayscale_t Gray",
+        ):
+            self.assertNotIn(stale_name, header)
 
     def test_scripts_and_vscode_have_no_machine_specific_legacy_paths(self):
         files = list((ROOT / "scripts").glob("*")) + list((ROOT / ".vscode").glob("*"))

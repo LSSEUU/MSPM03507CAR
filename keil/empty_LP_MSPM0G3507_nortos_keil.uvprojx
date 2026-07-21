@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>__MSPM0G3507__</Define>
               <Undefine></Undefine>
-              <IncludePath>../include,../Source,../Hardware,../System,../Control,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
+              <IncludePath>../include,../Source,../Hardware,../System,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>

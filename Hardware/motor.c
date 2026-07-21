@@ -1,8 +1,9 @@
-
 #include "motor.h"
 #include "board.h"
 
-MotorParam_t MotorA, MotorB;
+#include <stddef.h>
+#include <string.h>
+
 static MotorStats_t motor_stats;
 
 static int16_t Motor_ClampPWM(int16_t pwm)
@@ -12,12 +13,16 @@ static int16_t Motor_ClampPWM(int16_t pwm)
     return pwm;
 }
 
+static uint16_t Motor_PWMMagnitude(int16_t pwm)
+{
+    return (uint16_t)((pwm < 0) ? -pwm : pwm);
+}
+
 void Motor_Init(void)
 {
     memset(&motor_stats, 0, sizeof(motor_stats));
     Motor_Stop();
 }
-
 
 void Motor_SetPWM(int16_t motor_a, int16_t motor_b)
 {
@@ -28,73 +33,37 @@ void Motor_SetPWM(int16_t motor_a, int16_t motor_b)
     motor_stats.last_a = motor_a;
     motor_stats.last_b = motor_b;
 
-    MotorA.Motor_Pwm = (float)motor_a;
-    MotorB.Motor_Pwm = (float)motor_b;
-
-    
     if (motor_a > 0) {
-        
         DL_GPIO_setPins(AIN_PORT, AIN_AIN1_PIN);
         DL_GPIO_clearPins(AIN_PORT, AIN_AIN2_PIN);
     } else if (motor_a < 0) {
-        
         DL_GPIO_clearPins(AIN_PORT, AIN_AIN1_PIN);
         DL_GPIO_setPins(AIN_PORT, AIN_AIN2_PIN);
     } else {
-        
         DL_GPIO_setPins(AIN_PORT, AIN_AIN1_PIN | AIN_AIN2_PIN);
     }
-    DL_TimerA_setCaptureCompareValue(PWM_0_INST, ABS(motor_a),
+    DL_TimerA_setCaptureCompareValue(PWM_0_INST, Motor_PWMMagnitude(motor_a),
                                      GPIO_PWM_0_C1_IDX);
 
-    
     if (motor_b > 0) {
-        
         DL_GPIO_setPins(BIN_PORT, BIN_BIN1_PIN);
         DL_GPIO_clearPins(BIN_PORT, BIN_BIN2_PIN);
     } else if (motor_b < 0) {
-        
         DL_GPIO_clearPins(BIN_PORT, BIN_BIN1_PIN);
         DL_GPIO_setPins(BIN_PORT, BIN_BIN2_PIN);
     } else {
-        
         DL_GPIO_setPins(BIN_PORT, BIN_BIN1_PIN | BIN_BIN2_PIN);
     }
-    DL_TimerA_setCaptureCompareValue(PWM_0_INST, ABS(motor_b),
+    DL_TimerA_setCaptureCompareValue(PWM_0_INST, Motor_PWMMagnitude(motor_b),
                                      GPIO_PWM_0_C0_IDX);
-}
-
-
-void Motor_SetDir(uint8_t motor, uint8_t dir)
-{
-    if (motor == MOTOR_A) {
-        if (dir) {
-            DL_GPIO_clearPins(AIN_PORT, AIN_AIN1_PIN);
-            DL_GPIO_setPins(AIN_PORT, AIN_AIN2_PIN);
-        } else {
-            DL_GPIO_setPins(AIN_PORT, AIN_AIN1_PIN);
-            DL_GPIO_clearPins(AIN_PORT, AIN_AIN2_PIN);
-        }
-    } else {
-        if (dir) {
-            DL_GPIO_clearPins(BIN_PORT, BIN_BIN1_PIN);
-            DL_GPIO_setPins(BIN_PORT, BIN_BIN2_PIN);
-        } else {
-            DL_GPIO_setPins(BIN_PORT, BIN_BIN1_PIN);
-            DL_GPIO_clearPins(BIN_PORT, BIN_BIN2_PIN);
-        }
-    }
 }
 
 void Motor_Stop(void)
 {
-    
     DL_GPIO_setPins(AIN_PORT, AIN_AIN1_PIN | AIN_AIN2_PIN);
     DL_GPIO_setPins(BIN_PORT, BIN_BIN1_PIN | BIN_BIN2_PIN);
     DL_TimerA_setCaptureCompareValue(PWM_0_INST, 0, GPIO_PWM_0_C0_IDX);
     DL_TimerA_setCaptureCompareValue(PWM_0_INST, 0, GPIO_PWM_0_C1_IDX);
-    MotorA.Motor_Pwm = 0;
-    MotorB.Motor_Pwm = 0;
     motor_stats.last_a = 0;
     motor_stats.last_b = 0;
 }

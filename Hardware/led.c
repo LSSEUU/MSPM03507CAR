@@ -1,4 +1,5 @@
 #include "led.h"
+#include "board.h"
 
 /*
  * The verified carrier exposes only power indicators, which are not driven by

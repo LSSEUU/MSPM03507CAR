@@ -8,6 +8,8 @@
 #include "oled.h"
 #include "led.h"
 
+#include <string.h>
+
 #define MOTOR_TEST_PWM              250
 #define MOTOR_TEST_PHASE_MS         500U
 #define OPERATOR_TIMEOUT_MS         10000U
@@ -16,9 +18,7 @@
 static DiagReport_t reports[DIAG_PERIPHERAL_COUNT];
 static bool motor_test_passed;
 static bool oled_visual_passed;
-static bool gray_baseline_set;
-static bool gray_response_passed;
-static uint16_t gray_baseline_adc[GRAYSCALE_CHANNEL_COUNT];
+static bool gray_contrast_observed;
 
 static void Diagnostics_Set(DiagPeripheral_t peripheral, DiagStatus_t status,
     uint32_t samples, uint32_t errors, const char *detail)
@@ -53,7 +53,7 @@ static void Diagnostics_RefreshReports(void)
     Diagnostics_Set(DIAG_ENCODER,
         (encoder.edge_count_a > 0U && encoder.edge_count_b > 0U) ?
             DIAG_STATUS_OK : DIAG_STATUS_DEGRADED,
-        encoder.edge_count_a + encoder.edge_count_b, encoder.error_count,
+        encoder.edge_count_a + encoder.edge_count_b, 0U,
         (encoder.edge_count_a > 0U && encoder.edge_count_b > 0U) ?
             "both channels active" : "rotate both wheels or run motor test");
 
@@ -64,11 +64,12 @@ static void Diagnostics_RefreshReports(void)
 
     Diagnostics_Set(DIAG_GRAYSCALE,
         (gray.error_count > 0U) ? DIAG_STATUS_FAULT :
-            (gray_response_passed ? DIAG_STATUS_OK : DIAG_STATUS_DEGRADED),
+            (gray_contrast_observed ? DIAG_STATUS_OK : DIAG_STATUS_DEGRADED),
         gray.scan_count, gray.error_count,
         (gray.error_count > 0U) ? "address/ADC scan timeout" :
-            (gray_response_passed ? "ADC optical contrast observed" :
-                "ADC scan works; optical contrast needs operator"));
+            (gray_contrast_observed ? "ADC optical contrast observed" :
+                ((gray.scan_count > 0U) ? "ADC contrast below diagnostic threshold" :
+                    "press q to scan ADC and check optical contrast")));
 
     Diagnostics_Set(DIAG_OLED,
         !oled.present ? DIAG_STATUS_FAULT :
@@ -168,9 +169,9 @@ static void Diagnostics_PrintEncoder(void)
 {
     EncoderSnapshot_t s;
     Encoder_GetSnapshot(&s);
-    debug_printf("ENC countA=%ld countB=%ld edgeA=%lu edgeB=%lu errors=%lu\r\n",
+    debug_printf("ENC countA=%ld countB=%ld edgeA=%lu edgeB=%lu\r\n",
         (long)s.count_a, (long)s.count_b, (unsigned long)s.edge_count_a,
-        (unsigned long)s.edge_count_b, (unsigned long)s.error_count);
+        (unsigned long)s.edge_count_b);
 }
 
 static void Diagnostics_PrintGyro(void)
@@ -199,36 +200,27 @@ static void Diagnostics_ProbeGyroPins(void)
 static void Diagnostics_PrintGray(void)
 {
     GrayscaleSnapshot_t s;
-    Grayscale_Update();
+    Grayscale_Scan();
     Grayscale_GetSnapshot(&s);
-    uint16_t min_value = s.analog[0];
-    uint16_t max_value = s.analog[0];
-    if (!gray_baseline_set) {
-        for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++)
-            gray_baseline_adc[i] = s.analog[i];
-        gray_baseline_set = true;
-    }
+    uint16_t min_value = s.adc[0];
+    uint16_t max_value = s.adc[0];
 
     for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++) {
-        uint16_t delta = (s.analog[i] >= gray_baseline_adc[i]) ?
-            (uint16_t)(s.analog[i] - gray_baseline_adc[i]) :
-            (uint16_t)(gray_baseline_adc[i] - s.analog[i]);
-        if (delta >= GRAY_ADC_RESPONSE_DELTA) gray_response_passed = true;
-        if (s.analog[i] < min_value) min_value = s.analog[i];
-        if (s.analog[i] > max_value) max_value = s.analog[i];
+        if (s.adc[i] < min_value) min_value = s.adc[i];
+        if (s.adc[i] > max_value) max_value = s.adc[i];
     }
     if ((uint16_t)(max_value - min_value) >= GRAY_ADC_RESPONSE_DELTA)
-        gray_response_passed = true;
+        gray_contrast_observed = true;
 
     debug_printf("GRAY adc=[%u,%u,%u,%u,%u,%u,%u,%u] min=%u max=%u span=%u scans=%lu errors=%lu\r\n",
-        s.analog[0], s.analog[1], s.analog[2], s.analog[3],
-        s.analog[4], s.analog[5], s.analog[6], s.analog[7],
+        s.adc[0], s.adc[1], s.adc[2], s.adc[3],
+        s.adc[4], s.adc[5], s.adc[6], s.adc[7],
         min_value, max_value, (uint16_t)(max_value - min_value),
         (unsigned long)s.scan_count, (unsigned long)s.error_count);
     if (s.error_count > 0U) {
         debug_printf("GRAY ADC DIAG power=%u enc=%u sc=%u status=0x%08lX raw=0x%08lX\r\n",
             s.adc_powered, s.adc_enabled, s.adc_started,
-            (unsigned long)s.adc_status, (unsigned long)s.adc_raw_flags);
+            (unsigned long)s.last_adc_status, (unsigned long)s.last_adc_flags);
     }
     Diagnostics_RefreshReports();
 }
@@ -247,9 +239,7 @@ void Diagnostics_Init(void)
     memset(reports, 0, sizeof(reports));
     motor_test_passed = false;
     oled_visual_passed = false;
-    gray_baseline_set = false;
-    gray_response_passed = false;
-    memset(gray_baseline_adc, 0, sizeof(gray_baseline_adc));
+    gray_contrast_observed = false;
     Motor_Stop();
 }
 

@@ -1,38 +1,26 @@
 #ifndef GRAYSCALE_H
 #define GRAYSCALE_H
 
-#include "board.h"
+#include <stdbool.h>
+#include <stdint.h>
 
-#define GRAYSCALE_CHANNEL_COUNT  8U
-#define GRAY_SAMPLE_COUNT        8U
-#define GRAY_DEBOUNCE_COUNT      3U
-#define GRAY_POSITION_SCALE      1000
-#define GRAY_LINE_LOST           (-1)
-#define GRAY_MIN_LINE_BITS       3U
+#define GRAYSCALE_CHANNEL_COUNT       8U
+#define GRAYSCALE_SAMPLES_PER_CHANNEL 8U
 
 typedef struct {
-    uint8_t raw_state;
-    uint8_t filtered_state;
-    int32_t position;
-    uint16_t analog[GRAYSCALE_CHANNEL_COUNT];
-    uint8_t debounce_cnt[GRAYSCALE_CHANNEL_COUNT];
-    uint8_t min_bits;
+    uint16_t adc[GRAYSCALE_CHANNEL_COUNT];
     uint32_t scan_count;
     uint32_t error_count;
-    uint32_t adc_status;
-    uint32_t adc_raw_flags;
-    uint8_t adc_powered;
-    uint8_t adc_enabled;
-    uint8_t adc_started;
-} Grayscale_t;
-
-typedef Grayscale_t GrayscaleSnapshot_t;
-
-extern Grayscale_t Gray;
+    uint32_t last_adc_status;
+    uint32_t last_adc_flags;
+    bool last_scan_ok;
+    bool adc_powered;
+    bool adc_enabled;
+    bool adc_started;
+} GrayscaleSnapshot_t;
 
 void Grayscale_Init(void);
-void Grayscale_Update(void);
-void Grayscale_SetMinBits(uint8_t bits);
+bool Grayscale_Scan(void);
 void Grayscale_GetSnapshot(GrayscaleSnapshot_t *snapshot);
 
 #endif
