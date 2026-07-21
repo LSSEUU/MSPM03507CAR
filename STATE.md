@@ -109,9 +109,9 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 - 目标工程：`keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx`。
 - 工程包含当前 `Source/`、`Hardware/` 和 `Control/` 业务源文件。
 - 当前 Keil 位于 `C:\Users\Administrator\AppData\Local\Keil_v5`，目标编译器为 ARM Compiler 6.22。
-- 2026-07-21 使用 Keil 全量构建成功：0 error、0 warning；生成 AXF 149156 字节、HEX 24314 字节。
-- After Build 使用工程相对路径调用 `pad_hex.py`，脚本自动定位 `fromelf.exe`，8 字节对齐检查和 HEX 重写均成功。
-- `python -m unittest discover -s Tests -v` 的 3 个 Keil 可移植性回归测试全部通过。
+- 2026-07-21 禁用强制 After Build 后使用 Keil 全量构建成功：0 error、0 warning；生成 AXF 149176 字节、标准 HEX 24335 字节，构建日志未执行 Python 后处理。
+- Keil 已禁用强制 After Build 命令，由工程的 `Create HEX File` 选项直接生成标准 HEX；`keil/pad_hex.py` 暂时保留为非构建必需的可选对齐工具。
+- Keil 工程回归测试覆盖标准 HEX 生成、无强制 After Build、无机器特定路径和无空 scatter 区域。
 - `keil/Objects/` 和 `keil/build.log` 属于忽略的本机构建产物，不提交到仓库。
 - 2026-07-21 使用 MinGW GCC 对 13 个业务和配置 C 文件执行 `-fsyntax-only`，全部返回 0；这不等价于 ARM/Keil 完整构建。
 - 接线说明记录电机正反转、PWM 调速和 HC-04 透传已验证；编码器数值仍标记为待验证。
@@ -147,3 +147,4 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 | 2026-07-21 | 将旧状态说明迁移为 `STATE.md` | 文档迁移，无固件功能变化 |
 | 2026-07-21 | 增加 `AGENTS.md`、版本化预提交检查和启用脚本 | hook 拒绝/接受路径均验证通过，无固件功能变化 |
 | 2026-07-21 | 修复 Keil After Build 的旧电脑绝对路径和空 scatter 区域 | 3 个回归测试通过；ARM Compiler 6.22 全量构建 0 error、0 warning，AXF/HEX 生成成功 |
+| 2026-07-21 | 取消构建对 `pad_hex.py` 的强制依赖，保留脚本作为可选工具 | Keil ARM Compiler 6.22 全量构建 0 error、0 warning；AXF/标准 HEX 正常生成，日志无 After Build；无固件功能变化 |

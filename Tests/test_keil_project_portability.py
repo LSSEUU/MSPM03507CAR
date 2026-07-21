@@ -1,5 +1,6 @@
 from pathlib import Path
 import unittest
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -8,16 +9,17 @@ SCATTER_FILE = ROOT / "keil" / "mspm0g3507.sct"
 
 
 class KeilProjectPortabilityTests(unittest.TestCase):
-    def test_after_build_command_has_no_machine_specific_paths(self):
+    def test_hex_is_generated_without_a_mandatory_after_build_command(self):
         project = PROJECT_FILE.read_text(encoding="utf-8")
+        root = ET.fromstring(project)
+        after_make = root.find(".//AfterMake")
 
         self.assertNotIn(r"E:\MyFile", project)
         self.assertNotIn(r"D:\keil_5", project)
-        self.assertIn(
-            'python ".\\pad_hex.py" '
-            '".\\Objects\\empty_LP_MSPM0G3507_nortos_keil.axf"',
-            project,
-        )
+        self.assertEqual(root.findtext(".//CreateHexFile"), "1")
+        self.assertIsNotNone(after_make)
+        self.assertEqual(after_make.findtext("RunUserProg1"), "0")
+        self.assertFalse(after_make.findtext("UserProg1Name"))
 
     def test_scatter_file_has_no_empty_padding_region(self):
         scatter = SCATTER_FILE.read_text(encoding="utf-8")
