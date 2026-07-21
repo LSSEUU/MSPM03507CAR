@@ -1,15 +1,10 @@
 #ifndef CONTROL_CONFIG_H
 #define CONTROL_CONFIG_H
 
-/*
- * M3 chassis calibration.  The encoder value is the decoded x4 count at the
- * wheel shaft.  The current 1040 count value is the initial calibration value
- * inferred from the recorded hand-turn counts; confirm it with a marked exact
- * wheel revolution before accepting physical speed accuracy.
- */
-#define WHEEL_DIAMETER_MM                    65.0f
-#define ENCODER_A_COUNTS_PER_WHEEL_REV     1040.0f
-#define ENCODER_B_COUNTS_PER_WHEEL_REV     1040.0f
+/* M3 chassis calibration measured on-car over 10 wheel revolutions. */
+#define WHEEL_DIAMETER_MM                    46.0f
+#define ENCODER_A_COUNTS_PER_WHEEL_REV      530.0f
+#define ENCODER_B_COUNTS_PER_WHEEL_REV      531.4f
 #define ENCODER_A_FORWARD_SIGN                  1
 #define ENCODER_B_FORWARD_SIGN                 -1
 
@@ -39,6 +34,7 @@
 
 #define HEADING_CALIBRATION_SAMPLES            20U
 #define HEADING_HOLD_KP_MM_S_PER_DEG          3.0f
+#define HEADING_HOLD_KD_MM_S_PER_DEG_S        0.80f
 #define HEADING_HOLD_MAX_CORRECTION_MM_S     120.0f
 #define HEADING_TURN_KP_MM_S_PER_DEG          2.0f
 #define HEADING_TURN_KD_MM_S_PER_DEG_S        0.55f

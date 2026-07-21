@@ -45,8 +45,8 @@ static void test_speed_conversion_direction_and_ramp(void)
     assert(snapshot.sample_valid);
     assert(snapshot.encoder_delta[WHEEL_SPEED_LEFT] == 8);
     assert(snapshot.encoder_delta[WHEEL_SPEED_RIGHT] == 8);
-    assert(close_to(snapshot.raw_mm_s[WHEEL_SPEED_LEFT], 314.16f, 1.0f));
-    assert(close_to(snapshot.raw_mm_s[WHEEL_SPEED_RIGHT], 314.16f, 1.0f));
+    assert(close_to(snapshot.raw_mm_s[WHEEL_SPEED_LEFT], 436.25f, 1.0f));
+    assert(close_to(snapshot.raw_mm_s[WHEEL_SPEED_RIGHT], 435.10f, 1.0f));
 
     WheelSpeed_Enable();
     WheelSpeed_SetTarget(1000.0f, -1000.0f);

@@ -60,7 +60,9 @@ static void Heading_UpdateControl(void)
         heading.target_deg - heading.yaw_deg);
     if (heading.mode == HEADING_MODE_HOLD) {
         correction = Heading_Clamp(
-            HEADING_HOLD_KP_MM_S_PER_DEG * heading.error_deg,
+            (HEADING_HOLD_KP_MM_S_PER_DEG * heading.error_deg) -
+            (HEADING_HOLD_KD_MM_S_PER_DEG_S *
+             heading.yaw_rate_deg_s),
             HEADING_HOLD_MAX_CORRECTION_MM_S);
         heading.left_target_mm_s = hold_base_speed_mm_s - correction;
         heading.right_target_mm_s = hold_base_speed_mm_s + correction;

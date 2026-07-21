@@ -54,8 +54,9 @@ static void test_heading_hold_correction(void)
     Heading_GetSnapshot(&snapshot);
     assert(snapshot.mode == HEADING_MODE_HOLD);
     assert(close_to(snapshot.error_deg, -10.0f, 0.01f));
-    assert(close_to(snapshot.left_target_mm_s, 280.0f, 0.01f));
-    assert(close_to(snapshot.right_target_mm_s, 220.0f, 0.01f));
+    assert(close_to(snapshot.yaw_rate_deg_s, 35.0f, 0.01f));
+    assert(close_to(snapshot.left_target_mm_s, 308.0f, 0.01f));
+    assert(close_to(snapshot.right_target_mm_s, 192.0f, 0.01f));
 }
 
 static void test_nonblocking_turn_and_wrap(void)

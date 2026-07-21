@@ -68,6 +68,14 @@ class M3ControlTests(unittest.TestCase):
         self.assertIn("j=left k=right b=both speed test", diagnostics)
         self.assertIn("CSV: M3,time_ms", diagnostics)
 
+    def test_measured_wheel_calibration_is_recorded(self):
+        config = (ROOT / "Config" / "control_config.h").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("WHEEL_DIAMETER_MM                    46.0f", config)
+        self.assertIn("ENCODER_A_COUNTS_PER_WHEEL_REV      530.0f", config)
+        self.assertIn("ENCODER_B_COUNTS_PER_WHEEL_REV      531.4f", config)
+
 
 if __name__ == "__main__":
     unittest.main()
