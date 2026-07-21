@@ -18,12 +18,17 @@ typedef struct {
     int32_t  position;
     uint8_t  debounce_cnt[GRAYSCALE_CHANNEL_COUNT];
     uint8_t  min_bits;       /* 最少检测通道数, 默认3 */
+    uint32_t scan_count;
+    uint32_t error_count;
 } Grayscale_t;
+
+typedef Grayscale_t GrayscaleSnapshot_t;
 
 extern Grayscale_t Gray;
 
 void Grayscale_Init(void);
 void Grayscale_Update(void);
 void Grayscale_SetMinBits(uint8_t bits);
+void Grayscale_GetSnapshot(GrayscaleSnapshot_t *snapshot);
 
 #endif

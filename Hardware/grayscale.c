@@ -52,6 +52,8 @@ void Grayscale_Init(void)
     Gray.raw_state = Gray.filtered_state = 0U;
     Gray.position = 0;
     Gray.min_bits = 3U;
+    Gray.scan_count = 0U;
+    Gray.error_count = 0U;
     for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++)
         Gray.debounce_cnt[i] = 0U;
 
@@ -71,12 +73,14 @@ void Grayscale_Init(void)
 void Grayscale_Update(void)
 {
     uint8_t raw = Gray_ScanAll();
+    Gray.scan_count++;
+
+    /* Preserve the electrical scan before confidence filtering for M1 diagnostics. */
+    Gray.raw_state = raw;
 
     /* 黑点太少 → 当作没有线 (过滤地板杂讯) */
     if (Gray_CountBits(raw) < Gray.min_bits)
         raw = 0U;
-
-    Gray.raw_state = raw;
 
     for (uint8_t ch = 0U; ch < GRAYSCALE_CHANNEL_COUNT; ch++) {
         uint8_t mask       = (uint8_t)(1U << ch);
@@ -102,6 +106,11 @@ void Grayscale_Update(void)
     }
     Gray.position = (cnt > 0U) ? (wsum * GRAY_POSITION_SCALE) / (int32_t)cnt
                                : GRAY_LINE_LOST;
+}
+
+void Grayscale_GetSnapshot(GrayscaleSnapshot_t *snapshot)
+{
+    if (snapshot != NULL) *snapshot = Gray;
 }
 
 void Grayscale_SetMinBits(uint8_t bits)

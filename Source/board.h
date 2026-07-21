@@ -8,12 +8,6 @@
 #include <string.h>
 #include "ti_msp_dl_config.h"
 
-#include "uart_debug.h"
-#include "led.h"
-#include "motor.h"
-#include "encoder.h"
-#include "grayscale.h"
-#include "gyro.h"
 typedef int32_t   s32;
 typedef int16_t   s16;
 typedef int8_t    s8;

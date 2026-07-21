@@ -4,7 +4,7 @@
  */
 #ifndef MOTOR_H
 #define MOTOR_H
-#include "board.h"
+#include <stdint.h>
 
 /* ── 电机编号 ── */
 #define MOTOR_A  0
@@ -20,10 +20,18 @@ typedef struct {
 
 extern MotorParam_t MotorA, MotorB;
 
+typedef struct {
+    uint32_t command_count;
+    uint32_t clamp_count;
+    int16_t  last_a;
+    int16_t  last_b;
+} MotorStats_t;
+
 /* ── API ── */
 void Motor_Init(void);                            /* 初始化 GPIO + PWM */
 void Motor_SetPWM(int16_t motor_a, int16_t motor_b); /* 设置两路 PWM */
 void Motor_SetDir(uint8_t motor, uint8_t dir);    /* 设置方向 */
 void Motor_Stop(void);                             /* 急停 */
+void Motor_GetStats(MotorStats_t *stats);
 
 #endif

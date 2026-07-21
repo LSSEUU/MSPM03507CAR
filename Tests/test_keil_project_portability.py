@@ -26,6 +26,11 @@ class KeilProjectPortabilityTests(unittest.TestCase):
 
         self.assertNotIn("ER_IROM1_PAD", scatter)
 
+    def test_project_has_no_machine_specific_tool_path(self):
+        project = PROJECT_FILE.read_text(encoding="utf-8")
+        self.assertNotIn(r"C:\Keil_v5", project)
+        self.assertNotIn("D:/keil_5", project)
+
 
 if __name__ == "__main__":
     unittest.main()

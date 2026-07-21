@@ -6,6 +6,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_GPIO_init();
     SYSCFG_DL_SYSCTL_init();
     SYSCFG_DL_UART_0_init();
+    SYSCFG_DL_UART_2_init();
     SYSCFG_DL_PWM_0_init();
 }
 
@@ -16,12 +17,12 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOA);
     DL_GPIO_reset(GPIOB);
     DL_UART_Main_reset(UART_0_INST);
-    DL_UART_Extend_reset(UART_2_INST);
+    DL_UART_Main_reset(UART_2_INST);
 
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
     DL_UART_Main_enablePower(UART_0_INST);
-    DL_UART_Extend_enablePower(UART_2_INST);
+    DL_UART_Main_enablePower(UART_2_INST);
     DL_TimerA_enablePower(PWM_0_INST);
     delay_cycles(POWER_STARTUP_DELAY);
 }

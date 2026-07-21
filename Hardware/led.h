@@ -11,5 +11,7 @@ void LED_On(uint8_t index);                /* 点亮第 index 个 LED */
 void LED_Off(uint8_t index);               /* 熄灭 */
 void LED_Toggle(uint8_t index);            /* 翻转 */
 void LED_Flash(uint16_t period_ms);        /* 闪烁任务（放定时器中断） */
+uint8_t LED_GetConfiguredCount(void);
+uint32_t LED_GetErrorCount(void);
 
 #endif

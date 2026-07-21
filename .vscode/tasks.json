@@ -2,36 +2,21 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build (Keil)",
+            "label": "rebuild (Keil)",
             "type": "shell",
-            "command": "C:/Keil_v5/UV4/UV4.exe",
-            "args": [
-                "-b",
-                "${workspaceFolder}/keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx",
-                "-j0",
-                "-o",
-                "${workspaceFolder}/keil/build.log"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
+            "command": "powershell",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/build.ps1", "-Mode", "Rebuild"],
+            "group": { "kind": "build", "isDefault": true },
             "problemMatcher": [],
-            "detail": "使用 Keil 命令行编译工程"
+            "detail": "Resolve local Keil installation and perform a full target rebuild"
         },
         {
-            "label": "clean",
+            "label": "host regression tests",
             "type": "shell",
-            "command": "cmd",
-            "args": [
-                "/c",
-                "del /q",
-                "${workspaceFolder}/keil/Objects/*.o",
-                "${workspaceFolder}/keil/*.lst",
-                "${workspaceFolder}/keil/*.dep"
-            ],
-            "group": "build",
-            "detail": "清理编译中间文件"
+            "command": "powershell",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/test.ps1"],
+            "group": "test",
+            "problemMatcher": []
         }
     ]
 }

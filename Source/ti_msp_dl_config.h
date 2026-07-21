@@ -1,6 +1,16 @@
 #ifndef ti_msp_dl_config_h
 #define ti_msp_dl_config_h
 
+/*
+ * Frozen board configuration for the Tianmengxing MSPM0G3507 carrier.
+ *
+ * This pair of ti_msp_dl_config.c/.h files is the repository source of truth.
+ * It was originally produced by SysConfig and then extended for the carrier.
+ * Do not overwrite it from an unrelated LaunchPad .syscfg file.  Pin and
+ * peripheral invariants are guarded by Tests/test_board_configuration.py.
+ */
+#define FROZEN_BOARD_CONFIG_REVISION                         (20260721U)
+
 #define CONFIG_LP_MSPM0G3507
 #define CONFIG_MSPM0G3507
 
@@ -91,10 +101,10 @@ extern "C" {
 #define ENC_A_E1B_IOMUX                                         (IOMUX_PINCM20)
 
 #define ENC_B_PORT                                                       (GPIOB)
-#define ENC_B_E2A_PIN                                            (DL_GPIO_PIN_8)
-#define ENC_B_E2A_IOMUX                                         (IOMUX_PINCM25)
-#define ENC_B_E2B_PIN                                            (DL_GPIO_PIN_9)
-#define ENC_B_E2B_IOMUX                                         (IOMUX_PINCM26)
+#define ENC_B_E2A_PIN                                            (DL_GPIO_PIN_9)
+#define ENC_B_E2A_IOMUX                                         (IOMUX_PINCM26)
+#define ENC_B_E2B_PIN                                            (DL_GPIO_PIN_8)
+#define ENC_B_E2B_IOMUX                                         (IOMUX_PINCM25)
 
 /* ── 八路灰度传感器 ── */
 #define GRAY_AD0_PORT                                                   (GPIOA)
@@ -109,6 +119,17 @@ extern "C" {
 #define GRAY_OUT_PORT                                                   (GPIOA)
 #define GRAY_OUT_PIN                                            (DL_GPIO_PIN_25)
 #define GRAY_OUT_IOMUX                                          (IOMUX_PINCM55)
+
+/* SSD1306 connector: software I2C, address is probed at 0x3C/0x3D. */
+#define OLED_SDA_PORT                                                   (GPIOA)
+#define OLED_SDA_PIN                                            (DL_GPIO_PIN_28)
+#define OLED_SDA_IOMUX                                          (IOMUX_PINCM3)
+#define OLED_SCL_PORT                                                   (GPIOA)
+#define OLED_SCL_PIN                                            (DL_GPIO_PIN_31)
+#define OLED_SCL_IOMUX                                          (IOMUX_PINCM6)
+
+/* No MCU-controlled status LED is populated on the verified carrier. */
+#define BOARD_STATUS_LED_COUNT                                             (0U)
 
 #define TIMER_ENC_INST                                                    TIMG12
 #define TIMER_ENC_INST_IRQHandler                             TIMG12_IRQHandler

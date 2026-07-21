@@ -1,56 +1,46 @@
-
 #include "led.h"
 
+/*
+ * The verified carrier exposes only power indicators, which are not driven by
+ * the MCU.  Keep the diagnostic API explicit: zero configured LEDs is a
+ * DEGRADED capability, not a fabricated successful test.
+ */
+static uint32_t led_error_count;
 
-#define LED_MAX   4
-
-typedef struct {
-    uint32_t  pincmIndex;    
-    GPIO_Regs *port;         
-    uint32_t  pin;           
-} LedPin_t;
-
-static const LedPin_t leds[LED_MAX] = {
-    
-    
-    
-};
-
-
-void LED_Init(void) {
-    for (uint8_t i = 0; i < LED_MAX; i++) {
-        if (leds[i].port == NULL) continue;
-        
-        DL_GPIO_initPeripheralOutputFunction(leds[i].pincmIndex, 0x00000001);
-        
-        leds[i].port->DOUT31_0 |= leds[i].pin;
-    }
+void LED_Init(void)
+{
+    led_error_count = 0U;
 }
 
-
-void LED_On(uint8_t index) {
-    if (index >= LED_MAX || leds[index].port == NULL) return;
-    leds[index].port->DOUT31_0 &= ~leds[index].pin;
+void LED_On(uint8_t index)
+{
+    (void)index;
+    led_error_count++;
 }
 
-
-void LED_Off(uint8_t index) {
-    if (index >= LED_MAX || leds[index].port == NULL) return;
-    leds[index].port->DOUT31_0 |= leds[index].pin;
+void LED_Off(uint8_t index)
+{
+    (void)index;
+    led_error_count++;
 }
 
-
-void LED_Toggle(uint8_t index) {
-    if (index >= LED_MAX || leds[index].port == NULL) return;
-    leds[index].port->DOUT31_0 ^= leds[index].pin;
+void LED_Toggle(uint8_t index)
+{
+    (void)index;
+    led_error_count++;
 }
 
+void LED_Flash(uint16_t period_ms)
+{
+    (void)period_ms;
+}
 
-void LED_Flash(uint16_t period_ms) {
-    static uint16_t tick = 0;
-    tick++;
-    if (tick >= period_ms) {
-        tick = 0;
-        LED_Toggle(0);
-    }
+uint8_t LED_GetConfiguredCount(void)
+{
+    return (uint8_t)BOARD_STATUS_LED_COUNT;
+}
+
+uint32_t LED_GetErrorCount(void)
+{
+    return led_error_count;
 }

@@ -15,9 +15,18 @@ typedef struct {
     uint8_t updated;    /* 本周期有新数据 (读取后可清零) */
 } Gyro_t;
 
+typedef struct {
+    Gyro_t sample;
+    uint32_t rx_bytes;
+    uint32_t valid_frames;
+    uint32_t checksum_errors;
+    uint32_t frame_errors;
+} GyroSnapshot_t;
+
 extern Gyro_t Gyro;
 
 void Gyro_Init(void);
 void Gyro_Update(void);     /* 每 5ms 调用 */
+void Gyro_GetSnapshot(GyroSnapshot_t *snapshot);
 
 #endif

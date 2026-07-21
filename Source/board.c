@@ -1,4 +1,5 @@
 #include "board.h"
+#include "uart_debug.h"
 
 int fputc(int ch, FILE *f) {
     debug_putc((char)ch);

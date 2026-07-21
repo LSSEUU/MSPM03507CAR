@@ -10,7 +10,7 @@
       <TargetName>empty_LP_MSPM0G3507_nortos_keil</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
-      <pCCUsed>6240000::V6.24::ARMCLANG</pCCUsed>
+      <pCCUsed>6220000::V6.22::ARMCLANG</pCCUsed>
       <uAC6>1</uAC6>
       <TargetOption>
         <TargetCommonOption>
@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>__MSPM0G3507__</Define>
               <Undefine></Undefine>
-              <IncludePath>../include,../Source,../Hardware,../Control,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
+              <IncludePath>../include,../Source,../Hardware,../System,../Control,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -385,9 +385,9 @@
           <GroupName>Source</GroupName>
           <Files>
             <File>
-              <FileName>empty.c</FileName>
+              <FileName>main.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Source/empty.c</FilePath>
+              <FilePath>../Source/main.c</FilePath>
             </File>
             <File>
               <FileName>board.c</FileName>
@@ -462,22 +462,17 @@
           </Files>
         </Group>
         <Group>
-          <GroupName>Control</GroupName>
+          <GroupName>System</GroupName>
           <Files>
             <File>
-              <FileName>control.c</FileName>
+              <FileName>diagnostics_health.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Control/control.c</FilePath>
+              <FilePath>../System/diagnostics_health.c</FilePath>
             </File>
             <File>
-              <FileName>show.c</FileName>
+              <FileName>diagnostics.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Control/show.c</FilePath>
-            </File>
-            <File>
-              <FileName>uart_callback.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Control/uart_callback.c</FilePath>
+              <FilePath>../System/diagnostics.c</FilePath>
             </File>
           </Files>
         </Group>

@@ -9,6 +9,12 @@
 
 static inline void debug_init(void) { }
 
+typedef struct {
+    uint32_t tx_bytes;
+    uint32_t rx_bytes;
+    uint32_t format_errors;
+} DebugStats_t;
+
 
 void debug_putc(char c);
 char debug_getc(void);                   
@@ -23,5 +29,6 @@ void debug_printf(const char *fmt, ...)  __attribute__((format(printf,1,2)));
 
 
 int  debug_kbhit(void);                  
+void debug_get_stats(DebugStats_t *stats);
 
 #endif
