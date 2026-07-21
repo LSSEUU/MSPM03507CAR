@@ -25,6 +25,7 @@
 - Delete `CODEREADME.md`: remove the stale duplicate source of truth.
 - Create `STATE.md`: current functionality, hardware, validation evidence, known risks, and active milestone.
 - Create `AGENTS.md`: repository-wide maintenance requirements for agents.
+- Create `.gitattributes`: preserve executable hook files with LF line endings across platforms.
 - Create `.githooks/pre-commit`: staged-file enforcement.
 - Create `scripts/setup_git_hooks.ps1`: per-clone hook activation and verification.
 
@@ -251,6 +252,7 @@ Expected: one commit deleting `CODEREADME.md` and creating `STATE.md`.
 
 **Files:**
 - Create: `AGENTS.md`
+- Create: `.gitattributes`
 - Create: `.githooks/pre-commit`
 
 **Interfaces:**
@@ -304,6 +306,14 @@ Preserve unrelated user files and changes. In particular, never stage unrelated 
 
 - [ ] **Step 3: Create `.githooks/pre-commit` with this complete content**
 
+First create `.gitattributes` with:
+
+```gitattributes
+.githooks/* text eol=lf
+```
+
+Then create the hook:
+
 ```sh
 #!/bin/sh
 set -eu
@@ -351,19 +361,23 @@ Run:
 ```powershell
 $temporaryIndex = Join-Path ([System.IO.Path]::GetTempPath()) ("state-sync-" + [guid]::NewGuid().ToString('N') + '.index')
 $previousIndex = $env:GIT_INDEX_FILE
+$gitExecutable = (Get-Command git -ErrorAction Stop).Source
+$gitRoot = Split-Path (Split-Path $gitExecutable -Parent) -Parent
+$gitSh = Join-Path $gitRoot 'bin\sh.exe'
+if (-not (Test-Path -LiteralPath $gitSh)) { throw "Git shell not found: $gitSh" }
 try {
     $env:GIT_INDEX_FILE = $temporaryIndex
     git read-tree HEAD
 
     $codeBlob = ('synthetic engineering change' | git hash-object -w --stdin).Trim()
     git update-index --add --cacheinfo 100644 $codeBlob scripts/hook-test.txt
-    & sh .githooks/pre-commit
+    & $gitSh .githooks/pre-commit
     if ($LASTEXITCODE -ne 1) { throw 'Hook did not reject a code-only change.' }
     Write-Output 'Hook rejection PASS'
 
     $stateBlob = ('synthetic state update' | git hash-object -w --stdin).Trim()
     git update-index --cacheinfo 100644 $stateBlob STATE.md
-    & sh .githooks/pre-commit
+    & $gitSh .githooks/pre-commit
     if ($LASTEXITCODE -ne 0) { throw 'Hook rejected a synchronized change.' }
     Write-Output 'Hook acceptance PASS'
 }
@@ -392,12 +406,13 @@ Append this row under `STATE.md` section 10 before staging:
 Then stage and inspect the Task 2 files:
 
 ```powershell
-git add -- STATE.md AGENTS.md .githooks/pre-commit
+git add -- STATE.md AGENTS.md .gitattributes .githooks/pre-commit
+git update-index --chmod=+x .githooks/pre-commit
 git diff --cached --check
 git diff --cached --name-only
 ```
 
-Expected staged files: `.githooks/pre-commit`, `AGENTS.md`, and `STATE.md`.
+Expected staged files: `.gitattributes`, `.githooks/pre-commit`, `AGENTS.md`, and `STATE.md`.
 
 - [ ] **Step 6: Commit the repository policy and hook**
 
@@ -407,7 +422,7 @@ Run:
 git commit -m "chore: add state synchronization policy"
 ```
 
-Expected: one commit creating `AGENTS.md` and `.githooks/pre-commit` and updating `STATE.md`.
+Expected: one commit creating `.gitattributes`, `AGENTS.md`, and executable `.githooks/pre-commit`, and updating `STATE.md`.
 
 ### Task 3: Add per-clone hook setup and finish verification
 
@@ -498,7 +513,10 @@ Run:
 ```powershell
 git add -- scripts/setup_git_hooks.ps1 STATE.md
 git diff --cached --check
-& sh .githooks/pre-commit
+$gitExecutable = (Get-Command git -ErrorAction Stop).Source
+$gitRoot = Split-Path (Split-Path $gitExecutable -Parent) -Parent
+$gitSh = Join-Path $gitRoot 'bin\sh.exe'
+& $gitSh .githooks/pre-commit
 if ($LASTEXITCODE -ne 0) { exit 1 }
 git diff --cached --name-only
 ```
@@ -515,7 +533,7 @@ scripts/setup_git_hooks.ps1
 Run:
 
 ```powershell
-$requiredFiles = @('STATE.md', 'AGENTS.md', '.githooks/pre-commit', 'scripts/setup_git_hooks.ps1')
+$requiredFiles = @('STATE.md', 'AGENTS.md', '.gitattributes', '.githooks/pre-commit', 'scripts/setup_git_hooks.ps1')
 $missing = $requiredFiles | Where-Object { -not (Test-Path -LiteralPath $_) }
 $oldExists = Test-Path -LiteralPath CODEREADME.md
 $configuredPath = git config --local --get core.hooksPath
