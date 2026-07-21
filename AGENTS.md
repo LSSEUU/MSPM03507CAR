@@ -22,6 +22,10 @@ Do not bypass, disable, delete, or weaken `.githooks/pre-commit` to avoid updati
 
 Preserve unrelated user files and changes. In particular, never stage unrelated untracked documentation while updating project state.
 
+## Serial tooling
+
+- `pyserial` is an approved tool for serial-port discovery, communication, logging, and hardware acceptance.
+
 ## Workflow defaults
 
 - The user authorizes creation of isolated Git worktrees by default for planned implementation work. Do not ask for worktree consent again unless the target path or operation introduces a new material risk.
