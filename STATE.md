@@ -116,7 +116,7 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 - VS Code 默认构建任务调用同一 PowerShell 脚本。旧 OpenOCD 配置因未验证且互相冲突已经删除；当前只声明 Keil 下载链路可用。
 - 2026-07-21 当前天猛星-64P 诊断固件 Keil V6.22 全量重建成功：0 error、0 warning；Code=10354、RO-data=1470、RW-data=4、ZI-data=18004；AXF 179372 字节，HEX 33335 字节。
 - 12 项主机回归通过，包括板级配置/工程不变量、PA18/PA19/PA20 保留、UART2 仅 RX/PA21 高阻、PA25 数字输入和 PA23 开漏回读、构建可移植性、HEX 工具解析和诊断状态模型 C 测试。
-- 新 DAPLink 不接 RST，独立 CH340 为 COM5；仓库诊断固件曾连续得到 `Verify OK`、`Application running ...`。2026-07-22 适配商家灰度例程测试时又出现两次 SWD 访问失败，最新一次为 `Cannot access Memory / Target DLL has been cancelled`；因此下载链路当前降级为间歇可用，恢复连续成功前不得再声称稳定。
+- 新 DAPLink 不接 RST，独立 CH340 为 COM5；仓库诊断固件下载稳定并曾连续得到 `Verify OK`、`Application running ...`。2026-07-22 的 `Cannot access Memory / Target DLL has been cancelled` 来自仓库外商家 `ADC_Interrupt` 工程的命令行下载，操作者随后用该商家工程手动下载成功；该失败不得归因于仓库下载链路或新 DAPLink。
 
 ## 8. 已知问题与风险
 
@@ -129,7 +129,7 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 7. UART 诊断输出是阻塞式发送；M1 可接受，M2 周期控制接入前必须改为不会阻塞关键控制周期的发送策略。
 8. 旧 `Source/empty.c` 仍含五段直线缺陷和阻塞式转向，仅作迁移参考且不在当前目标构建中。
 9. 初始提交 `accb981` 的灰度驱动本身按 AD2/AD1/AD0 从 `000` 到 `111` 扫描，译码顺序正确；但旧主程序只调用 `Grayscale_Init()`，从未调用 `Grayscale_Update()`，且默认把少于 3 个有效黑点的结果清零。原作者所说“只是未启用，启用后可用”与驱动设计意图一致；当前已在正确的天猛星-64P 原理图基础上恢复无错地址扫描，但旧版本仍没有形成实际运行的循迹链路。
-10. 商家 `ADC_Interrupt` 例程已在仓库外按当前小车接线最小适配（PA23/PA24/PA26 地址、PA25/A0_2），ARM Compiler 6.22 构建为 0 error、0 warning并曾得到 `Verify OK`。排除松线后重试仍报 `Cannot access Memory`，但 DAP 操作触发目标多次以 UART0 9600 正确输出 `BOOT`、`READY`，证明初始化和 100 ms SysTick 延时已通过；程序未输出随后任何 ADC 行。源码显示 `READY` 后首个 `adc_getValue()` 对 ADC 完成标志作无超时等待，首转换/中断未完成是当前高可能性停点。物理 RST 无字节，重新上电仅收到一个 `0x00`，正常复位启动还存在独立问题。该实验只能证明商家方案设计为 ADC，不能证明当前灰度实物已可用；按两次失败停止继续复位、换波特率和试烧。
+10. 商家 `ADC_Interrupt` 例程已在仓库外按当前小车接线最小适配（PA23/PA24/PA26 地址、PA25/A0_2），ARM Compiler 6.22 构建为 0 error、0 warning，操作者已用 Keil 手动下载成功。COM5/9600 在下载阶段多次正确捕获 `BOOT`、`READY`，下载完成后稳定监听 5 s 为 0 字节，始终没有 `Digtal/Anolog/Normalize`。链接映射确认向量表中的 `ADC0_IRQHandler` 来自商家 `adc.o`；源码显示 `READY` 后首个 `adc_getValue()` 对 ADC 完成标志作无超时等待，因此首转换没有产生 MEM0 完成事件是当前高可能性停点。TI DriverLib 说明 `freqRange` 是 ADC 时钟源范围，当前 ULPCLK 40 MHz 配 `32–40 MHz` 合理，不据此改动。该实验只能证明商家方案设计为 ADC，不能证明当前灰度实物已可用；按约束停止继续盲试。
 
 ## 9. 当前里程碑
 
@@ -162,4 +162,4 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 | 2026-07-22 | OLED 与更换串口接法后的 JY61P 复测 | OLED 棋盘格目视通过并以 `p` 记录；JY61P valid=16811→16824、checksum=0、frame=0，确认 TXD→PA22 接收链路正常；无功能变化 |
 | 2026-07-22 | 双电机方向、编码器联动和急停复测 | 架空、电池供电；A 正/反、B 正/反目视完全符合，dEdgeA=1543、dEdgeB=1402；测试后再次发送 `S` 急停；无功能变化 |
 | 2026-07-22 | 电机测试后 JY61P 稳定性复核 | valid>30900、checksum=2、frame=0；连续两次后续读取 checksum 保持为 2 未增长，M1 可用并记录瞬态干扰风险；无功能变化 |
-| 2026-07-22 | 商家八路灰度 ADC 例程最小适配测试 | PA23/PA24/PA26 地址、PA25/A0_2，Keil 6.22 构建 0 error/0 warning且曾 `Verify OK`；DAP 触发时 COM5/9600 多次正确输出 `BOOT/READY`，随后无 ADC 行，源码高概率停在首转换无超时等待；物理 RST 无字节、重新上电仅 `0x00`，SWD 重试仍失败；结论不成立并停止重复操作；无仓库固件功能变化 |
+| 2026-07-22 | 商家八路灰度 ADC 例程最小适配测试 | PA23/PA24/PA26 地址、PA25/A0_2，Keil 6.22 构建 0 error/0 warning并由操作者手动下载成功；COM5/9600 捕获 `BOOT/READY`，完成后 5 s 为 0 字节且无 ADC 行；ADC0 向量链接正确，高概率停在首转换无超时等待；商家命令行下载失败不代表仓库链路不稳定；无仓库固件功能变化 |
