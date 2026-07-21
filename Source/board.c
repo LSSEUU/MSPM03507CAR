@@ -17,8 +17,7 @@ uint32_t systick_get(void)
 
 void delay_us(uint32_t us)
 {
-    if (us > SYSTICK_MAX_COUNT / (CPUCLK_FREQ / 1000000))
-        us = SYSTICK_MAX_COUNT / (CPUCLK_FREQ / 1000000);
+    if (us >= 1000U) us = 999U;
     uint32_t target = us * (CPUCLK_FREQ / 1000000);
     uint32_t start  = systick_get();
     uint32_t elapsed = 0;
@@ -33,5 +32,8 @@ void delay_us(uint32_t us)
 
 void delay_ms(uint32_t ms)
 {
-    for (uint32_t i = 0U; i < ms; i++) delay_us(1000U);
+    for (uint32_t i = 0U; i < ms; i++) {
+        delay_us(999U);
+        delay_us(1U);
+    }
 }

@@ -18,6 +18,8 @@ typedef struct {
 void OLED_Init(void);
 void OLED_Clear(void);
 void OLED_Refresh(void);
+void OLED_RequestRefresh(void);
+void OLED_Task100ms(void);
 void OLED_SetPos(uint8_t x, uint8_t y);
 void OLED_ShowChar(uint8_t x, uint8_t y, char c);
 void OLED_ShowString(uint8_t x, uint8_t y, const char *s);

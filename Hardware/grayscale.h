@@ -10,6 +10,7 @@
 typedef struct {
     uint16_t adc[GRAYSCALE_CHANNEL_COUNT];
     uint32_t scan_count;
+    uint32_t last_update_ms;
     uint32_t error_count;
     uint32_t last_adc_status;
     uint32_t last_adc_flags;
@@ -21,6 +22,9 @@ typedef struct {
 
 void Grayscale_Init(void);
 bool Grayscale_Scan(void);
+bool Grayscale_RequestScan(void);
+void Grayscale_Task(uint32_t now_ms);
+bool Grayscale_IsScanPending(void);
 void Grayscale_GetSnapshot(GrayscaleSnapshot_t *snapshot);
 
 #endif

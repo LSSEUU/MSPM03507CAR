@@ -13,6 +13,7 @@ typedef struct {
     Gyro_t sample;
     uint32_t rx_bytes;
     uint32_t valid_frames;
+    uint32_t last_update_ms;
     uint32_t checksum_errors;
     uint32_t frame_errors;
     uint8_t recent_count;

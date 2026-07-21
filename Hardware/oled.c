@@ -11,6 +11,8 @@
 static uint8_t OLED_Buffer[OLED_WIDTH * OLED_HEIGHT / 8];
 static OLED_Stats_t oled_stats;
 static uint8_t oled_address = OLED_ADDRESS_PRIMARY;
+static bool oled_refresh_pending;
+static uint8_t oled_refresh_page;
 
 static void OLED_I2CDelay(void) { delay_cycles(OLED_I2C_DELAY_CYCLES); }
 
@@ -94,6 +96,8 @@ void OLED_Init(void)
         0x40U,0x8DU,0x14U,0xAFU
     };
     memset(&oled_stats, 0, sizeof(oled_stats));
+    oled_refresh_pending = false;
+    oled_refresh_page = 0U;
     /* Input enable remains active while DOE is toggled for open-drain bit-bang. */
     DL_GPIO_initDigitalInput(OLED_SDA_IOMUX);
     DL_GPIO_initDigitalInput(OLED_SCL_IOMUX);
@@ -126,6 +130,30 @@ void OLED_Refresh(void)
         (void)OLED_WritePacket(0x40U, &OLED_Buffer[(uint16_t)page * OLED_WIDTH], OLED_WIDTH);
     }
     oled_stats.refresh_count++;
+}
+
+void OLED_RequestRefresh(void)
+{
+    if (!oled_stats.present) return;
+    oled_refresh_page = 0U;
+    oled_refresh_pending = true;
+}
+
+void OLED_Task100ms(void)
+{
+    uint8_t position[3];
+    if (!oled_refresh_pending || !oled_stats.present) return;
+    position[0] = (uint8_t)(0xB0U + oled_refresh_page);
+    position[1] = 0x00U;
+    position[2] = 0x10U;
+    (void)OLED_WritePacket(0x00U, position, sizeof(position));
+    (void)OLED_WritePacket(0x40U,
+        &OLED_Buffer[(uint16_t)oled_refresh_page * OLED_WIDTH], OLED_WIDTH);
+    oled_refresh_page++;
+    if (oled_refresh_page >= OLED_PAGES) {
+        oled_refresh_pending = false;
+        oled_stats.refresh_count++;
+    }
 }
 
 void OLED_SetPos(uint8_t x, uint8_t y)
@@ -203,7 +231,7 @@ void OLED_ShowNum(uint8_t x, uint8_t y, int32_t num, uint8_t len)
 void OLED_ShowTestPattern(void)
 {
     for (uint16_t i = 0U; i < sizeof(OLED_Buffer); i++) OLED_Buffer[i] = ((i / 16U) & 1U) ? 0xAAU : 0x55U;
-    OLED_Refresh();
+    OLED_RequestRefresh();
 }
 
 bool OLED_IsPresent(void) { return oled_stats.present; }

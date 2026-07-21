@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>__MSPM0G3507__</Define>
               <Undefine></Undefine>
-              <IncludePath>../include,../Source,../Hardware,../System,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
+              <IncludePath>../include,../Source,../Hardware,../System,../Config,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -459,6 +459,11 @@
               <FileType>1</FileType>
               <FilePath>../Hardware/gyro.c</FilePath>
             </File>
+            <File>
+              <FileName>watchdog.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/watchdog.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -473,6 +478,26 @@
               <FileName>diagnostics.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/diagnostics.c</FilePath>
+            </File>
+            <File>
+              <FileName>system_time.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/system_time.c</FilePath>
+            </File>
+            <File>
+              <FileName>scheduler.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/scheduler.c</FilePath>
+            </File>
+            <File>
+              <FileName>system_state.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/system_state.c</FilePath>
+            </File>
+            <File>
+              <FileName>safety.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/safety.c</FilePath>
             </File>
           </Files>
         </Group>

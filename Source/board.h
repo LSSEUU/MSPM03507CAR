@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include "ti_msp_dl_config.h"
 
-#define SYSTICK_MAX_COUNT  0xFFFFFFU
-#define SYSTICK_PERIOD     (SYSTICK_MAX_COUNT + 1U)
+#define SYSTICK_PERIOD     (CPUCLK_FREQ / 1000U)
+#define SYSTICK_MAX_COUNT  (SYSTICK_PERIOD - 1U)
 
 uint32_t systick_get(void);
 

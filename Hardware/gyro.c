@@ -1,5 +1,6 @@
 #include "gyro.h"
 #include "board.h"
+#include "system_time.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -9,6 +10,7 @@ static uint8_t  rx_buf[11];
 static uint8_t  rx_idx;
 static volatile uint32_t rx_bytes;
 static volatile uint32_t valid_frames;
+static volatile uint32_t last_update_ms;
 static volatile uint32_t checksum_errors;
 static volatile uint32_t frame_errors;
 static uint8_t recent_bytes[32];
@@ -43,6 +45,7 @@ static void Gyro_DrainRx(void)
                 gyro_sample.pitch = (float)pitch * 180.0f / 32768.0f;
                 gyro_sample.yaw   = (float)yaw   * 180.0f / 32768.0f;
                 valid_frames++;
+                last_update_ms = SystemTime_Now();
             }
             /* Other valid JY61P frame types are expected and ignored. */
         }
@@ -56,6 +59,7 @@ void Gyro_Init(void)
     recent_write = 0U;
     memset(recent_bytes, 0, sizeof(recent_bytes));
     rx_bytes = valid_frames = checksum_errors = frame_errors = 0U;
+    last_update_ms = 0U;
 
     /* UART2 pinmux/baud/power are owned by the frozen board configuration. */
     DL_UART_enableInterrupt(UART_2_INST, DL_UART_INTERRUPT_RX);
@@ -85,6 +89,7 @@ void Gyro_GetSnapshot(GyroSnapshot_t *snapshot)
     snapshot->sample = gyro_sample;
     snapshot->rx_bytes = rx_bytes;
     snapshot->valid_frames = valid_frames;
+    snapshot->last_update_ms = last_update_ms;
     snapshot->checksum_errors = checksum_errors;
     snapshot->frame_errors = frame_errors;
     snapshot->recent_count = (rx_bytes < sizeof(recent_bytes)) ?
