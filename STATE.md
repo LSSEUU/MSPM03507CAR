@@ -53,7 +53,7 @@
 
 | 功能 | 源码 | 主程序 | 构建/上板证据 | 当前结论 |
 |---|---|---|---|---|
-| MSPM0 板级初始化 | 已实现 | 已接入 | 仅主机语法检查 | 目标构建未验证 |
+| MSPM0 板级初始化 | 已实现 | 已接入 | Keil 目标构建通过，当前工程已成功下载 | 已编译、已下载；板级功能尚未逐项验收 |
 | 双电机方向与 PWM | 已实现 | 已接入 | 接线说明记录正反转和 PWM 已验证 | 可用于当前演示 |
 | 双路 AB 编码器计数 | 已实现 | 左轮距离已接入 | 接线说明标记数值待验证 | 硬件精度未验证 |
 | JY61P 角度解析 | 已实现 | yaw 已接入转向 | 无完整测试记录 | 硬件可靠性未验证 |
@@ -110,6 +110,7 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 - 工程包含当前 `Source/`、`Hardware/` 和 `Control/` 业务源文件。
 - 当前 Keil 位于 `C:\Users\Administrator\AppData\Local\Keil_v5`，目标编译器为 ARM Compiler 6.22。
 - 2026-07-21 禁用强制 After Build 后使用 Keil 全量构建成功：0 error、0 warning；生成 AXF 149176 字节、标准 HEX 24335 字节，构建日志未执行 Python 后处理。
+- 当前 Keil 工程使用 `BIN\UL2CM3.DLL` 下载驱动；用户已确认能够成功下载到目标板，但尚未据此确认固件运行行为或各外设功能。
 - Keil 已禁用强制 After Build 命令，由工程的 `Create HEX File` 选项直接生成标准 HEX；`keil/pad_hex.py` 暂时保留为非构建必需的可选对齐工具。
 - Keil 工程回归测试覆盖标准 HEX 生成、无强制 After Build、无机器特定路径和无空 scatter 区域。
 - `keil/Objects/` 和 `keil/build.log` 属于忽略的本机构建产物，不提交到仓库。
@@ -126,10 +127,13 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 6. 灰度驱动已实现，但主循环不调用 `Grayscale_Update()`。
 7. 蓝牙 DMA、OLED I2C/字库、LED 引脚和 APP 上报均为空或不完整。
 8. `board.h` 与硬件头文件相互包含，模块边界不清晰。
-9. `Source/empty.syscfg` 与生成的 `ti_msp_dl_config.c/.h` 不足以证明配置可安全重新生成，存在覆盖风险。
+9. 仓库同时存在非标准 JSON 格式的 `Source/empty.syscfg` 和只配置 UART0 的 `syscfg/untitled.syscfg`，均不能可靠重建当前手工扩展过的 `ti_msp_dl_config.c/.h`；本机也没有已发现的 MSPM0 SDK/SysConfig CLI，重新生成存在覆盖风险。
 10. 接线说明内部存在冲突：文字表使用编码器 B 的 PB8/PB9，示意图曾写 PB4/PB5；灰度 PA25 在文档中写 ADC，而当前代码按数字输入读取。
 11. 没有传感器超时、堵转、任务超期、急停优先级和看门狗闭环。
 12. `scripts/build.bat` 和 VS Code 构建任务仍假定 Keil 位于 `C:\Keil_v5`，尚未适配当前用户目录安装路径。
+13. Keil 工程记录编译器 V6.24，而当前实际构建使用 V6.22；VS Code C/C++ 配置仍指向旧电脑的 `D:/keil_5`，工具链版本和路径尚未统一。
+14. `.vscode` 内存在多套未验证且互相不一致的 OpenOCD 配置，包括重复 Flash bank 和 128/256 KiB 容量差异；当前已验证的下载路径仅为 Keil，不能把 VS Code/OpenOCD 调试视为可用。
+15. 新整理的主控板原理图参考尚未纳入版本库，并与旧接线说明/当前生成配置在 UART 方向、编码器 B 相命名和部分供电描述上存在待实物确认的差异。
 
 ## 9. 当前里程碑
 
@@ -148,3 +152,5 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 | 2026-07-21 | 增加 `AGENTS.md`、版本化预提交检查和启用脚本 | hook 拒绝/接受路径均验证通过，无固件功能变化 |
 | 2026-07-21 | 修复 Keil After Build 的旧电脑绝对路径和空 scatter 区域 | 3 个回归测试通过；ARM Compiler 6.22 全量构建 0 error、0 warning，AXF/HEX 生成成功 |
 | 2026-07-21 | 取消构建对 `pad_hex.py` 的强制依赖，保留脚本作为可选工具 | Keil ARM Compiler 6.22 全量构建 0 error、0 warning；AXF/标准 HEX 正常生成，日志无 After Build；无固件功能变化 |
+| 2026-07-21 | 使用当前 Keil 下载配置写入目标板 | 用户确认下载成功；仅证明下载链路可用，未据此确认固件运行或外设功能 |
+| 2026-07-21 | 阶段开发前基线复查 | Keil V6.22 全量构建 0 error、0 warning，3 个回归测试通过；确认 SysConfig、工具路径、调试配置和硬件资料仍有 M0 缺口 |
