@@ -26,6 +26,10 @@ Preserve unrelated user files and changes. In particular, never stage unrelated 
 
 - `pyserial` is an approved tool for serial-port discovery, communication, logging, and hardware acceptance.
 
+## Firmware download retries
+
+- If a command-line firmware download fails, retry the same command once without changing the method or configuration. If the second command-line attempt also fails, stop and ask the user to download manually; do not switch to GUI automation or continue trying variants.
+
 ## Workflow defaults
 
 - The user authorizes creation of isolated Git worktrees by default for planned implementation work. Do not ask for worktree consent again unless the target path or operation introduces a new material risk.
