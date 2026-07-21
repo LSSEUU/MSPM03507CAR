@@ -8,7 +8,7 @@
 
 - M0“工程基线”：完成。
 - M1“外设诊断”：完成。
-- M2“调度与安全”：软件实现完成；15 项主机回归和 Keil ARM Compiler 6.22 全量构建通过。2026-07-22 串口台架已验证周期调度、JY61P、灰度扫描、完整电机诊断和 UART 急停；OLED 运行期刷新会触发 WWDT 复位，且传感器/动作超时故障注入尚未执行，因此 M2 硬件验收未通过。
+- M2“调度与安全”：完成。18 项主机回归和 Keil ARM Compiler 6.22 正式构建通过；架空串口台架已验证周期调度、外设、完整电机诊断、急停、动作超时、JY61P 断开和受控 WWDT 复位，正式固件已恢复且不含故障注入入口。急停到 PWM 引脚归零的示波器测量留作 M7 复核。
 - 当前入口：`Source/main.c`；系统按 1 ms 时基调度 5/10/20/100 ms 任务，电机输出只能由 `System/safety.c` 仲裁。没有动作时保持两路电机制动。
 - 下一节点：M3“电机闭环”。尚未实现速度 PI、自动行驶、航向或循迹控制。
 - JY61P 已重新安装：TX 接 PA22，RX 不接。2026-07-22 当前固件被动复核持续收到有效角度帧且无校验/帧错误。
@@ -96,26 +96,28 @@ PA23/VREF+ 与 PA21/VREF− 在天猛星-64P 上通过 C44（1 µF）耦合，�
 | 编码器 | 手转 A count=1076/edge=1084，B count=-1041/edge=1041；电机联测两路边沿均增长 | 已上板 |
 | JY61P | 最终固件有效帧 41→89，yaw/pitch/roll 有效，checksum=0、frame=0 | 已上板 |
 | 灰度 ADC | 最终固件 `[3204,3200,3246,3249,68,73,74,74]`，span=3181、errors=0；此前连续四轮 span=3182–3189 | 已上板；标定/循迹属 M5 |
-| OLED | 启动初始化 ACK 正常；M2 运行期 `o` 刷新触发 WWDT0 复位 | 已上板；当前缺陷 |
+| OLED | 启动初始化 ACK 正常；4 字节后台刷新在首次 `t=2.7 s` 报告前完成，连续调度无复位 | 已上板 |
 | LED | 硬件无 MCU 可控状态 LED | 预期 `DEGRADED` |
 | HC-04 | UART0 接口已验证，模块无线透传未单独验收 | 未单独验证 |
 | M2 状态机/安全模型 | 主机 C 回归覆盖合法状态迁移、调度漏期、动作超时、陀螺仪超时、急停锁存、PWM 否决和仅回到 IDLE 的清故障 | 主机测试通过 |
-| M2 目标构建 | ARM Compiler 6.22：`Code=12938, RO-data=1570, RW-data=4, ZI-data=18996`，0 error、0 warning；AXF 230060 字节、HEX 40895 字节 | 已编译并上板 |
-| M2 串口台架 | `miss=0/0/0/0`；JY61P valid 持续增长且 errors=0；灰度 span=249/errors=0；急停锁存 `0x01` 且 PWM=0；完整电机测试 dEdgeA=1539、dEdgeB=1346；逐行 `s` 报告和 4 字节 OLED 刷新无复位 | 部分通过；剩余故障注入待验收 |
+| M2 目标构建 | ARM Compiler 6.22：`Code=12938, RO-data=1570, RW-data=4, ZI-data=18996`，0 error、0 warning；AXF 230068 字节、HEX 40895 字节 | 已编译并上板 |
+| M2 串口台架 | `miss=0/0/0/0`；急停 `0x01`、动作超时 `0x08`、JY61P 断开 `0x02`、停喂狗重启 `0x20` 均锁存且 PWM=0；完整电机测试 dEdgeA=1539、dEdgeB=1346；逐行报告和 OLED 刷新稳定 | 通过；物理响应延迟测量留作 M7 复核 |
 
-最新软件验证：17 项主机回归全部通过；Keil V6.22 全量构建 0 error、0 warning，尺寸见上表。完整 `s` 自检报告已改为 100 ms 周期逐行输出，OLED 后台刷新每步使用 4 字节数据包；实车连续报告、刷新和刷新后报告均保持 `IDLE`、`faults=0`、`miss=0/0/0/0`。M2 的已知运行期 WWDT0 缺陷已消除，但剩余故障注入未完成，因此尚不标记为完整硬件验收通过。
+最新软件验证：18 项主机回归全部通过；Keil V6.22 正式固件全量构建 0 error、0 warning，尺寸见上表。专用故障注入固件使用独立输出目录和仅测试宏，完成动作超时、JY61P 断开与停喂狗复位验收；随后重新下载正式固件，确认 `T/G/W` 均为未知命令、JY61P 恢复、系统为 `IDLE` 且故障为零。M2 软件、构建和架空串口台架验收完成，可进入 M3；示波器测量急停到 PWM 引脚归零的物理延迟保留为 M7 复核项。
 
 ## 6. 构建与仓库规则
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Mode Rebuild
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injection.ps1 [-Flash]
 ```
 
 - Keil 工程：`keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx`，ARM Compiler 6.22。
 - `Source/ti_msp_dl_config.c/.h` 是手工维护且由测试保护的冻结配置；仓库不保留 `.syscfg`，避免错误的 LaunchPad 配置覆盖当前载板。
 - 新克隆在仓库根目录运行 `scripts/setup_git_hooks.ps1`，启用要求同步 `STATE.md` 的 pre-commit hook。
-- `keil/Objects`、构建日志和临时下载日志不纳入版本控制。
+- `scripts/build_fault_injection.ps1` 从正式工程生成临时测试工程，仅测试构建加入 `M2_FAULT_INJECTION_TEST`，输出到 `keil/ObjectsFaultInjection`；正式 target 不含测试入口。
+- `keil/Objects`、`keil/ObjectsFaultInjection`、生成的临时工程、构建日志和下载日志不纳入版本控制。
 - 出现问题时先定位原因，只有高可能性时才修复；同一问题两次尝试仍失败就停止并总结，不盲目重试。
 
 ## 7. 已知风险与 M3 边界
@@ -124,6 +126,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Mode Rebu
 2. JY61P 已有有效帧时间戳和按动作声明的 250 ms 超时保护；校零、角度归一化和错误率窗口属于 M4。
 3. UART0 使用 RX/TX 中断环形缓冲；缓冲满会丢弃数据并计数。完整 `s` 报告已改为每 100 ms 最多输出一行，避免一次主循环内同步格式化和入队整份报告。OLED 仍是软件 I²C，运行期使用后台状态机和 4 字节数据包；总线恢复和时钟拉伸超时仍未实现。
 4. 早期 `o → v/c/s` 联合脚本把 `s` 同步报告导致的 WWDT0 复位误归因于 OLED。修复后连续两次 `s`、一次 OLED 刷新以及刷新后 `s` 均无复位；最终调度计数从 `3680/1840/920/184` 连续增长到 `6878/3439/1719/343`，全程 `faults=0`、`miss=0/0/0/0`。OLED 刷新计数在排队后首次 `t=2.7 s` 报告时已由 1 增至 2；当前 4 字节批量兼顾刷新速度和调度安全，不恢复到 128 字节整页阻塞路径。
-5. M2 的急停延迟尚缺示波器/逻辑分析仪实测；动作超时、传感器更新时间超时和受控停止喂狗也尚未执行故障注入。
+5. M2 故障注入已验证动作超时、JY61P 更新时间超时和受控停止喂狗；UART 急停到 PWM 引脚归零的物理延迟尚缺示波器/逻辑分析仪实测，留作 M7 平台验收复核。
 6. 编码器堵转/物理不合理跳变保护依赖 M3 的速度估计和目标速度，目前尚未实现。
 7. PA18 与载板蜂鸣器网络复用且是默认 BSL 输入；应用和板级配置均不得占用 PA18/PA19/PA20。

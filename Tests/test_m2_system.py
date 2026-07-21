@@ -82,6 +82,20 @@ class M2SystemTests(unittest.TestCase):
         self.assertIn("report_line", service)
         self.assertIn("Diagnostics_ServiceReport();", diagnostics)
 
+    def test_fault_injection_is_excluded_from_production_target(self):
+        project = (ROOT / "keil" /
+            "empty_LP_MSPM0G3507_nortos_keil.uvprojx").read_text(
+                encoding="utf-8")
+        diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
+            encoding="utf-8")
+        script = (ROOT / "scripts" / "build_fault_injection.ps1").read_text(
+            encoding="utf-8")
+
+        self.assertNotIn("M2_FAULT_INJECTION_TEST", project)
+        self.assertIn("#ifdef M2_FAULT_INJECTION_TEST", diagnostics)
+        self.assertIn("M2_FAULT_INJECTION_TEST", script)
+        self.assertIn("ObjectsFaultInjection", script)
+
 
 if __name__ == "__main__":
     unittest.main()

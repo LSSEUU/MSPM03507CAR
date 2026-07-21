@@ -40,6 +40,10 @@ static uint32_t gray_requested_scan_count;
 static bool report_pending;
 static uint8_t report_line;
 
+#ifdef M2_FAULT_INJECTION_TEST
+static bool fault_injection_stop_watchdog;
+#endif
+
 static void Diagnostics_Set(DiagPeripheral_t peripheral, DiagStatus_t status,
     uint32_t samples, uint32_t errors, const char *detail)
 {
@@ -287,12 +291,18 @@ void Diagnostics_Init(void)
     gray_print_pending = false;
     report_pending = false;
     report_line = 0U;
+#ifdef M2_FAULT_INJECTION_TEST
+    fault_injection_stop_watchdog = false;
+#endif
     Safety_StopMotor();
 }
 
 void Diagnostics_RunBootSelfTest(void)
 {
     debug_println("\r\n=== MSPM0 CAR M2 SCHEDULER + SAFETY ===");
+#ifdef M2_FAULT_INJECTION_TEST
+    debug_println("*** FAULT INJECTION BUILD - ZERO PWM TESTS ONLY ***");
+#endif
     debug_println("Boot self-test settling; motor output is safety-locked.");
     Diagnostics_PrintHelp();
 }
@@ -302,7 +312,33 @@ void Diagnostics_PrintHelp(void)
     debug_println("Commands: h=help s=status d=all e=encoder y=gyro q=grayscale");
     debug_println("          o=OLED pattern p/f=confirm l=LED c=comm m=motor A=arm");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
+#ifdef M2_FAULT_INJECTION_TEST
+    debug_println("TEST ONLY: T=action timeout G=gyro disconnect W=stop watchdog");
+#endif
 }
+
+#ifdef M2_FAULT_INJECTION_TEST
+static void Diagnostics_StartZeroPwmFaultTest(uint32_t now_ms,
+    uint32_t timeout_ms, uint32_t required_sensor_mask, const char *message)
+{
+    if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault()) {
+        debug_println("Fault test rejected: clear faults and return IDLE.");
+        return;
+    }
+    if (!SystemState_RequestRun()) {
+        debug_println("Fault test rejected: cannot enter RUN.");
+        return;
+    }
+    Safety_BeginAction(now_ms, timeout_ms, required_sensor_mask);
+    if (!Safety_RequestMotor(0, 0)) {
+        Safety_EndAction();
+        (void)SystemState_RequestIdle();
+        debug_println("Fault test rejected by safety layer.");
+        return;
+    }
+    debug_println(message);
+}
+#endif
 
 void Diagnostics_PrintReport(void)
 {
@@ -395,6 +431,22 @@ void Diagnostics_Poll(void)
             }
             break;
         case 'A': Diagnostics_StartMotorTest(now_ms); break;
+#ifdef M2_FAULT_INJECTION_TEST
+        case 'T':
+            Diagnostics_StartZeroPwmFaultTest(now_ms, 200U, 0U,
+                "TEST action timeout armed: zero PWM, expect fault 0x08.");
+            break;
+        case 'G':
+            Diagnostics_StartZeroPwmFaultTest(now_ms, 5000U,
+                SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO),
+                "TEST gyro dependency armed: zero PWM, expect fault 0x02 after disconnect.");
+            break;
+        case 'W':
+            Safety_StopMotor();
+            fault_injection_stop_watchdog = true;
+            debug_println("TEST watchdog service stopped: zero PWM, expect reset 0x20.");
+            break;
+#endif
         case 'x': case 'X':
             debug_println(Safety_ClearFaults(now_ms) ?
                 "Faults cleared; state=IDLE." : "Fault clear rejected."); break;
@@ -419,3 +471,10 @@ const DiagReport_t *Diagnostics_GetReports(void)
 {
     return reports;
 }
+
+#ifdef M2_FAULT_INJECTION_TEST
+bool Diagnostics_FaultInjectionStopWatchdog(void)
+{
+    return fault_injection_stop_watchdog;
+}
+#endif

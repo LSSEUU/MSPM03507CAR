@@ -3,6 +3,8 @@
 
 # ── Keil MDK 编译产物 ──
 keil/Objects/
+keil/ObjectsFaultInjection/
+keil/fault_injection.generated.uvprojx
 *.o
 *.d
 *.crf

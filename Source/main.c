@@ -111,7 +111,12 @@ int main(void)
             /* Reserved for M3/M4 motion and heading state machines. */
             Main_CompleteTask(SCHEDULER_TASK_20MS, started,
                               TASK_20MS_PERIOD_MS);
-            if (Scheduler_ConsumeHealthyWindow()) Watchdog_Service();
+            if (Scheduler_ConsumeHealthyWindow()) {
+#ifdef M2_FAULT_INJECTION_TEST
+                if (!Diagnostics_FaultInjectionStopWatchdog())
+#endif
+                    Watchdog_Service();
+            }
         }
 
         if (Scheduler_Take(SCHEDULER_TASK_100MS)) {
