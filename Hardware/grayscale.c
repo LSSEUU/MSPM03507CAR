@@ -14,18 +14,14 @@ static bool Gray_SetAD0(bool high)
         return true;
     }
 
-    /* PA23 is also VREF+ and the core board loads it with C33 (1 uF).
-     * Release the output and charge C33 through the internal pull-up instead
-     * of sourcing the capacitor with a push-pull edge that can brown out the
-     * target.  A diagnostic scan is intentionally slow but electrically safe. */
+    /* Tianmengxing-64P couples PA23/VREF+ to the undriven PA21/VREF- through
+     * C44 (1 uF).  Release AD0 and raise it through the internal pull-up so no
+     * push-pull edge is injected through that capacitor. */
     /* HIZ1 releases the pad only while the GPIO output latch is high. */
     DL_GPIO_setPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
     DL_GPIO_enableHiZ(GRAY_AD0_IOMUX);
     for (uint16_t elapsed = 0U; elapsed < GRAY_AD0_RISE_TIMEOUT_MS; elapsed++) {
-        if (DL_GPIO_readPins(GRAY_AD0_PORT, GRAY_AD0_PIN) != 0U) {
-            DL_GPIO_disableHiZ(GRAY_AD0_IOMUX);
-            return true;
-        }
+        if (DL_GPIO_readPins(GRAY_AD0_PORT, GRAY_AD0_PIN) != 0U) return true;
         delay_ms(1U);
     }
 
@@ -59,7 +55,7 @@ static bool Gray_SampleChannel(uint8_t ch)
 static uint8_t Gray_ScanAll(void)
 {
     uint8_t mask = 0U;
-    /* Read all even channels first, then all odd channels, so PA23/C33 only
+    /* Read all even channels first, then all odd channels, so PA23/C44 only
      * needs one slow low-to-high transition per complete eight-channel scan. */
     static const uint8_t scan_order[GRAYSCALE_CHANNEL_COUNT] = {
         0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U
@@ -88,11 +84,14 @@ void Grayscale_Init(void)
     for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++)
         Gray.debounce_cnt[i] = 0U;
 
-    DL_GPIO_initDigitalOutputFeatures(GRAY_AD0_IOMUX,
+    /* Enable the input buffer so the open-drain rise check reads the pad,
+     * then add HIZ1 to make a high output latch release the pin. */
+    DL_GPIO_initDigitalInputFeatures(GRAY_AD0_IOMUX,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_PULL_UP,
-        DL_GPIO_DRIVE_STRENGTH_LOW,
-        DL_GPIO_HIZ_ENABLE);
+        DL_GPIO_HYSTERESIS_ENABLE,
+        DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_enableHiZ(GRAY_AD0_IOMUX);
     DL_GPIO_initDigitalOutput(GRAY_AD1_IOMUX);
     DL_GPIO_initDigitalOutput(GRAY_AD2_IOMUX);
     DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN | GRAY_AD1_PIN | GRAY_AD2_PIN);

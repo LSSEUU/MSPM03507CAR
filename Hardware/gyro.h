@@ -1,7 +1,7 @@
 /*
  * gyro.h  —  JY61P 陀螺仪驱动 (UART2, 9600 baud)
  *
- * 硬件: JY61P TX → PA22 (UART2_RX), RX → PA21 (UART2_TX)
+ * 硬件: JY61P TX → PA22 (UART2_RX); PA21 保持高阻，不启用 UART2_TX
  * 数据: 角度输出模式, 每帧 11 字节, 自动发送
  */
 #ifndef GYRO_H

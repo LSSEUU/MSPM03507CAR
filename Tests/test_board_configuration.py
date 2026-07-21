@@ -47,11 +47,22 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         driver = (ROOT / "Hardware" / "grayscale.c").read_text(encoding="utf-8")
         self.assertNotIn("DL_ADC12_", config)
         self.assertIn("DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX", driver)
+        self.assertIn("DL_GPIO_initDigitalInputFeatures(GRAY_AD0_IOMUX", driver)
         self.assertIn("DL_GPIO_RESISTOR_NONE", driver)
-        self.assertIn("DL_GPIO_HIZ_ENABLE", driver)
+        self.assertIn("DL_GPIO_enableHiZ(GRAY_AD0_IOMUX)", driver)
         self.assertIn("DL_GPIO_RESISTOR_PULL_UP", driver)
         self.assertIn("0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U", driver)
         self.assertNotIn("GRAY D", driver)
+
+    def test_uart2_is_receive_only_to_release_pa21_vref_minus(self):
+        config = CONFIG_SOURCE.read_text(encoding="utf-8")
+        self.assertIn(".direction   = DL_UART_MAIN_DIRECTION_RX", config)
+        self.assertIn("DL_GPIO_initDigitalInputFeatures(GPIO_UART_2_TX_IOMUX", config)
+        self.assertNotIn(
+            "DL_GPIO_initPeripheralOutputFunction(\n"
+            "        GPIO_UART_2_TX_IOMUX",
+            config,
+        )
 
     def test_keil_target_uses_diagnostic_main_and_system_sources(self):
         root = ET.fromstring(PROJECT.read_text(encoding="utf-8"))

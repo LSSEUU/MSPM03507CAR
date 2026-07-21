@@ -112,7 +112,7 @@ static const DL_UART_Main_ClockConfig gUART_2ClockConfig = {
 
 static const DL_UART_Main_Config gUART_2Config = {
     .mode        = DL_UART_MAIN_MODE_NORMAL,
-    .direction   = DL_UART_MAIN_DIRECTION_TX_RX,
+    .direction   = DL_UART_MAIN_DIRECTION_RX,
     .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
     .parity      = DL_UART_MAIN_PARITY_NONE,
     .wordLength  = DL_UART_MAIN_WORD_LENGTH_8_BITS,
@@ -121,8 +121,14 @@ static const DL_UART_Main_Config gUART_2Config = {
 
 SYSCONFIG_WEAK void SYSCFG_DL_UART_2_init(void)
 {
-    DL_GPIO_initPeripheralOutputFunction(
-        GPIO_UART_2_TX_IOMUX, GPIO_UART_2_TX_IOMUX_FUNC);
+    /* Tianmengxing-64P fits C44 (1 uF) between PA21/VREF- and
+     * PA23/VREF+.  JY61P is receive-only, so leave PA21 undriven to avoid
+     * coupling UART TX edges into the grayscale AD0 address line. */
+    DL_GPIO_initDigitalInputFeatures(GPIO_UART_2_TX_IOMUX,
+        DL_GPIO_INVERSION_DISABLE,
+        DL_GPIO_RESISTOR_NONE,
+        DL_GPIO_HYSTERESIS_DISABLE,
+        DL_GPIO_WAKEUP_DISABLE);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_UART_2_RX_IOMUX, GPIO_UART_2_RX_IOMUX_FUNC);
 

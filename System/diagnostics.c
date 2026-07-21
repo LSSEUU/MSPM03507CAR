@@ -62,10 +62,12 @@ static void Diagnostics_RefreshReports(void)
         (gyro.valid_frames > 0U) ? "valid JY61P angle frames" : "no valid 0x55 0x53 frame");
 
     Diagnostics_Set(DIAG_GRAYSCALE,
-        gray_response_passed ? DIAG_STATUS_OK : DIAG_STATUS_DEGRADED,
+        (gray.error_count > 0U) ? DIAG_STATUS_FAULT :
+            (gray_response_passed ? DIAG_STATUS_OK : DIAG_STATUS_DEGRADED),
         gray.scan_count, gray.error_count,
-        gray_response_passed ? "operator-observed raw state change" :
-            "raw scan works; optical response needs operator");
+        (gray.error_count > 0U) ? "address/output scan error" :
+            (gray_response_passed ? "operator-observed raw state change" :
+                "raw scan works; optical response needs operator"));
 
     Diagnostics_Set(DIAG_OLED,
         !oled.present ? DIAG_STATUS_FAULT :
@@ -235,8 +237,8 @@ void Diagnostics_RunBootSelfTest(void)
     Motor_Stop();
     debug_println("\r\n=== MSPM0 CAR M1 DIAGNOSTICS ===");
     debug_println("Boot self-test: motor output is locked.");
-    /* Let serial sensors settle; grayscale scans stay operator-triggered while
-     * the PA23/VREF+ address-line conflict is being resolved. */
+    /* Let serial sensors settle; grayscale scans stay operator-triggered for
+     * the M1 black/white optical response check. */
     delay_ms(750U);
     Diagnostics_RefreshReports();
     Diagnostics_PrintReport();
