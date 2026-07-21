@@ -1,49 +1,80 @@
-/*
- * grayscale.c  —  八路灰度传感器 (数字模式 + 最小黑点过滤)
- */
+/* Eight-channel digital grayscale sensor selected through a 74HC4051. */
 #include "grayscale.h"
 
-#define GRAY_CH_SWITCH_DELAY  320U
+#define GRAY_CH_SWITCH_DELAY_CYCLES  320U
+#define GRAY_AD0_RISE_TIMEOUT_MS     200U
 
 Grayscale_t Gray;
 
-static void Gray_SetChannel(uint8_t ch)
+static bool Gray_SetAD0(bool high)
 {
-    if (ch & 0x01U) DL_GPIO_setPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
-    else            DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
+    if (!high) {
+        DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
+        DL_GPIO_disableHiZ(GRAY_AD0_IOMUX);
+        return true;
+    }
+
+    /* PA23 is also VREF+ and the core board loads it with C33 (1 uF).
+     * Release the output and charge C33 through the internal pull-up instead
+     * of sourcing the capacitor with a push-pull edge that can brown out the
+     * target.  A diagnostic scan is intentionally slow but electrically safe. */
+    /* HIZ1 releases the pad only while the GPIO output latch is high. */
+    DL_GPIO_setPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
+    DL_GPIO_enableHiZ(GRAY_AD0_IOMUX);
+    for (uint16_t elapsed = 0U; elapsed < GRAY_AD0_RISE_TIMEOUT_MS; elapsed++) {
+        if (DL_GPIO_readPins(GRAY_AD0_PORT, GRAY_AD0_PIN) != 0U) {
+            DL_GPIO_disableHiZ(GRAY_AD0_IOMUX);
+            return true;
+        }
+        delay_ms(1U);
+    }
+
+    return false;
+}
+
+static bool Gray_SetChannel(uint8_t ch)
+{
     if (ch & 0x02U) DL_GPIO_setPins(GRAY_AD1_PORT, GRAY_AD1_PIN);
     else            DL_GPIO_clearPins(GRAY_AD1_PORT, GRAY_AD1_PIN);
     if (ch & 0x04U) DL_GPIO_setPins(GRAY_AD2_PORT, GRAY_AD2_PIN);
     else            DL_GPIO_clearPins(GRAY_AD2_PORT, GRAY_AD2_PIN);
-    for (volatile uint32_t i = 0U; i < GRAY_CH_SWITCH_DELAY; i++) { __NOP(); }
-}
-
-static bool Gray_ReadOut(void)
-{
-    return (DL_GPIO_readPins(GRAY_OUT_PORT, GRAY_OUT_PIN) == 0U);
+    bool ad0_ok = Gray_SetAD0((ch & 0x01U) != 0U);
+    delay_cycles(GRAY_CH_SWITCH_DELAY_CYCLES);
+    return ad0_ok;
 }
 
 static bool Gray_SampleChannel(uint8_t ch)
 {
     uint8_t low_count = 0U;
-    Gray_SetChannel(ch);
-    for (uint8_t i = 0U; i < GRAY_SAMPLE_COUNT; i++)
-        if (Gray_ReadOut()) low_count++;
+    if (!Gray_SetChannel(ch)) {
+        Gray.error_count++;
+        return false;
+    }
+    for (uint8_t i = 0U; i < GRAY_SAMPLE_COUNT; i++) {
+        if (DL_GPIO_readPins(GRAY_OUT_PORT, GRAY_OUT_PIN) == 0U) low_count++;
+    }
     return (low_count > (GRAY_SAMPLE_COUNT / 2U));
 }
 
 static uint8_t Gray_ScanAll(void)
 {
     uint8_t mask = 0U;
-    for (uint8_t ch = 0U; ch < GRAYSCALE_CHANNEL_COUNT; ch++)
+    /* Read all even channels first, then all odd channels, so PA23/C33 only
+     * needs one slow low-to-high transition per complete eight-channel scan. */
+    static const uint8_t scan_order[GRAYSCALE_CHANNEL_COUNT] = {
+        0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U
+    };
+    for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++) {
+        uint8_t ch = scan_order[i];
         if (Gray_SampleChannel(ch)) mask |= (uint8_t)(1U << ch);
+    }
     return mask;
 }
 
 static uint8_t Gray_CountBits(uint8_t v)
 {
     uint8_t n = 0U;
-    while (v) { n++; v &= v - 1U; }
+    while (v) { n++; v &= (uint8_t)(v - 1U); }
     return n;
 }
 
@@ -51,22 +82,27 @@ void Grayscale_Init(void)
 {
     Gray.raw_state = Gray.filtered_state = 0U;
     Gray.position = 0;
-    Gray.min_bits = 3U;
+    Gray.min_bits = GRAY_MIN_LINE_BITS;
     Gray.scan_count = 0U;
     Gray.error_count = 0U;
     for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++)
         Gray.debounce_cnt[i] = 0U;
 
-    DL_GPIO_initDigitalOutput(GRAY_AD0_IOMUX);
+    DL_GPIO_initDigitalOutputFeatures(GRAY_AD0_IOMUX,
+        DL_GPIO_INVERSION_DISABLE,
+        DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_DRIVE_STRENGTH_LOW,
+        DL_GPIO_HIZ_ENABLE);
     DL_GPIO_initDigitalOutput(GRAY_AD1_IOMUX);
     DL_GPIO_initDigitalOutput(GRAY_AD2_IOMUX);
     DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN | GRAY_AD1_PIN | GRAY_AD2_PIN);
     DL_GPIO_enableOutput(GRAY_AD0_PORT, GRAY_AD0_PIN | GRAY_AD1_PIN | GRAY_AD2_PIN);
 
+    /* The installed module provides a thresholded digital OUT signal. */
     DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX,
         DL_GPIO_INVERSION_DISABLE,
-        DL_GPIO_RESISTOR_PULL_UP,
-        DL_GPIO_HYSTERESIS_DISABLE,
+        DL_GPIO_RESISTOR_NONE,
+        DL_GPIO_HYSTERESIS_ENABLE,
         DL_GPIO_WAKEUP_DISABLE);
 }
 
@@ -74,34 +110,29 @@ void Grayscale_Update(void)
 {
     uint8_t raw = Gray_ScanAll();
     Gray.scan_count++;
-
-    /* Preserve the electrical scan before confidence filtering for M1 diagnostics. */
     Gray.raw_state = raw;
 
-    /* 黑点太少 → 当作没有线 (过滤地板杂讯) */
-    if (Gray_CountBits(raw) < Gray.min_bits)
-        raw = 0U;
+    if (Gray_CountBits(raw) < Gray.min_bits) raw = 0U;
 
     for (uint8_t ch = 0U; ch < GRAYSCALE_CHANNEL_COUNT; ch++) {
         uint8_t mask       = (uint8_t)(1U << ch);
-        uint8_t raw_bit    = raw                    & mask;
-        uint8_t stable_bit = Gray.filtered_state    & mask;
+        uint8_t raw_bit    = raw & mask;
+        uint8_t stable_bit = Gray.filtered_state & mask;
         if (raw_bit == stable_bit) {
             Gray.debounce_cnt[ch] = 0U;
-        } else {
-            Gray.debounce_cnt[ch]++;
-            if (Gray.debounce_cnt[ch] >= GRAY_DEBOUNCE_COUNT) {
-                if (raw_bit) Gray.filtered_state |= mask;
-                else          Gray.filtered_state &= (uint8_t)(~mask);
-                Gray.debounce_cnt[ch] = 0U;
-            }
+        } else if (++Gray.debounce_cnt[ch] >= GRAY_DEBOUNCE_COUNT) {
+            if (raw_bit) Gray.filtered_state |= mask;
+            else         Gray.filtered_state &= (uint8_t)(~mask);
+            Gray.debounce_cnt[ch] = 0U;
         }
     }
 
-    int32_t wsum = 0; uint8_t cnt = 0U;
+    int32_t wsum = 0;
+    uint8_t cnt = 0U;
     for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++) {
         if (Gray.filtered_state & ((uint8_t)(1U << i))) {
-            wsum += (int32_t)i; cnt++;
+            wsum += (int32_t)i;
+            cnt++;
         }
     }
     Gray.position = (cnt > 0U) ? (wsum * GRAY_POSITION_SCALE) / (int32_t)cnt

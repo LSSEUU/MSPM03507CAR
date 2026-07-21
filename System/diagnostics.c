@@ -15,6 +15,9 @@
 static DiagReport_t reports[DIAG_PERIPHERAL_COUNT];
 static bool motor_test_passed;
 static bool oled_visual_passed;
+static bool gray_baseline_set;
+static bool gray_response_passed;
+static uint8_t gray_baseline_raw;
 
 static void Diagnostics_Set(DiagPeripheral_t peripheral, DiagStatus_t status,
     uint32_t samples, uint32_t errors, const char *detail)
@@ -58,8 +61,11 @@ static void Diagnostics_RefreshReports(void)
         gyro.valid_frames, gyro.checksum_errors + gyro.frame_errors,
         (gyro.valid_frames > 0U) ? "valid JY61P angle frames" : "no valid 0x55 0x53 frame");
 
-    Diagnostics_Set(DIAG_GRAYSCALE, DIAG_STATUS_DEGRADED,
-        gray.scan_count, gray.error_count, "raw scan works; optical response needs operator");
+    Diagnostics_Set(DIAG_GRAYSCALE,
+        gray_response_passed ? DIAG_STATUS_OK : DIAG_STATUS_DEGRADED,
+        gray.scan_count, gray.error_count,
+        gray_response_passed ? "operator-observed raw state change" :
+            "raw scan works; optical response needs operator");
 
     Diagnostics_Set(DIAG_OLED,
         !oled.present ? DIAG_STATUS_FAULT :
@@ -172,6 +178,19 @@ static void Diagnostics_PrintGyro(void)
         (double)s.sample.yaw, (double)s.sample.pitch, (double)s.sample.roll,
         (unsigned long)s.valid_frames, (unsigned long)s.rx_bytes,
         (unsigned long)s.checksum_errors, (unsigned long)s.frame_errors);
+    debug_print("GYRO raw=");
+    for (uint8_t i = 0U; i < s.recent_count; i++)
+        debug_printf("%02X", s.recent_bytes[i]);
+    debug_newline();
+}
+
+static void Diagnostics_ProbeGyroPins(void)
+{
+    GyroPinProbe_t probe;
+    Gyro_ProbePins(&probe);
+    debug_printf("GYRO PINS PA21 transitions=%lu level=%u; PA22 transitions=%lu level=%u\r\n",
+        (unsigned long)probe.pa21_transitions, probe.pa21_level,
+        (unsigned long)probe.pa22_transitions, probe.pa22_level);
 }
 
 static void Diagnostics_PrintGray(void)
@@ -179,9 +198,16 @@ static void Diagnostics_PrintGray(void)
     GrayscaleSnapshot_t s;
     Grayscale_Update();
     Grayscale_GetSnapshot(&s);
+    if (!gray_baseline_set) {
+        gray_baseline_raw = s.raw_state;
+        gray_baseline_set = true;
+    } else if (s.raw_state != gray_baseline_raw) {
+        gray_response_passed = true;
+    }
     debug_printf("GRAY raw=0x%02X filtered=0x%02X position=%ld scans=%lu errors=%lu\r\n",
         s.raw_state, s.filtered_state, (long)s.position,
         (unsigned long)s.scan_count, (unsigned long)s.error_count);
+    Diagnostics_RefreshReports();
 }
 
 static void Diagnostics_PrintCommunication(void)
@@ -198,6 +224,9 @@ void Diagnostics_Init(void)
     memset(reports, 0, sizeof(reports));
     motor_test_passed = false;
     oled_visual_passed = false;
+    gray_baseline_set = false;
+    gray_response_passed = false;
+    gray_baseline_raw = 0U;
     Motor_Stop();
 }
 
@@ -206,10 +235,9 @@ void Diagnostics_RunBootSelfTest(void)
     Motor_Stop();
     debug_println("\r\n=== MSPM0 CAR M1 DIAGNOSTICS ===");
     debug_println("Boot self-test: motor output is locked.");
-    for (uint16_t i = 0U; i < 75U; i++) {
-        if ((i % 2U) == 0U) Grayscale_Update();
-        delay_ms(10U);
-    }
+    /* Let serial sensors settle; grayscale scans stay operator-triggered while
+     * the PA23/VREF+ address-line conflict is being resolved. */
+    delay_ms(750U);
     Diagnostics_RefreshReports();
     Diagnostics_PrintReport();
     Diagnostics_PrintHelp();
@@ -217,8 +245,9 @@ void Diagnostics_RunBootSelfTest(void)
 
 void Diagnostics_PrintHelp(void)
 {
-    debug_println("Commands: h=help s=status d=all raw e=encoder y=gyro");
-    debug_println("          q=grayscale o=OLED test l=LED info c=comm m=motor test");
+    debug_println("Commands: h=help s=status d=all raw e=encoder y=gyro i=gyro pins");
+    debug_println("          q=grayscale o=OLED test p/f=OLED confirm l=LED info");
+    debug_println("          c=comm m=motor test");
     debug_println("          S or space=stop motor at any time");
 }
 
@@ -248,8 +277,17 @@ void Diagnostics_Poll(void)
             Diagnostics_PrintGray(); Diagnostics_PrintCommunication(); break;
         case 'e': case 'E': Diagnostics_PrintEncoder(); break;
         case 'y': case 'Y': Diagnostics_PrintGyro(); break;
+        case 'i': case 'I': Diagnostics_ProbeGyroPins(); break;
         case 'q': case 'Q': Diagnostics_PrintGray(); break;
         case 'o': case 'O': Diagnostics_OLEDTest(); break;
+        case 'p':
+            oled_visual_passed = true;
+            Diagnostics_RefreshReports();
+            debug_println("OLED OK: visual confirmation recorded."); break;
+        case 'f': case 'F':
+            oled_visual_passed = false;
+            Diagnostics_RefreshReports();
+            debug_println("OLED DEGRADED: visual confirmation cleared."); break;
         case 'l': case 'L':
             debug_printf("LED configured=%u errors=%lu; carrier LEDs are power-only.\r\n",
                 LED_GetConfiguredCount(), (unsigned long)LED_GetErrorCount()); break;

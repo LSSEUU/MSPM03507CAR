@@ -21,12 +21,22 @@ typedef struct {
     uint32_t valid_frames;
     uint32_t checksum_errors;
     uint32_t frame_errors;
+    uint8_t recent_count;
+    uint8_t recent_bytes[32];
 } GyroSnapshot_t;
+
+typedef struct {
+    uint32_t pa21_transitions;
+    uint32_t pa22_transitions;
+    uint8_t pa21_level;
+    uint8_t pa22_level;
+} GyroPinProbe_t;
 
 extern Gyro_t Gyro;
 
 void Gyro_Init(void);
 void Gyro_Update(void);     /* 每 5ms 调用 */
 void Gyro_GetSnapshot(GyroSnapshot_t *snapshot);
+void Gyro_ProbePins(GyroPinProbe_t *probe);
 
 #endif

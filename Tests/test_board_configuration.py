@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "Source" / "ti_msp_dl_config.h"
+CONFIG_SOURCE = ROOT / "Source" / "ti_msp_dl_config.c"
 PROJECT = ROOT / "keil" / "empty_LP_MSPM0G3507_nortos_keil.uvprojx"
 
 
@@ -32,6 +33,25 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         ]
         for invariant in expected:
             self.assertIn(invariant, header)
+
+    def test_bsl_and_swd_pins_are_not_reconfigured_by_application(self):
+        config = CONFIG_SOURCE.read_text(encoding="utf-8")
+        header = HEADER.read_text(encoding="utf-8")
+        combined = config + "\n" + header
+        # PA18 is the default BSL invocation pin; PA19/PA20 are SWDIO/SWCLK.
+        for pincm in ("IOMUX_PINCM40", "IOMUX_PINCM41", "IOMUX_PINCM42"):
+            self.assertNotIn(pincm, combined)
+
+    def test_grayscale_uses_safe_digital_diagnostic_mode(self):
+        config = CONFIG_SOURCE.read_text(encoding="utf-8")
+        driver = (ROOT / "Hardware" / "grayscale.c").read_text(encoding="utf-8")
+        self.assertNotIn("DL_ADC12_", config)
+        self.assertIn("DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX", driver)
+        self.assertIn("DL_GPIO_RESISTOR_NONE", driver)
+        self.assertIn("DL_GPIO_HIZ_ENABLE", driver)
+        self.assertIn("DL_GPIO_RESISTOR_PULL_UP", driver)
+        self.assertIn("0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U", driver)
+        self.assertNotIn("GRAY D", driver)
 
     def test_keil_target_uses_diagnostic_main_and_system_sources(self):
         root = ET.fromstring(PROJECT.read_text(encoding="utf-8"))

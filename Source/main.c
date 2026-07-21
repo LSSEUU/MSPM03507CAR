@@ -25,6 +25,7 @@ int main(void)
     Diagnostics_RunBootSelfTest();
 
     while (1) {
+        Gyro_Update();
         Diagnostics_Poll();
         delay_ms(5U);
     }

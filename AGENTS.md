@@ -25,5 +25,11 @@ Preserve unrelated user files and changes. In particular, never stage unrelated 
 ## Workflow defaults
 
 - The user authorizes creation of isolated Git worktrees by default for planned implementation work. Do not ask for worktree consent again unless the target path or operation introduces a new material risk.
+- Codex may use Git autonomously to manage in-scope repository changes. Create an intentional commit whenever a coherent implementation or verification milestone is complete.
 - After a design and implementation plan are approved, proceed directly with implementation when no genuine blocker or material user decision remains. Do not ask the user to choose an execution style merely as a formality.
 - Stop and ask only when required information cannot be discovered safely, a verification repeatedly fails, or proceeding would materially expand scope or risk.
+
+## Problem investigation limits
+
+- When a problem occurs, locate and document its probable cause before changing the implementation. Attempt a fix only when the evidence indicates a high probability that it addresses that cause.
+- If two attempted fixes do not solve the same problem, stop producing further experimental outputs or speculative changes. Summarize the evidence, attempted fixes, remaining cause boundary, and the next diagnostic decision instead of trying variants blindly.
