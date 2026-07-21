@@ -21,7 +21,8 @@
 
 | 功能 | MCU 引脚 | 当前配置/接线 |
 |---|---|---|
-| UART0 诊断 | PA10 TX / PA11 RX | 115200 8N1；独立 USB-UART 当前为 COM5；HC-04 尚未单独验收 |
+| UART0 诊断 | PA10 TX / PA11 RX | 115200 8N1；有线调试使用独立 USB-UART COM5；无线调试使用 ESP32 BLE UART 桥，HC-04 已退出当前接线 |
+| ESP32 BLE 调车器 | GPIO16 RX2 / GPIO17 TX2 | GPIO16←PA10，GPIO17→PA11，GND 共地；ESP32 使用移动电源 USB-C 或稳定 5 V→VIN，禁止原始电池电压直入 VIN |
 | JY61P | PA22 UART2_RX | 9600；JY61P TX→PA22，RX 不接 |
 | PA21 / VREF− | PA21 | 无上下拉高阻；不启用 UART2_TX，避免经 C44 耦合灰度 AD0 |
 | 电机 A PWM/方向 | PB3 / PA14 / PA13 | TIMA1 CCP1，4 kHz，比较值 0–999；AIN1/AIN2 |
@@ -94,6 +95,42 @@ M3 闭环诊断由 `j/k/b` 选择 A 轮、B 轮或双轮，再用大写 `A` 解�
 | `x/X` | 清除锁存故障并仅返回 `IDLE` |
 | `S` / 空格 | UART RX 中断级全局急停并进入 `FAULT` |
 
+### ESP32 BLE 无线调车器
+
+当前无线入口不是 Windows 虚拟 COM，而是 ESP32 提供的 BLE Nordic UART Service（NUS）。ESP32 已刷入 Arduino-ESP32 3.3.10 构建的桥接固件，BLE 名称为 `MSPM0-CAR`；车辆侧使用 UART2 GPIO16/17，以 115200 8N1 双向透传 UART0 诊断字节。电脑侧 Bluetooth 设备是 Realtek RTL8852BE，使用 ASUS/Realtek 驱动 `18.4032.2509.1900`；Microsoft 通用 `bth.inf` 在本机无法发现 Classic SPP 或 BLE 设备。
+
+| 方向 | 端点 | UUID / 接线 |
+|---|---|---|
+| 电脑→车辆 | BLE RX Write / Write Without Response | `6e400002-b5a3-f393-e0a9-e50e24dcca9e` → ESP32 GPIO17 TX2 → MSPM0 PA11 RX |
+| 车辆→电脑 | BLE TX Notify | MSPM0 PA10 TX → ESP32 GPIO16 RX2 → `6e400003-b5a3-f393-e0a9-e50e24dcca9e` |
+| 服务 | BLE NUS | `6e400001-b5a3-f393-e0a9-e50e24dcca9e` |
+| 电气参考 | GND | ESP32 GND 与 MSPM0 GND 必须共地；UART 均为 3.3 V 逻辑 |
+
+电脑端使用 Python `bleak` 按设备名扫描，不依赖配对或 COM 号；订阅 TX 通知后，把现有单字符诊断命令写入 RX 特征即可。最小调用方式：
+
+```python
+import asyncio
+from bleak import BleakClient, BleakScanner
+
+RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+
+async def command(value: bytes):
+    device = await BleakScanner.find_device_by_name("MSPM0-CAR", timeout=10)
+    if device is None:
+        raise RuntimeError("MSPM0-CAR not found")
+    received = bytearray()
+    async with BleakClient(device) as client:
+        await client.start_notify(TX, lambda _, data: received.extend(data))
+        await client.write_gatt_char(RX, value, response=False)
+        await asyncio.sleep(1)
+    return bytes(received)
+
+print(asyncio.run(command(b"h")).decode("utf-8", "replace"))
+```
+
+动作命令仍遵循固件原有的二次解锁和安全状态机，例如先写入测试选择字符，再单独写入大写 `A`；`S` 仍会在到达 MSPM0 UART RX ISR 后触发急停。BLE 不能替代物理断电手段，落地测试必须保证电池开关可立即触达。无线使用时断开 HC-04 和外置 CH340 的 TX/RX，避免多个发送端同时驱动 PA11；需要有线复核时可重新连接 COM5。
+
 ## 5. 功能与验证状态
 
 | 功能 | 当前证据 | 状态 |
@@ -107,7 +144,8 @@ M3 闭环诊断由 `j/k/b` 选择 A 轮、B 轮或双轮，再用大写 `A` 解�
 | 灰度 ADC | 最终固件 `[3204,3200,3246,3249,68,73,74,74]`，span=3181、errors=0；此前连续四轮 span=3182–3189 | 已上板；标定/循迹属 M5 |
 | OLED | 启动初始化 ACK 正常；4 字节后台刷新在首次 `t=2.7 s` 报告前完成，连续调度无复位 | 已上板 |
 | LED | 硬件无 MCU 可控状态 LED | 预期 `DEGRADED` |
-| HC-04 | UART0 接口已验证，模块无线透传未单独验收 | 未单独验证 |
+| ESP32 BLE 无线调车器 | BLE 名称 `MSPM0-CAR`，NUS 服务/收发特征可发现；安装后 `h/g/v` 完整双向透传，BLE MTU 517，719 字节/37 通知包无丢字，最终 `IDLE/faults=0`、`miss=0/0/0/0` | 已安装并验证 |
+| HC-04 | 已由 ESP32 BLE UART 桥替代，当前不接 UART0 | 停用 |
 | M2 状态机/安全模型 | 主机 C 回归覆盖合法状态迁移、调度漏期、动作超时、陀螺仪超时、急停锁存、PWM 否决和仅回到 IDLE 的清故障 | 主机测试通过 |
 | M2 目标构建 | ARM Compiler 6.22：`Code=12938, RO-data=1570, RW-data=4, ZI-data=18996`，0 error、0 warning；AXF 230068 字节、HEX 40895 字节 | 已编译并上板 |
 | M2 串口台架 | `miss=0/0/0/0`；急停 `0x01`、动作超时 `0x08`、JY61P 断开 `0x02`、停喂狗重启 `0x20` 均锁存且 PWM=0；完整电机测试 dEdgeA=1539、dEdgeB=1346；逐行报告和 OLED 刷新稳定 | 通过；物理响应延迟测量留作 M7 复核 |
@@ -116,6 +154,8 @@ M3 闭环诊断由 `j/k/b` 选择 A 轮、B 轮或双轮，再用大写 `A` 解�
 | M3 架空闭环 | 300 mm/s：A 单轮 1.54%、B 单轮 1.38%、双轮 A/B 1.53%/1.36%，各 35 个稳态样本且误差符号变化均为 0；无饱和、故障或漏期。A 轮 Kp `0.70→0.75→0.70` 独立调参和自动退出解锁通过 | 通过，M3 完成 |
 
 最新验证：21 项主机回归全部通过；Keil V6.22 M3 正式固件和 M2 隔离故障注入 target 全量构建均为 0 error、0 warning，正式固件尺寸见上表。用户手动下载后，COM5 已确认目标运行 M3；架空单轮/双轮闭环均满足 `<5%` 且无持续振荡，最终 Safety 为 `IDLE/faults=0`、调度 `miss=0/0/0/0`。完整证据见 `docs/2026-07-22-M3验证记录.md`。
+
+无线链路最新验证：ESP32-D0WD-V3 rev3.1 以 DIO/40 MHz Flash 配置运行 BLE NUS→UART2 桥；台架接线后先收到完整 375 字节/19 包 `h` 输出，安装并脱离电脑 USB 供电后再次收到 `h/g/v` 共 719 字节/37 包，BLE RSSI 约 -52 dBm、MTU 517。最终航向有效且已校准，Safety 为 `IDLE/faults=0`，PWM 为 0，调度 `miss=0/0/0/0`。
 
 ## 6. 构建与仓库规则
 
