@@ -37,6 +37,8 @@ static bool motor_diag_driving;
 static EncoderSnapshot_t motor_diag_before;
 static bool gray_print_pending;
 static uint32_t gray_requested_scan_count;
+static bool report_pending;
+static uint8_t report_line;
 
 static void Diagnostics_Set(DiagPeripheral_t peripheral, DiagStatus_t status,
     uint32_t samples, uint32_t errors, const char *detail)
@@ -283,6 +285,8 @@ void Diagnostics_Init(void)
     boot_started_ms = SystemTime_Now();
     motor_diag_state = MOTOR_DIAG_IDLE;
     gray_print_pending = false;
+    report_pending = false;
+    report_line = 0U;
     Safety_StopMotor();
 }
 
@@ -302,18 +306,40 @@ void Diagnostics_PrintHelp(void)
 
 void Diagnostics_PrintReport(void)
 {
-    Diagnostics_RefreshReports();
-    debug_println("--- SELF TEST ---");
-    for (uint8_t i = 0U; i < (uint8_t)DIAG_PERIPHERAL_COUNT; i++) {
-        debug_printf("%-10s %-8s samples=%lu errors=%lu %s\r\n",
-            Diag_PeripheralName((DiagPeripheral_t)i),
-            Diag_StatusName(reports[i].status),
-            (unsigned long)reports[i].sample_count,
-            (unsigned long)reports[i].error_count, reports[i].detail);
+    if (report_pending) {
+        debug_println("Status report already queued.");
+        return;
     }
-    debug_printf("OVERALL    %s\r\n", Diag_StatusName(
-        Diag_WorstStatus(reports, (uint8_t)DIAG_PERIPHERAL_COUNT)));
-    Diagnostics_PrintSafety();
+    Diagnostics_RefreshReports();
+    report_line = 0U;
+    report_pending = true;
+}
+
+static void Diagnostics_ServiceReport(void)
+{
+    uint8_t peripheral;
+    if (!report_pending) return;
+
+    if (report_line == 0U) {
+        debug_println("--- SELF TEST ---");
+    } else if (report_line <= (uint8_t)DIAG_PERIPHERAL_COUNT) {
+        peripheral = (uint8_t)(report_line - 1U);
+        debug_printf("%-10s %-8s samples=%lu errors=%lu %s\r\n",
+            Diag_PeripheralName((DiagPeripheral_t)peripheral),
+            Diag_StatusName(reports[peripheral].status),
+            (unsigned long)reports[peripheral].sample_count,
+            (unsigned long)reports[peripheral].error_count,
+            reports[peripheral].detail);
+    } else if (report_line ==
+               ((uint8_t)DIAG_PERIPHERAL_COUNT + 1U)) {
+        debug_printf("OVERALL    %s\r\n", Diag_StatusName(
+            Diag_WorstStatus(reports, (uint8_t)DIAG_PERIPHERAL_COUNT)));
+    } else {
+        Diagnostics_PrintSafety();
+        report_pending = false;
+        return;
+    }
+    report_line++;
 }
 
 void Diagnostics_Poll(void)
@@ -349,7 +375,7 @@ void Diagnostics_Poll(void)
         case 'o': case 'O':
             if (OLED_IsPresent()) {
                 OLED_ShowTestPattern();
-                debug_println("OLED refresh queued; wait about 7 s, then type p=pass or f=fail.");
+                debug_println("OLED refresh queued; wait about 2 s, then type p=pass or f=fail.");
             } else debug_println("OLED FAULT: no ACK.");
             break;
         case 'p': oled_visual_passed = true; break;
@@ -386,6 +412,7 @@ void Diagnostics_Task100ms(void)
         Diagnostics_PrintReport();
         if (!Safety_HasFault()) (void)SystemState_CompleteSelfTest(true);
     }
+    Diagnostics_ServiceReport();
 }
 
 const DiagReport_t *Diagnostics_GetReports(void)

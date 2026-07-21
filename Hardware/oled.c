@@ -7,6 +7,11 @@
 #define OLED_ADDRESS_PRIMARY       0x3CU
 #define OLED_ADDRESS_SECONDARY     0x3DU
 #define OLED_I2C_DELAY_CYCLES      80U
+#define OLED_REFRESH_CHUNK_BYTES    4U
+
+#if ((OLED_WIDTH % OLED_REFRESH_CHUNK_BYTES) != 0U)
+#error "OLED refresh chunk must divide the display width"
+#endif
 
 typedef enum {
     OLED_REFRESH_SET_PAGE = 0,
@@ -178,8 +183,8 @@ void OLED_Service(void)
         default:
             (void)OLED_WritePacket(0x40U,
                 &OLED_Buffer[(uint16_t)oled_refresh_page * OLED_WIDTH +
-                    oled_refresh_column], 1U);
-            oled_refresh_column++;
+                    oled_refresh_column], OLED_REFRESH_CHUNK_BYTES);
+            oled_refresh_column += OLED_REFRESH_CHUNK_BYTES;
             if (oled_refresh_column >= OLED_WIDTH) {
                 oled_refresh_column = 0U;
                 oled_refresh_page++;

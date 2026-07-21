@@ -64,8 +64,23 @@ class M2SystemTests(unittest.TestCase):
         self.assertIn("OLED_REFRESH_SET_PAGE", task)
         self.assertIn("OLED_REFRESH_WRITE_DATA", task)
         self.assertIn("OLED_Service();", main)
-        self.assertIn("oled_refresh_column], 1U);", task)
+        self.assertIn("#define OLED_REFRESH_CHUNK_BYTES    4U", oled)
+        self.assertIn("oled_refresh_column], OLED_REFRESH_CHUNK_BYTES);", task)
         self.assertNotIn(", OLED_WIDTH);", task)
+
+    def test_status_report_is_emitted_incrementally(self):
+        diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
+            encoding="utf-8")
+        queue = diagnostics.split("void Diagnostics_PrintReport(void)", 1)[1].split(
+            "static void Diagnostics_ServiceReport", 1)[0]
+        service = diagnostics.split(
+            "static void Diagnostics_ServiceReport(void)", 1)[1].split(
+            "void Diagnostics_Poll", 1)[0]
+
+        self.assertNotIn("for (", queue)
+        self.assertIn("report_pending = true", queue)
+        self.assertIn("report_line", service)
+        self.assertIn("Diagnostics_ServiceReport();", diagnostics)
 
 
 if __name__ == "__main__":
