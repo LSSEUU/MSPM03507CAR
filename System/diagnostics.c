@@ -4,6 +4,7 @@
 #include "encoder.h"
 #include "grayscale.h"
 #include "gyro.h"
+#include "heading.h"
 #include "led.h"
 #include "motor.h"
 #include "oled.h"
@@ -33,6 +34,19 @@ typedef enum {
     SPEED_DIAG_RAMP_DOWN
 } SpeedDiagState_t;
 
+typedef enum {
+    HEADING_DIAG_IDLE = 0,
+    HEADING_DIAG_ARMED,
+    HEADING_DIAG_RUNNING,
+    HEADING_DIAG_RAMP_DOWN
+} HeadingDiagState_t;
+
+typedef enum {
+    HEADING_DIAG_HOLD = 0,
+    HEADING_DIAG_TURN_POSITIVE,
+    HEADING_DIAG_TURN_NEGATIVE
+} HeadingDiagKind_t;
+
 #define SPEED_DIAG_LEFT_MASK  (1U << WHEEL_SPEED_LEFT)
 #define SPEED_DIAG_RIGHT_MASK (1U << WHEEL_SPEED_RIGHT)
 
@@ -60,6 +74,12 @@ static float speed_diag_error_sum[WHEEL_SPEED_COUNT];
 static float speed_diag_previous_error[WHEEL_SPEED_COUNT];
 static uint32_t speed_diag_samples[WHEEL_SPEED_COUNT];
 static uint16_t speed_diag_sign_changes[WHEEL_SPEED_COUNT];
+static HeadingDiagState_t heading_diag_state;
+static HeadingDiagKind_t heading_diag_kind;
+static uint32_t heading_diag_started_ms;
+static uint32_t heading_diag_deadline_ms;
+static float heading_diag_final_error_deg;
+static bool heading_diag_completed;
 
 #ifdef M2_FAULT_INJECTION_TEST
 static bool fault_injection_stop_watchdog;
@@ -217,6 +237,30 @@ static void Diagnostics_PrintGyro(void)
     }
     raw[s.recent_count * 2U] = '\0';
     debug_printf("GYRO raw=%s\r\n", raw);
+}
+
+static const char *Diagnostics_HeadingModeName(HeadingMode_t mode)
+{
+    if (mode == HEADING_MODE_HOLD) return "HOLD";
+    if (mode == HEADING_MODE_TURN) return "TURN";
+    return "IDLE";
+}
+
+static void Diagnostics_PrintHeading(void)
+{
+    HeadingSnapshot_t s;
+    Heading_GetSnapshot(&s);
+    debug_printf("HEADING valid=%u calibrated=%u calibrating=%u count=%lu mode=%s zero_x100=%ld yaw_x100=%ld rate_x100=%ld reference_x100=%ld target_x100=%ld error_x100=%ld complete=%u age=%lu\r\n",
+        s.valid, s.calibrated, s.calibrating,
+        (unsigned long)s.calibration_count,
+        Diagnostics_HeadingModeName(s.mode),
+        (long)Diagnostics_Round(s.zero_offset_deg * 100.0f),
+        (long)Diagnostics_Round(s.yaw_deg * 100.0f),
+        (long)Diagnostics_Round(s.yaw_rate_deg_s * 100.0f),
+        (long)Diagnostics_Round(s.reference_deg * 100.0f),
+        (long)Diagnostics_Round(s.target_deg * 100.0f),
+        (long)Diagnostics_Round(s.error_deg * 100.0f), s.complete,
+        (unsigned long)(SystemTime_Now() - s.last_update_ms));
 }
 
 static void Diagnostics_PrintGraySnapshot(void)
@@ -547,6 +591,133 @@ static void Diagnostics_AdjustSpeedGain(bool proportional, float delta,
     Diagnostics_PrintWheelSpeed();
 }
 
+static const char *Diagnostics_HeadingKindName(void)
+{
+    if (heading_diag_kind == HEADING_DIAG_HOLD) return "straight hold";
+    if (heading_diag_kind == HEADING_DIAG_TURN_POSITIVE) return "+90 turn";
+    return "-90 turn";
+}
+
+static void Diagnostics_ArmHeadingTest(HeadingDiagKind_t kind,
+                                       uint32_t now_ms)
+{
+    HeadingSnapshot_t heading_snapshot;
+    Heading_GetSnapshot(&heading_snapshot);
+    if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
+        (motor_diag_state != MOTOR_DIAG_IDLE) ||
+        (speed_diag_state != SPEED_DIAG_IDLE) ||
+        (heading_diag_state != HEADING_DIAG_IDLE)) {
+        debug_println("M4 test rejected: clear faults and return IDLE.");
+        return;
+    }
+    if (!heading_snapshot.calibrated) {
+        debug_println("M4 test rejected: keep car still and wait for calibration.");
+        return;
+    }
+    heading_diag_kind = kind;
+    heading_diag_state = HEADING_DIAG_ARMED;
+    heading_diag_deadline_ms = now_ms + DIAGNOSTIC_ARM_TIMEOUT_MS;
+    debug_printf("Place car safely for %s; type uppercase A within 10 s.\r\n",
+        Diagnostics_HeadingKindName());
+}
+
+static void Diagnostics_StartHeadingTest(uint32_t now_ms)
+{
+    bool started;
+    if ((heading_diag_state != HEADING_DIAG_ARMED) ||
+        SystemTime_Reached(now_ms, heading_diag_deadline_ms)) {
+        heading_diag_state = HEADING_DIAG_IDLE;
+        debug_println("M4 arm expired or not requested.");
+        return;
+    }
+    if (!SystemState_RequestRun()) {
+        heading_diag_state = HEADING_DIAG_IDLE;
+        debug_println("M4 test rejected: system is not IDLE.");
+        return;
+    }
+    if (heading_diag_kind == HEADING_DIAG_HOLD)
+        started = Heading_StartHold(HEADING_STRAIGHT_TEST_SPEED_MM_S);
+    else
+        started = Heading_StartTurn(
+            (heading_diag_kind == HEADING_DIAG_TURN_POSITIVE) ? 90.0f : -90.0f);
+    if (!started) {
+        (void)SystemState_RequestIdle();
+        heading_diag_state = HEADING_DIAG_IDLE;
+        debug_println("M4 start rejected: heading sample is not ready.");
+        return;
+    }
+    Safety_BeginAction(now_ms, HEADING_ACTION_TIMEOUT_MS,
+        SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO));
+    WheelSpeed_Enable();
+    heading_diag_started_ms = now_ms;
+    heading_diag_deadline_ms = now_ms +
+        ((heading_diag_kind == HEADING_DIAG_HOLD) ?
+            HEADING_STRAIGHT_TEST_DURATION_MS : HEADING_TURN_TIMEOUT_MS);
+    heading_diag_state = HEADING_DIAG_RUNNING;
+    debug_println("CSV: M4,time_ms,phase,mode,yaw_x100,rate_x100,target_x100,error_x100,targetL,targetR,rampL,rampR,speedL,speedR,pwmL,pwmR,faults");
+    debug_println("M4 test running; S/space is immediate emergency stop.");
+}
+
+static void Diagnostics_FinishHeadingTest(void)
+{
+    WheelSpeed_Disable();
+    Safety_EndAction();
+    (void)SystemState_RequestIdle();
+    debug_printf("M4 RESULT kind=%s elapsed=%lu error_x100=%ld complete=%u\r\n",
+        Diagnostics_HeadingKindName(),
+        (unsigned long)(SystemTime_Now() - heading_diag_started_ms),
+        (long)Diagnostics_Round(heading_diag_final_error_deg * 100.0f),
+        heading_diag_completed);
+    Heading_Stop();
+    heading_diag_state = HEADING_DIAG_IDLE;
+}
+
+static void Diagnostics_ServiceHeadingTest(uint32_t now_ms)
+{
+    HeadingSnapshot_t heading_snapshot;
+    WheelSpeedSnapshot_t speed_snapshot;
+    if (heading_diag_state == HEADING_DIAG_ARMED) {
+        if (SystemTime_Reached(now_ms, heading_diag_deadline_ms)) {
+            heading_diag_state = HEADING_DIAG_IDLE;
+            debug_println("M4 test arm timed out.");
+        }
+        return;
+    }
+    if ((heading_diag_state != HEADING_DIAG_RUNNING) &&
+        (heading_diag_state != HEADING_DIAG_RAMP_DOWN)) return;
+    if (Safety_HasFault()) {
+        Heading_Stop();
+        WheelSpeed_Disable();
+        heading_diag_state = HEADING_DIAG_IDLE;
+        debug_println("M4 test aborted by safety fault.");
+        return;
+    }
+    Heading_GetSnapshot(&heading_snapshot);
+    if ((heading_diag_state == HEADING_DIAG_RUNNING) &&
+        (((heading_diag_kind != HEADING_DIAG_HOLD) &&
+          heading_snapshot.complete) ||
+         SystemTime_Reached(now_ms, heading_diag_deadline_ms))) {
+        heading_diag_final_error_deg = heading_snapshot.error_deg;
+        heading_diag_completed = heading_snapshot.complete;
+        Heading_Stop();
+        WheelSpeed_SetTarget(0.0f, 0.0f);
+        Safety_BeginAction(now_ms, SPEED_DIAGNOSTIC_STOP_TIMEOUT_MS,
+            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO));
+        heading_diag_state = HEADING_DIAG_RAMP_DOWN;
+        heading_diag_deadline_ms = now_ms + SPEED_DIAGNOSTIC_STOP_TIMEOUT_MS;
+        return;
+    }
+    if (heading_diag_state != HEADING_DIAG_RAMP_DOWN) return;
+    WheelSpeed_GetSnapshot(&speed_snapshot);
+    if (((Diagnostics_Abs(speed_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]) < 0.5f) &&
+         (Diagnostics_Abs(speed_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]) < 0.5f) &&
+         (Diagnostics_Abs(speed_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]) < 20.0f) &&
+         (Diagnostics_Abs(speed_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]) < 20.0f)) ||
+        SystemTime_Reached(now_ms, heading_diag_deadline_ms)) {
+        Diagnostics_FinishHeadingTest();
+    }
+}
+
 void Diagnostics_Init(void)
 {
     memset(reports, 0, sizeof(reports));
@@ -563,6 +734,9 @@ void Diagnostics_Init(void)
     speed_diag_wheel_mask = SPEED_DIAG_LEFT_MASK |
                             SPEED_DIAG_RIGHT_MASK;
     speed_diag_target_mm_s = SPEED_DIAGNOSTIC_DEFAULT_MM_S;
+    heading_diag_state = HEADING_DIAG_IDLE;
+    heading_diag_final_error_deg = 0.0f;
+    heading_diag_completed = false;
     Diagnostics_ResetSpeedMetrics();
 #ifdef M2_FAULT_INJECTION_TEST
     fault_injection_stop_watchdog = false;
@@ -572,7 +746,7 @@ void Diagnostics_Init(void)
 
 void Diagnostics_RunBootSelfTest(void)
 {
-    debug_println("\r\n=== MSPM0 CAR M3 DUAL WHEEL SPEED CONTROL ===");
+    debug_println("\r\n=== MSPM0 CAR M4 HEADING CONTROL ===");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("*** FAULT INJECTION BUILD - ZERO PWM TESTS ONLY ***");
 #endif
@@ -586,6 +760,7 @@ void Diagnostics_PrintHelp(void)
     debug_println("          o=OLED pattern p/f=confirm l=LED c=comm m=motor A=arm");
     debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
     debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
+    debug_println("          g=heading z=calibrate u=+90 i=-90 w=straight; A=arm");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("TEST ONLY: T=action timeout G=gyro disconnect W=stop watchdog");
@@ -659,6 +834,7 @@ void Diagnostics_Poll(void)
     GrayscaleSnapshot_t gray;
     Diagnostics_ServiceMotorTest(now_ms);
     Diagnostics_ServiceSpeedTest(now_ms);
+    Diagnostics_ServiceHeadingTest(now_ms);
 
     if (gray_print_pending) {
         Grayscale_GetSnapshot(&gray);
@@ -678,6 +854,21 @@ void Diagnostics_Poll(void)
             Diagnostics_PrintWheelSpeed(); Diagnostics_PrintSafety(); break;
         case 'e': case 'E': Diagnostics_PrintEncoder(); break;
         case 'y': case 'Y': Diagnostics_PrintGyro(); break;
+        case 'g': Diagnostics_PrintHeading(); break;
+        case 'z':
+            if ((SystemState_Get() == SYSTEM_STATE_IDLE) &&
+                !Safety_HasFault() &&
+                (heading_diag_state == HEADING_DIAG_IDLE)) {
+                Heading_StartCalibration();
+                debug_println("M4 calibration started: keep car still for 20 samples.");
+            } else debug_println("M4 calibration rejected: return to IDLE.");
+            break;
+        case 'u': case 'U':
+            Diagnostics_ArmHeadingTest(HEADING_DIAG_TURN_POSITIVE, now_ms); break;
+        case 'i': case 'I':
+            Diagnostics_ArmHeadingTest(HEADING_DIAG_TURN_NEGATIVE, now_ms); break;
+        case 'w':
+            Diagnostics_ArmHeadingTest(HEADING_DIAG_HOLD, now_ms); break;
         case 'q': case 'Q':
             Grayscale_GetSnapshot(&gray);
             gray_requested_scan_count = gray.scan_count;
@@ -716,7 +907,8 @@ void Diagnostics_Poll(void)
         case 'm': case 'M':
             if ((SystemState_Get() != SYSTEM_STATE_IDLE) ||
                 Safety_HasFault() ||
-                (speed_diag_state != SPEED_DIAG_IDLE)) {
+                (speed_diag_state != SPEED_DIAG_IDLE) ||
+                (heading_diag_state != HEADING_DIAG_IDLE)) {
                 debug_println("Motor test rejected: clear faults and return IDLE.");
             } else {
                 motor_diag_state = MOTOR_DIAG_ARMED;
@@ -725,7 +917,9 @@ void Diagnostics_Poll(void)
             }
             break;
         case 'A':
-            if (speed_diag_state == SPEED_DIAG_ARMED)
+            if (heading_diag_state == HEADING_DIAG_ARMED)
+                Diagnostics_StartHeadingTest(now_ms);
+            else if (speed_diag_state == SPEED_DIAG_ARMED)
                 Diagnostics_StartSpeedTest(now_ms);
             else
                 Diagnostics_StartMotorTest(now_ms);
@@ -751,6 +945,8 @@ void Diagnostics_Poll(void)
             if (Safety_ClearFaults(now_ms)) {
                 WheelSpeed_ClearFaults();
                 speed_diag_state = SPEED_DIAG_IDLE;
+                Heading_Stop();
+                heading_diag_state = HEADING_DIAG_IDLE;
                 motor_diag_state = MOTOR_DIAG_IDLE;
                 debug_println("Faults cleared; state=IDLE.");
             } else {
@@ -823,6 +1019,32 @@ void Diagnostics_Task100ms(void)
                     speed_diag_previous_error[i] = error;
             }
         }
+    }
+    if ((heading_diag_state == HEADING_DIAG_RUNNING) ||
+        (heading_diag_state == HEADING_DIAG_RAMP_DOWN)) {
+        HeadingSnapshot_t heading_snapshot;
+        SafetySnapshot_t safety_snapshot;
+        Heading_GetSnapshot(&heading_snapshot);
+        Safety_GetSnapshot(&safety_snapshot);
+        WheelSpeedSnapshot_t wheel_snapshot;
+        WheelSpeed_GetSnapshot(&wheel_snapshot);
+        debug_printf("M4,%lu,%s,%s,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,0x%08lX\r\n",
+            (unsigned long)now_ms,
+            (heading_diag_state == HEADING_DIAG_RUNNING) ? "RUN" : "STOP",
+            Diagnostics_HeadingModeName(heading_snapshot.mode),
+            (long)Diagnostics_Round(heading_snapshot.yaw_deg * 100.0f),
+            (long)Diagnostics_Round(heading_snapshot.yaw_rate_deg_s * 100.0f),
+            (long)Diagnostics_Round(heading_snapshot.target_deg * 100.0f),
+            (long)Diagnostics_Round(heading_snapshot.error_deg * 100.0f),
+            (long)Diagnostics_Round(heading_snapshot.left_target_mm_s),
+            (long)Diagnostics_Round(heading_snapshot.right_target_mm_s),
+            (long)Diagnostics_Round(wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
+            (long)Diagnostics_Round(wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+            (long)Diagnostics_Round(wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
+            (long)Diagnostics_Round(wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
+            wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
+            wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
+            (unsigned long)safety_snapshot.fault_bits);
     }
 }
 

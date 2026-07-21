@@ -519,6 +519,11 @@
               <FileType>1</FileType>
               <FilePath>../Control/wheel_speed.c</FilePath>
             </File>
+            <File>
+              <FileName>heading.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/heading.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>

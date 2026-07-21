@@ -4,6 +4,7 @@
 #include "encoder.h"
 #include "grayscale.h"
 #include "gyro.h"
+#include "heading.h"
 #include "led.h"
 #include "motor.h"
 #include "oled.h"
@@ -49,6 +50,7 @@ int main(void)
     debug_set_emergency_callback(Main_EmergencyStopCallback);
     Encoder_Init();
     WheelSpeed_Init();
+    Heading_Init();
     Grayscale_Init();
     Gyro_Init();
     LED_Init();
@@ -138,7 +140,16 @@ int main(void)
 
         if (Scheduler_Take(SCHEDULER_TASK_20MS)) {
             uint32_t started = SystemTime_Now();
-            /* Reserved for M3/M4 motion and heading state machines. */
+            GyroSnapshot_t gyro;
+            HeadingSnapshot_t heading;
+
+            Gyro_GetSnapshot(&gyro);
+            Heading_Update(gyro.sample.yaw, gyro.valid_frames, started);
+            Heading_GetSnapshot(&heading);
+            if (heading.mode != HEADING_MODE_IDLE) {
+                WheelSpeed_SetTarget(heading.left_target_mm_s,
+                                     heading.right_target_mm_s);
+            }
             Main_CompleteTask(SCHEDULER_TASK_20MS, started,
                               TASK_20MS_PERIOD_MS);
             if (Scheduler_ConsumeHealthyWindow()) {
