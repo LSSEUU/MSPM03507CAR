@@ -43,6 +43,8 @@ desktop.ini
 # ── 其它 ──
 *.tmp
 *.log
+__pycache__/
+*.py[cod]
 
 # Codex isolated implementation worktrees
 /.worktrees/

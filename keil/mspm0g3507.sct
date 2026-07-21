@@ -42,7 +42,6 @@ LR_IROM1 0x00000000 0x00020000  {    ; load region size_region
    .ANY (+RO)
    .ANY (+XO)
   }
-  ER_IROM1_PAD +0 ALIGN 8 { }  ; 强制 8 字节对齐
   RW_IRAM2 0x20200000 0x00008000  {  ; RW data
    .ANY (+RW +ZI)
    .ANY (.ramfunc)

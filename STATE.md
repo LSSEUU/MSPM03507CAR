@@ -108,9 +108,11 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 
 - 目标工程：`keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx`。
 - 工程包含当前 `Source/`、`Hardware/` 和 `Control/` 业务源文件。
-- 仓库脚本期望 Keil 位于 `C:\Keil_v5\UV4\UV4.exe`。
-- 2026-07-21 检查时，本机该路径不存在。
-- 仓库内没有 AXF、HEX、MAP 或成功构建日志。
+- 当前 Keil 位于 `C:\Users\Administrator\AppData\Local\Keil_v5`，目标编译器为 ARM Compiler 6.22。
+- 2026-07-21 使用 Keil 全量构建成功：0 error、0 warning；生成 AXF 149156 字节、HEX 24314 字节。
+- After Build 使用工程相对路径调用 `pad_hex.py`，脚本自动定位 `fromelf.exe`，8 字节对齐检查和 HEX 重写均成功。
+- `python -m unittest discover -s Tests -v` 的 3 个 Keil 可移植性回归测试全部通过。
+- `keil/Objects/` 和 `keil/build.log` 属于忽略的本机构建产物，不提交到仓库。
 - 2026-07-21 使用 MinGW GCC 对 13 个业务和配置 C 文件执行 `-fsyntax-only`，全部返回 0；这不等价于 ARM/Keil 完整构建。
 - 接线说明记录电机正反转、PWM 调速和 HC-04 透传已验证；编码器数值仍标记为待验证。
 
@@ -127,6 +129,7 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 9. `Source/empty.syscfg` 与生成的 `ti_msp_dl_config.c/.h` 不足以证明配置可安全重新生成，存在覆盖风险。
 10. 接线说明内部存在冲突：文字表使用编码器 B 的 PB8/PB9，示意图曾写 PB4/PB5；灰度 PA25 在文档中写 ADC，而当前代码按数字输入读取。
 11. 没有传感器超时、堵转、任务超期、急停优先级和看门狗闭环。
+12. `scripts/build.bat` 和 VS Code 构建任务仍假定 Keil 位于 `C:\Keil_v5`，尚未适配当前用户目录安装路径。
 
 ## 9. 当前里程碑
 
@@ -140,6 +143,7 @@ UART0 参数：115200、8 数据位、无校验、1 停止位。
 |---|---|---|
 | 2026-07-21 | 检查工程结构、调用关系、引脚配置和 Keil 收录文件 | 完成，只读分析 |
 | 2026-07-21 | MinGW GCC 对全部 13 个 C 文件执行语法检查 | 全部通过，仅代表语法层面 |
-| 2026-07-21 | 检查本机 Keil 和仓库构建产物 | 未发现 Keil 指定路径及 AXF/HEX |
+| 2026-07-21 | 检查旧默认路径 `C:\Keil_v5` 和当时的仓库产物 | 旧默认路径及仓库内 AXF/HEX 不存在，随后定位到当前用户目录安装 |
 | 2026-07-21 | 将旧状态说明迁移为 `STATE.md` | 文档迁移，无固件功能变化 |
 | 2026-07-21 | 增加 `AGENTS.md`、版本化预提交检查和启用脚本 | hook 拒绝/接受路径均验证通过，无固件功能变化 |
+| 2026-07-21 | 修复 Keil After Build 的旧电脑绝对路径和空 scatter 区域 | 3 个回归测试通过；ARM Compiler 6.22 全量构建 0 error、0 warning，AXF/HEX 生成成功 |
