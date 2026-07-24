@@ -1,32 +1,30 @@
 #ifndef REMOTE_CONFIG_H
 #define REMOTE_CONFIG_H
 
-/* Stage-one production gate. Set to 1 only after all 17 keys have been
- * captured on the actual handset and the address/command table below has
- * been reconciled with that evidence. Host application tests override it. */
+/* All 17 keys were captured from the actual handset on 2026-07-24. */
 #ifndef IR_REMOTE_KEYMAP_VERIFIED
-#define IR_REMOTE_KEYMAP_VERIFIED              0
+#define IR_REMOTE_KEYMAP_VERIFIED              1
 #endif
 
-/* Provisional KEYES 17-key NEC values; not yet hardware-verified. */
+/* Measured KEYES 17-key NEC command bytes, address 0x00. */
 #define IR_REMOTE_EXPECTED_ADDRESS          0x00U
-#define IR_REMOTE_KEY_UP                    0x62U
-#define IR_REMOTE_KEY_DOWN                  0xA8U
-#define IR_REMOTE_KEY_LEFT                  0x22U
-#define IR_REMOTE_KEY_RIGHT                 0xC2U
-#define IR_REMOTE_KEY_OK                    0x02U
-#define IR_REMOTE_KEY_STAR                  0x98U
-#define IR_REMOTE_KEY_HASH                  0xB0U
-#define IR_REMOTE_KEY_0                     0x68U
-#define IR_REMOTE_KEY_1                     0x30U
-#define IR_REMOTE_KEY_2                     0x18U
-#define IR_REMOTE_KEY_3                     0x7AU
-#define IR_REMOTE_KEY_4                     0x10U
-#define IR_REMOTE_KEY_5                     0x38U
-#define IR_REMOTE_KEY_6                     0x5AU
-#define IR_REMOTE_KEY_7                     0x42U
-#define IR_REMOTE_KEY_8                     0x4AU
-#define IR_REMOTE_KEY_9                     0x52U
+#define IR_REMOTE_KEY_UP                    0x18U
+#define IR_REMOTE_KEY_DOWN                  0x52U
+#define IR_REMOTE_KEY_LEFT                  0x08U
+#define IR_REMOTE_KEY_RIGHT                 0x5AU
+#define IR_REMOTE_KEY_OK                    0x1CU
+#define IR_REMOTE_KEY_STAR                  0x16U
+#define IR_REMOTE_KEY_HASH                  0x0DU
+#define IR_REMOTE_KEY_0                     0x19U
+#define IR_REMOTE_KEY_1                     0x45U
+#define IR_REMOTE_KEY_2                     0x46U
+#define IR_REMOTE_KEY_3                     0x47U
+#define IR_REMOTE_KEY_4                     0x44U
+#define IR_REMOTE_KEY_5                     0x40U
+#define IR_REMOTE_KEY_6                     0x43U
+#define IR_REMOTE_KEY_7                     0x07U
+#define IR_REMOTE_KEY_8                     0x15U
+#define IR_REMOTE_KEY_9                     0x09U
 
 #define IR_REMOTE_SPEED_LOW_MM_S             100U
 #define IR_REMOTE_SPEED_DEFAULT_MM_S         160U

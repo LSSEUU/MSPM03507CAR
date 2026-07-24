@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -39,7 +40,20 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("IOMUX_PINCM22_PF_UART0_RX", header)
         self.assertIn("IOMUX_PINCM47_PF_UART2_RX", header)
         self.assertIn("IOMUX_PINCM15_PF_TIMA1_CCP0", header)
-        self.assertIn("#define IR_REMOTE_KEYMAP_VERIFIED              0", remote_config)
+        self.assertIn("#define IR_REMOTE_KEYMAP_VERIFIED              1", remote_config)
+        measured_keys = {
+            "UP": "0x18U", "DOWN": "0x52U", "LEFT": "0x08U",
+            "RIGHT": "0x5AU", "OK": "0x1CU", "STAR": "0x16U",
+            "HASH": "0x0DU", "0": "0x19U", "1": "0x45U",
+            "2": "0x46U", "3": "0x47U", "4": "0x44U",
+            "5": "0x40U", "6": "0x43U", "7": "0x07U",
+            "8": "0x15U", "9": "0x09U",
+        }
+        for key, command in measured_keys.items():
+            self.assertRegex(
+                remote_config,
+                rf"(?m)^#define\s+IR_REMOTE_KEY_{re.escape(key)}\s+{re.escape(command)}$",
+            )
         self.assertIn("ir_phase_level_high = !ir_phase_level_high", receiver)
         self.assertNotIn(
             "bool level_high = (DL_GPIO_readPins", receiver

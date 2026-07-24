@@ -143,7 +143,10 @@ void debug_println(const char *text) { (void)text; }
 
 static void test_four_directions_and_heartbeat(void)
 {
-    static const uint8_t commands[] = { 0x62U, 0xA8U, 0x22U, 0xC2U };
+    static const uint8_t commands[] = {
+        IR_REMOTE_KEY_UP, IR_REMOTE_KEY_DOWN,
+        IR_REMOTE_KEY_LEFT, IR_REMOTE_KEY_RIGHT
+    };
     static const float left[] = { 160.0f, -160.0f, -160.0f, 160.0f };
     static const float right[] = { 160.0f, -160.0f, 160.0f, -160.0f };
     uint32_t i;
@@ -161,11 +164,11 @@ static void test_four_directions_and_heartbeat(void)
     }
 
     reset_fixture();
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x62U, 10U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_UP, 10U);
     AppRemote_Poll();
     AppRemote_Task20ms(259U);
     assert(test_wheel_enabled);
-    inject(IR_NEC_EVENT_REPEAT, 0x00U, 0x62U, 260U);
+    inject(IR_NEC_EVENT_REPEAT, 0x00U, IR_REMOTE_KEY_UP, 260U);
     AppRemote_Poll();
     AppRemote_Task20ms(509U);
     assert(test_wheel_enabled);
@@ -178,31 +181,31 @@ static void test_speed_demo_confirmation_and_cancel(void)
 {
     AppRemoteSnapshot_t snapshot;
     reset_fixture();
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x98U, 1U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_STAR, 1U);
     AppRemote_Poll();
     AppRemote_GetSnapshot(&snapshot);
     assert(snapshot.speed_mm_s == 100U);
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0xB0U, 2U);
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0xB0U, 3U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_HASH, 2U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_HASH, 3U);
     AppRemote_Poll();
     AppRemote_GetSnapshot(&snapshot);
     assert(snapshot.speed_mm_s == 220U);
 
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x30U, 10U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_1, 10U);
     AppRemote_Poll();
     AppRemote_GetSnapshot(&snapshot);
     assert(snapshot.state == APP_REMOTE_PENDING_DEMO);
     assert(test_arm_calls == 1U);
     assert(test_last_action == DIAGNOSTICS_ACTION_STRAIGHT);
-    inject(IR_NEC_EVENT_REPEAT, 0x00U, 0x02U, 20U);
+    inject(IR_NEC_EVENT_REPEAT, 0x00U, IR_REMOTE_KEY_OK, 20U);
     AppRemote_Poll();
     assert(test_confirm_calls == 0U);
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x02U, 30U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_OK, 30U);
     AppRemote_Poll();
     assert(test_confirm_calls == 1U);
     AppRemote_GetSnapshot(&snapshot);
     assert(snapshot.state == APP_REMOTE_DEMO_RUNNING);
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x68U, 40U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_0, 40U);
     AppRemote_Poll();
     assert(test_cancel_calls == 1U);
     assert(test_system_state == SYSTEM_STATE_IDLE);
@@ -212,19 +215,19 @@ static void test_conflicts_capture_fault_and_address_filter(void)
 {
     AppRemoteSnapshot_t snapshot;
     reset_fixture();
-    inject(IR_NEC_EVENT_FULL, 0x01U, 0x62U, 1U);
+    inject(IR_NEC_EVENT_FULL, 0x01U, IR_REMOTE_KEY_UP, 1U);
     AppRemote_Poll();
     AppRemote_GetSnapshot(&snapshot);
     assert(snapshot.address_rejects == 1U);
     assert(!test_wheel_enabled);
 
     test_fault = true;
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x62U, 2U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_UP, 2U);
     AppRemote_Poll();
     assert(!test_wheel_enabled);
     test_fault = false;
     assert(AppRemote_StartCapture(10U));
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x62U, 11U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_UP, 11U);
     AppRemote_Poll();
     AppRemote_GetSnapshot(&snapshot);
     assert(snapshot.state == APP_REMOTE_CAPTURE);
@@ -239,14 +242,14 @@ static void test_production_keymap_gate(void)
 {
     AppRemoteSnapshot_t snapshot;
     reset_fixture();
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x62U, 1U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_UP, 1U);
     AppRemote_Poll();
     AppRemote_GetSnapshot(&snapshot);
     assert(!snapshot.actions_enabled);
     assert(snapshot.state == APP_REMOTE_IDLE);
     assert(!test_wheel_enabled);
     assert(AppRemote_StartCapture(10U));
-    inject(IR_NEC_EVENT_FULL, 0x00U, 0x62U, 11U);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_UP, 11U);
     AppRemote_Poll();
     AppRemote_GetSnapshot(&snapshot);
     assert(snapshot.captured_keys == 1U);
