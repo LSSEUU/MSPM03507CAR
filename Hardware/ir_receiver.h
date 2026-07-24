@@ -10,6 +10,13 @@ typedef struct {
     IrNecStats_t nec;
     uint32_t queue_overflow;
     uint32_t queued_events;
+    uint32_t capture_edges;
+    uint32_t capture_high_edges;
+    uint32_t capture_low_edges;
+    uint16_t capture_min_ticks;
+    uint16_t capture_max_ticks;
+    uint16_t capture_last_ticks;
+    bool pin_high;
 } IrReceiverStats_t;
 
 void IrReceiver_Init(void);

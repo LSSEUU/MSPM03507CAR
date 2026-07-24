@@ -350,6 +350,12 @@ static void Diagnostics_PrintInfrared(void)
         (unsigned long)receiver.queued_events,
         receiver.nec.last_address, receiver.nec.last_command,
         (unsigned long)receiver.nec.last_raw);
+    debug_printf("IR EDGE count=%lu high=%lu low=%lu ticks=%u/%u/%u pin=%u\r\n",
+        (unsigned long)receiver.capture_edges,
+        (unsigned long)receiver.capture_high_edges,
+        (unsigned long)receiver.capture_low_edges,
+        receiver.capture_min_ticks, receiver.capture_max_ticks,
+        receiver.capture_last_ticks, receiver.pin_high);
     debug_printf("REMOTE enabled=%u state=%u direction=%u speed=%u addr_reject=%lu unknown=%lu action_reject=%lu heartbeat_stop=%lu captured=%lu\r\n",
         app.actions_enabled,
         (unsigned int)app.state, (unsigned int)app.direction,

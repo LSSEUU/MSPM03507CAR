@@ -11,6 +11,12 @@ static IrEventQueue_t ir_queue;
 static uint16_t ir_previous_capture;
 static volatile uint32_t ir_last_edge_ms;
 static volatile bool ir_capture_valid;
+static volatile uint32_t ir_capture_edges;
+static volatile uint32_t ir_capture_high_edges;
+static volatile uint32_t ir_capture_low_edges;
+static volatile uint16_t ir_capture_min_ticks;
+static volatile uint16_t ir_capture_max_ticks;
+static volatile uint16_t ir_capture_last_ticks;
 
 static void IrReceiver_QueueFromIsr(const IrNecEvent_t *event)
 {
@@ -24,6 +30,12 @@ void IrReceiver_Init(void)
     ir_previous_capture = 0U;
     ir_last_edge_ms = SystemTime_Now();
     ir_capture_valid = false;
+    ir_capture_edges = 0U;
+    ir_capture_high_edges = 0U;
+    ir_capture_low_edges = 0U;
+    ir_capture_min_ticks = 0xFFFFU;
+    ir_capture_max_ticks = 0U;
+    ir_capture_last_ticks = 0U;
     NVIC_ClearPendingIRQ(IR_CAPTURE_INST_INT_IRQN);
     NVIC_EnableIRQ(IR_CAPTURE_INST_INT_IRQN);
 }
@@ -56,6 +68,15 @@ void IrReceiver_GetStats(IrReceiverStats_t *stats)
     IrNec_GetStats(&ir_decoder, &stats->nec);
     stats->queue_overflow = ir_queue.overflow;
     stats->queued_events = ir_queue.queued;
+    stats->capture_edges = ir_capture_edges;
+    stats->capture_high_edges = ir_capture_high_edges;
+    stats->capture_low_edges = ir_capture_low_edges;
+    stats->capture_min_ticks =
+        (ir_capture_min_ticks == 0xFFFFU) ? 0U : ir_capture_min_ticks;
+    stats->capture_max_ticks = ir_capture_max_ticks;
+    stats->capture_last_ticks = ir_capture_last_ticks;
+    stats->pin_high = (DL_GPIO_readPins(IR_CAPTURE_PORT,
+        IR_CAPTURE_PIN) & IR_CAPTURE_PIN) != 0U;
     NVIC_EnableIRQ(IR_CAPTURE_INST_INT_IRQN);
 }
 
@@ -73,6 +94,16 @@ void IR_CAPTURE_INST_IRQHandler(void)
         IrNecEvent_t event;
 
         ir_last_edge_ms = now_ms;
+        ir_capture_edges++;
+        if (level_high) ir_capture_high_edges++;
+        else ir_capture_low_edges++;
+        if (ir_capture_valid) {
+            ir_capture_last_ticks = elapsed;
+            if (elapsed < ir_capture_min_ticks)
+                ir_capture_min_ticks = elapsed;
+            if (elapsed > ir_capture_max_ticks)
+                ir_capture_max_ticks = elapsed;
+        }
         if (IrNec_ProcessEdge(&ir_decoder,
                 ir_capture_valid ? elapsed : 0U,
                 level_high, now_ms, &event)) {
