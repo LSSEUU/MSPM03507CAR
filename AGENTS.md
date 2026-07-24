@@ -22,6 +22,17 @@ Do not bypass, disable, delete, or weaken `.githooks/pre-commit` to avoid updati
 
 Preserve unrelated user files and changes. In particular, never stage unrelated untracked documentation while updating project state.
 
+## Conversation context hygiene
+
+At the start of a new engineering conversation:
+
+1. Run `git status --short` and preserve all pre-existing user changes.
+2. Read `STATE.md` first. Treat its quick-start summary, active work, safety boundaries, and evidence map as the minimal current context.
+3. Open only the task-specific document named by the evidence map or `docs/README.md`. Do not bulk-read all validation records, historical plans, PDFs, build outputs, or logs merely to establish context.
+4. Inspect source files relevant to the task instead of assuming implementation details from old plans or validation records.
+
+Keep `STATE.md` concise and current. Move long command transcripts, chronological debugging narratives, raw measurements, and closed-problem evidence into a dated record under `docs/`, then link to it from `STATE.md`. Do not duplicate the same mutable status across README files, guides, and validation records. README files should route readers; `STATE.md` should state current truth; dated records should preserve evidence.
+
 ## Serial tooling
 
 - `pyserial` is an approved tool for serial-port discovery, communication, logging, and hardware acceptance.
