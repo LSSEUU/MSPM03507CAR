@@ -62,6 +62,18 @@ class M5LineFollowTests(unittest.TestCase):
         self.assertIn("AppLine_ConfirmStart", diagnostics)
         self.assertIn("CSV: M5,time_ms", diagnostics)
 
+    def test_runtime_status_queries_are_bounded_during_line_action(self):
+        diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Diagnostics_QueueSafetyReport", diagnostics)
+        self.assertIn("Diagnostics_ServiceSafetyReport", diagnostics)
+        self.assertIn("Diagnostics_ActionTelemetryActive", diagnostics)
+        self.assertIn("M5 running: use CSV telemetry; stop before r.", diagnostics)
+        self.assertNotIn(
+            "case 'v': case 'V': Diagnostics_PrintSafety()", diagnostics
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

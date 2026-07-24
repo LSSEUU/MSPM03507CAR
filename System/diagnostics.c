@@ -66,6 +66,11 @@ static bool gray_print_pending;
 static uint32_t gray_requested_scan_count;
 static bool report_pending;
 static uint8_t report_line;
+static bool safety_report_pending;
+static uint8_t safety_report_line;
+static SystemState_t safety_report_system_state;
+static SafetySnapshot_t safety_report_snapshot;
+static SchedulerStats_t safety_report_scheduler;
 static SpeedDiagState_t speed_diag_state;
 static uint8_t speed_diag_wheel_mask;
 static uint32_t speed_diag_started_ms;
@@ -326,31 +331,63 @@ static void Diagnostics_PrintCommunication(void)
         (unsigned long)s.format_errors);
 }
 
-static void Diagnostics_PrintSafety(void)
+static void Diagnostics_QueueSafetyReport(void)
 {
-    SafetySnapshot_t safety;
-    SchedulerStats_t scheduler;
-    Safety_GetSnapshot(&safety);
-    Scheduler_GetStats(&scheduler);
-    debug_printf("SAFETY state=%s faults=0x%08lX first=%lu last=%lu action=%u deadline=%lu pwm=%d,%d\r\n",
-        SystemState_Name(SystemState_Get()), (unsigned long)safety.fault_bits,
-        (unsigned long)safety.first_fault_ms, (unsigned long)safety.last_fault_ms,
-        safety.action_active, (unsigned long)safety.action_deadline_ms,
-        safety.applied_motor_a, safety.applied_motor_b);
-    debug_printf("CONTEXT target=%d,%d speed=%d,%d requested_pwm=%d,%d\r\n",
-        safety.target_speed_left_mm_s, safety.target_speed_right_mm_s,
-        safety.measured_speed_left_mm_s, safety.measured_speed_right_mm_s,
-        safety.requested_motor_a, safety.requested_motor_b);
-    debug_printf("SCHED release=%lu/%lu/%lu/%lu miss=%lu/%lu/%lu/%lu pending=0x%02lX\r\n",
-        (unsigned long)scheduler.release_count[0],
-        (unsigned long)scheduler.release_count[1],
-        (unsigned long)scheduler.release_count[2],
-        (unsigned long)scheduler.release_count[3],
-        (unsigned long)scheduler.miss_count[0],
-        (unsigned long)scheduler.miss_count[1],
-        (unsigned long)scheduler.miss_count[2],
-        (unsigned long)scheduler.miss_count[3],
-        (unsigned long)scheduler.pending_mask);
+    safety_report_system_state = SystemState_Get();
+    Safety_GetSnapshot(&safety_report_snapshot);
+    Scheduler_GetStats(&safety_report_scheduler);
+    safety_report_line = 0U;
+    safety_report_pending = true;
+}
+
+static bool Diagnostics_ActionTelemetryActive(void)
+{
+    AppLineSnapshot_t app;
+    AppLine_GetSnapshot(&app);
+    return (speed_diag_state == SPEED_DIAG_RUNNING) ||
+        (speed_diag_state == SPEED_DIAG_RAMP_DOWN) ||
+        (heading_diag_state == HEADING_DIAG_RUNNING) ||
+        (heading_diag_state == HEADING_DIAG_RAMP_DOWN) ||
+        (app.state == APP_LINE_RUNNING);
+}
+
+static void Diagnostics_ServiceSafetyReport(void)
+{
+    if (!safety_report_pending || Diagnostics_ActionTelemetryActive()) return;
+
+    if (safety_report_line == 0U) {
+        debug_printf("SAFETY state=%s faults=0x%08lX first=%lu last=%lu action=%u deadline=%lu pwm=%d,%d\r\n",
+            SystemState_Name(safety_report_system_state),
+            (unsigned long)safety_report_snapshot.fault_bits,
+            (unsigned long)safety_report_snapshot.first_fault_ms,
+            (unsigned long)safety_report_snapshot.last_fault_ms,
+            safety_report_snapshot.action_active,
+            (unsigned long)safety_report_snapshot.action_deadline_ms,
+            safety_report_snapshot.applied_motor_a,
+            safety_report_snapshot.applied_motor_b);
+    } else if (safety_report_line == 1U) {
+        debug_printf("CONTEXT target=%d,%d speed=%d,%d requested_pwm=%d,%d\r\n",
+            safety_report_snapshot.target_speed_left_mm_s,
+            safety_report_snapshot.target_speed_right_mm_s,
+            safety_report_snapshot.measured_speed_left_mm_s,
+            safety_report_snapshot.measured_speed_right_mm_s,
+            safety_report_snapshot.requested_motor_a,
+            safety_report_snapshot.requested_motor_b);
+    } else {
+        debug_printf("SCHED release=%lu/%lu/%lu/%lu miss=%lu/%lu/%lu/%lu pending=0x%02lX\r\n",
+            (unsigned long)safety_report_scheduler.release_count[0],
+            (unsigned long)safety_report_scheduler.release_count[1],
+            (unsigned long)safety_report_scheduler.release_count[2],
+            (unsigned long)safety_report_scheduler.release_count[3],
+            (unsigned long)safety_report_scheduler.miss_count[0],
+            (unsigned long)safety_report_scheduler.miss_count[1],
+            (unsigned long)safety_report_scheduler.miss_count[2],
+            (unsigned long)safety_report_scheduler.miss_count[3],
+            (unsigned long)safety_report_scheduler.pending_mask);
+        safety_report_pending = false;
+        return;
+    }
+    safety_report_line++;
 }
 
 static void Diagnostics_SetMotorPhase(uint32_t now_ms)
@@ -770,6 +807,8 @@ void Diagnostics_Init(void)
     gray_print_pending = false;
     report_pending = false;
     report_line = 0U;
+    safety_report_pending = false;
+    safety_report_line = 0U;
     speed_diag_state = SPEED_DIAG_IDLE;
     speed_diag_wheel_mask = SPEED_DIAG_LEFT_MASK |
                             SPEED_DIAG_RIGHT_MASK;
@@ -863,7 +902,7 @@ static void Diagnostics_ServiceReport(void)
         debug_printf("OVERALL    %s\r\n", Diag_StatusName(
             Diag_WorstStatus(reports, (uint8_t)DIAG_PERIPHERAL_COUNT)));
     } else {
-        Diagnostics_PrintSafety();
+        Diagnostics_QueueSafetyReport();
         report_pending = false;
         return;
     }
@@ -890,7 +929,7 @@ static void Diagnostics_ServiceLineEvents(void)
             (long)Diagnostics_Round(app.control.position * 1000.0f),
             (unsigned long)Diagnostics_ScalePositive(
                 app.control.confidence, 1000.0f));
-        Diagnostics_PrintSafety();
+        Diagnostics_QueueSafetyReport();
     }
     line_previous_state = app.state;
 }
@@ -919,11 +958,19 @@ void Diagnostics_Poll(void)
         case 'd': case 'D':
             Diagnostics_PrintEncoder(); Diagnostics_PrintGyro();
             Diagnostics_PrintGraySnapshot(); Diagnostics_PrintCommunication();
-            Diagnostics_PrintWheelSpeed(); Diagnostics_PrintSafety(); break;
+            Diagnostics_PrintWheelSpeed(); Diagnostics_QueueSafetyReport(); break;
         case 'e': case 'E': Diagnostics_PrintEncoder(); break;
         case 'y': case 'Y': Diagnostics_PrintGyro(); break;
         case 'g': Diagnostics_PrintHeading(); break;
-        case 'r': case 'R': Diagnostics_PrintLine(); break;
+        case 'r': case 'R': {
+            AppLineSnapshot_t app;
+            AppLine_GetSnapshot(&app);
+            if (app.state == APP_LINE_RUNNING)
+                debug_println("M5 running: use CSV telemetry; stop before r.");
+            else
+                Diagnostics_PrintLine();
+            break;
+        }
         case '1':
             if (AppLine_StartCalibration(now_ms))
                 debug_println("M5 qualification: sweep every sensor across line and background for 5 s.");
@@ -981,7 +1028,7 @@ void Diagnostics_Poll(void)
             debug_printf("LED configured=%u errors=%lu\r\n",
                 LED_GetConfiguredCount(), (unsigned long)LED_GetErrorCount()); break;
         case 'c': case 'C': Diagnostics_PrintCommunication(); break;
-        case 'v': case 'V': Diagnostics_PrintSafety(); break;
+        case 'v': case 'V': Diagnostics_QueueSafetyReport(); break;
         case 'n': case 'N': Diagnostics_PrintWheelSpeed(); break;
         case 'j': case 'J':
             Diagnostics_ArmSpeedTest(SPEED_DIAG_LEFT_MASK, now_ms); break;
@@ -1075,7 +1122,10 @@ void Diagnostics_Task100ms(void)
         Diagnostics_PrintReport();
         if (!Safety_HasFault()) (void)SystemState_CompleteSelfTest(true);
     }
-    Diagnostics_ServiceReport();
+    if (report_pending)
+        Diagnostics_ServiceReport();
+    else
+        Diagnostics_ServiceSafetyReport();
     if ((speed_diag_state == SPEED_DIAG_RUNNING) ||
         (speed_diag_state == SPEED_DIAG_RAMP_DOWN)) {
         WheelSpeedSnapshot_t wheel_snapshot;
