@@ -9,7 +9,7 @@
  * Do not overwrite it from an unrelated LaunchPad .syscfg file.  Pin and
  * peripheral invariants are guarded by Tests/test_board_configuration.py.
  */
-#define FROZEN_BOARD_CONFIG_REVISION                         (20260724U)
+#define FROZEN_BOARD_CONFIG_REVISION                         (20260725U)
 
 #define CONFIG_LP_MSPM0G3507
 #define CONFIG_MSPM0G3507
@@ -136,6 +136,18 @@ extern "C" {
 #define TIMER_ENC_INST_INT_IRQN                               (TIMG12_INT_IRQn)
 #define TIMER_ENC_INST_LOAD_VALUE                                       (31999)
 
+/* VS1838B NEC receiver on rotary-encoder connector pin 4 (PB11). */
+#define IR_CAPTURE_INST                                                   TIMG0
+#define IR_CAPTURE_INST_IRQHandler                            TIMG0_IRQHandler
+#define IR_CAPTURE_INST_INT_IRQN                              (TIMG0_INT_IRQn)
+#define IR_CAPTURE_INST_LOAD_VALUE                                  (65535U)
+#define IR_CAPTURE_CC_INDEX                               DL_TIMER_CC_1_INDEX
+#define IR_CAPTURE_PORT                                                   GPIOB
+#define IR_CAPTURE_PIN                                           DL_GPIO_PIN_11
+#define IR_CAPTURE_IOMUX                                         IOMUX_PINCM28
+#define IR_CAPTURE_IOMUX_FUNC                    IOMUX_PINCM28_PF_TIMG0_CCP1
+#define IR_CAPTURE_TICKS_PER_US                                         (4U)
+
 void SYSCFG_DL_init(void);
 void SYSCFG_DL_TIMER_ENC_init(void);
 void SYSCFG_DL_initPower(void);
@@ -144,6 +156,7 @@ void SYSCFG_DL_SYSCTL_init(void);
 void SYSCFG_DL_UART_0_init(void);
 void SYSCFG_DL_UART_2_init(void);
 void SYSCFG_DL_PWM_0_init(void);
+void SYSCFG_DL_IR_CAPTURE_init(void);
 
 bool SYSCFG_DL_saveConfiguration(void);
 bool SYSCFG_DL_restoreConfiguration(void);

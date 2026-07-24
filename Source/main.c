@@ -1,6 +1,7 @@
 #include "board.h"
 
 #include "app_line.h"
+#include "app_remote.h"
 #include "diagnostics.h"
 #include "encoder.h"
 #include "grayscale.h"
@@ -68,6 +69,7 @@ int main(void)
     }
 
     Diagnostics_Init();
+    AppRemote_Init();
     Diagnostics_RunBootSelfTest();
 
     while (1) {
@@ -77,6 +79,7 @@ int main(void)
                               SystemTime_Now());
         }
 
+        AppRemote_Poll();
         Diagnostics_Poll();
 
         if (Scheduler_Take(SCHEDULER_TASK_5MS)) {
@@ -146,6 +149,7 @@ int main(void)
             GyroSnapshot_t gyro;
             HeadingSnapshot_t heading;
 
+            AppRemote_Task20ms(started);
             Gyro_GetSnapshot(&gyro);
             Heading_Update(gyro.sample.yaw, gyro.valid_frames, started);
             Heading_GetSnapshot(&heading);

@@ -1,11 +1,13 @@
 #include "diagnostics.h"
 
 #include "app_line.h"
+#include "app_remote.h"
 #include "control_config.h"
 #include "encoder.h"
 #include "grayscale.h"
 #include "gyro.h"
 #include "heading.h"
+#include "ir_receiver.h"
 #include "led.h"
 #include "motor.h"
 #include "oled.h"
@@ -86,6 +88,8 @@ static uint32_t heading_diag_started_ms;
 static uint32_t heading_diag_deadline_ms;
 static float heading_diag_final_error_deg;
 static bool heading_diag_completed;
+static float heading_diag_hold_speed_mm_s;
+static uint32_t heading_diag_hold_duration_ms;
 static AppLineState_t line_previous_state;
 
 #ifdef M2_FAULT_INJECTION_TEST
@@ -329,6 +333,31 @@ static void Diagnostics_PrintCommunication(void)
         (unsigned long)s.tx_bytes, (unsigned long)s.rx_bytes,
         (unsigned long)s.tx_dropped, (unsigned long)s.rx_dropped,
         (unsigned long)s.format_errors);
+}
+
+static void Diagnostics_PrintInfrared(void)
+{
+    IrReceiverStats_t receiver;
+    AppRemoteSnapshot_t app;
+    IrReceiver_GetStats(&receiver);
+    AppRemote_GetSnapshot(&app);
+    debug_printf("IR full=%lu repeat=%lu checksum=%lu timing=%lu overflow=%lu queued=%lu last=0x%02X/0x%02X raw=0x%08lX\r\n",
+        (unsigned long)receiver.nec.full_frames,
+        (unsigned long)receiver.nec.repeat_frames,
+        (unsigned long)receiver.nec.checksum_errors,
+        (unsigned long)receiver.nec.timing_errors,
+        (unsigned long)receiver.queue_overflow,
+        (unsigned long)receiver.queued_events,
+        receiver.nec.last_address, receiver.nec.last_command,
+        (unsigned long)receiver.nec.last_raw);
+    debug_printf("REMOTE enabled=%u state=%u direction=%u speed=%u addr_reject=%lu unknown=%lu action_reject=%lu heartbeat_stop=%lu captured=%lu\r\n",
+        app.actions_enabled,
+        (unsigned int)app.state, (unsigned int)app.direction,
+        app.speed_mm_s, (unsigned long)app.address_rejects,
+        (unsigned long)app.unknown_commands,
+        (unsigned long)app.action_rejects,
+        (unsigned long)app.heartbeat_stops,
+        (unsigned long)app.captured_keys);
 }
 
 static void Diagnostics_QueueSafetyReport(void)
@@ -670,7 +699,9 @@ static const char *Diagnostics_HeadingKindName(void)
     return "-90 turn";
 }
 
-static void Diagnostics_ArmHeadingTest(HeadingDiagKind_t kind,
+static bool Diagnostics_ArmHeadingTest(HeadingDiagKind_t kind,
+                                       float hold_speed_mm_s,
+                                       uint32_t hold_duration_ms,
                                        uint32_t now_ms)
 {
     HeadingSnapshot_t heading_snapshot;
@@ -683,35 +714,38 @@ static void Diagnostics_ArmHeadingTest(HeadingDiagKind_t kind,
         (heading_diag_state != HEADING_DIAG_IDLE) ||
         (app_line_snapshot.state != APP_LINE_IDLE)) {
         debug_println("M4 test rejected: clear faults and return IDLE.");
-        return;
+        return false;
     }
     if (!heading_snapshot.calibrated) {
         debug_println("M4 test rejected: keep car still and wait for calibration.");
-        return;
+        return false;
     }
     heading_diag_kind = kind;
+    heading_diag_hold_speed_mm_s = hold_speed_mm_s;
+    heading_diag_hold_duration_ms = hold_duration_ms;
     heading_diag_state = HEADING_DIAG_ARMED;
     heading_diag_deadline_ms = now_ms + DIAGNOSTIC_ARM_TIMEOUT_MS;
     debug_printf("Place car safely for %s; type uppercase A within 10 s.\r\n",
         Diagnostics_HeadingKindName());
+    return true;
 }
 
-static void Diagnostics_StartHeadingTest(uint32_t now_ms)
+static bool Diagnostics_StartHeadingTest(uint32_t now_ms)
 {
     bool started;
     if ((heading_diag_state != HEADING_DIAG_ARMED) ||
         SystemTime_Reached(now_ms, heading_diag_deadline_ms)) {
         heading_diag_state = HEADING_DIAG_IDLE;
         debug_println("M4 arm expired or not requested.");
-        return;
+        return false;
     }
     if (!SystemState_RequestRun()) {
         heading_diag_state = HEADING_DIAG_IDLE;
         debug_println("M4 test rejected: system is not IDLE.");
-        return;
+        return false;
     }
     if (heading_diag_kind == HEADING_DIAG_HOLD)
-        started = Heading_StartHold(HEADING_STRAIGHT_TEST_SPEED_MM_S);
+        started = Heading_StartHold(heading_diag_hold_speed_mm_s);
     else
         started = Heading_StartTurn(
             (heading_diag_kind == HEADING_DIAG_TURN_POSITIVE) ? 90.0f : -90.0f);
@@ -719,7 +753,7 @@ static void Diagnostics_StartHeadingTest(uint32_t now_ms)
         (void)SystemState_RequestIdle();
         heading_diag_state = HEADING_DIAG_IDLE;
         debug_println("M4 start rejected: heading sample is not ready.");
-        return;
+        return false;
     }
     Safety_BeginAction(now_ms, HEADING_ACTION_TIMEOUT_MS,
         SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO));
@@ -727,10 +761,11 @@ static void Diagnostics_StartHeadingTest(uint32_t now_ms)
     heading_diag_started_ms = now_ms;
     heading_diag_deadline_ms = now_ms +
         ((heading_diag_kind == HEADING_DIAG_HOLD) ?
-            HEADING_STRAIGHT_TEST_DURATION_MS : HEADING_TURN_TIMEOUT_MS);
+            heading_diag_hold_duration_ms : HEADING_TURN_TIMEOUT_MS);
     heading_diag_state = HEADING_DIAG_RUNNING;
     debug_println("CSV: M4,time_ms,phase,mode,yaw_x100,rate_x100,target_x100,error_x100,targetL,targetR,rampL,rampR,speedL,speedR,pwmL,pwmR,faults");
     debug_println("M4 test running; S/space is immediate emergency stop.");
+    return true;
 }
 
 static void Diagnostics_FinishHeadingTest(void)
@@ -816,6 +851,8 @@ void Diagnostics_Init(void)
     heading_diag_state = HEADING_DIAG_IDLE;
     heading_diag_final_error_deg = 0.0f;
     heading_diag_completed = false;
+    heading_diag_hold_speed_mm_s = HEADING_STRAIGHT_TEST_SPEED_MM_S;
+    heading_diag_hold_duration_ms = HEADING_STRAIGHT_TEST_DURATION_MS;
     line_previous_state = APP_LINE_IDLE;
     Diagnostics_ResetSpeedMetrics();
 #ifdef M2_FAULT_INJECTION_TEST
@@ -836,7 +873,7 @@ void Diagnostics_RunBootSelfTest(void)
 
 void Diagnostics_PrintHelp(void)
 {
-    debug_println("Commands: h=help s=status d=all e=encoder y=gyro q=grayscale");
+    debug_println("Commands: h=help s=status d=all e=encoder y=gyro q=grayscale t=IR capture");
     debug_println("          o=OLED pattern p/f=confirm l=LED c=comm m=motor A=arm");
     debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
     debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
@@ -934,6 +971,73 @@ static void Diagnostics_ServiceLineEvents(void)
     line_previous_state = app.state;
 }
 
+bool Diagnostics_ActionIsIdle(void)
+{
+    AppLineSnapshot_t app;
+    AppLine_GetSnapshot(&app);
+    return (motor_diag_state == MOTOR_DIAG_IDLE) &&
+        (speed_diag_state == SPEED_DIAG_IDLE) &&
+        (heading_diag_state == HEADING_DIAG_IDLE) &&
+        (app.state == APP_LINE_IDLE);
+}
+
+bool Diagnostics_ActionArm(DiagnosticsAction_t action,
+                           float straight_speed_mm_s,
+                           uint32_t straight_duration_ms,
+                           uint32_t now_ms)
+{
+    if ((straight_speed_mm_s <= 0.0f) ||
+        (straight_duration_ms == 0U)) return false;
+
+    if (action == DIAGNOSTICS_ACTION_LINE) {
+        if (!Diagnostics_ActionIsIdle() || Safety_HasFault() ||
+            (SystemState_Get() != SYSTEM_STATE_IDLE)) return false;
+        return AppLine_Arm(now_ms);
+    }
+    if (action == DIAGNOSTICS_ACTION_STRAIGHT)
+        return Diagnostics_ArmHeadingTest(HEADING_DIAG_HOLD,
+            straight_speed_mm_s, straight_duration_ms, now_ms);
+    if (action == DIAGNOSTICS_ACTION_TURN_POSITIVE)
+        return Diagnostics_ArmHeadingTest(HEADING_DIAG_TURN_POSITIVE,
+            straight_speed_mm_s, straight_duration_ms, now_ms);
+    if (action == DIAGNOSTICS_ACTION_TURN_NEGATIVE)
+        return Diagnostics_ArmHeadingTest(HEADING_DIAG_TURN_NEGATIVE,
+            straight_speed_mm_s, straight_duration_ms, now_ms);
+    return false;
+}
+
+bool Diagnostics_ActionConfirm(uint32_t now_ms)
+{
+    AppLineSnapshot_t app;
+    AppLine_GetSnapshot(&app);
+    if (app.state == APP_LINE_ARMED) return AppLine_ConfirmStart(now_ms);
+    if (heading_diag_state == HEADING_DIAG_ARMED)
+        return Diagnostics_StartHeadingTest(now_ms);
+    return false;
+}
+
+bool Diagnostics_ActionCancel(uint32_t now_ms)
+{
+    AppLineSnapshot_t app;
+    bool active;
+    AppLine_GetSnapshot(&app);
+    active = (motor_diag_state != MOTOR_DIAG_IDLE) ||
+        (speed_diag_state != SPEED_DIAG_IDLE) ||
+        (heading_diag_state != HEADING_DIAG_IDLE) ||
+        (app.state != APP_LINE_IDLE);
+    if (!active || Safety_HasFault()) return false;
+
+    WheelSpeed_Disable();
+    Heading_Stop();
+    (void)AppLine_Stop(now_ms);
+    Safety_EndAction();
+    (void)SystemState_RequestIdle();
+    motor_diag_state = MOTOR_DIAG_IDLE;
+    speed_diag_state = SPEED_DIAG_IDLE;
+    heading_diag_state = HEADING_DIAG_IDLE;
+    return true;
+}
+
 void Diagnostics_Poll(void)
 {
     uint32_t now_ms = SystemTime_Now();
@@ -954,11 +1058,12 @@ void Diagnostics_Poll(void)
     if (!debug_kbhit()) return;
     switch (debug_getc()) {
         case 'h': case 'H': Diagnostics_PrintHelp(); break;
-        case 's': Diagnostics_PrintReport(); break;
+        case 's': Diagnostics_PrintInfrared(); Diagnostics_PrintReport(); break;
         case 'd': case 'D':
             Diagnostics_PrintEncoder(); Diagnostics_PrintGyro();
             Diagnostics_PrintGraySnapshot(); Diagnostics_PrintCommunication();
-            Diagnostics_PrintWheelSpeed(); Diagnostics_QueueSafetyReport(); break;
+            Diagnostics_PrintWheelSpeed(); Diagnostics_PrintInfrared();
+            Diagnostics_QueueSafetyReport(); break;
         case 'e': case 'E': Diagnostics_PrintEncoder(); break;
         case 'y': case 'Y': Diagnostics_PrintGyro(); break;
         case 'g': Diagnostics_PrintHeading(); break;
@@ -993,8 +1098,14 @@ void Diagnostics_Poll(void)
             }
             break;
         case '0':
-            if (AppLine_Stop(now_ms)) debug_println("M5 line action stopped; state=IDLE.");
-            else debug_println("M5 line action is not active.");
+            if (AppRemote_NormalStop(now_ms))
+                debug_println("Action cancelled normally; state=IDLE.");
+            else debug_println("No non-fault action is active.");
+            break;
+        case 't':
+            if (AppRemote_StartCapture(now_ms))
+                debug_println("IR key capture active for 30 s; full frames only, vehicle actions disabled.");
+            else debug_println("IR key capture rejected: clear faults and return IDLE.");
             break;
         case 'z':
             if ((SystemState_Get() == SYSTEM_STATE_IDLE) &&
@@ -1005,11 +1116,17 @@ void Diagnostics_Poll(void)
             } else debug_println("M4 calibration rejected: return to IDLE.");
             break;
         case 'u': case 'U':
-            Diagnostics_ArmHeadingTest(HEADING_DIAG_TURN_POSITIVE, now_ms); break;
+            (void)Diagnostics_ArmHeadingTest(HEADING_DIAG_TURN_POSITIVE,
+                HEADING_STRAIGHT_TEST_SPEED_MM_S,
+                HEADING_STRAIGHT_TEST_DURATION_MS, now_ms); break;
         case 'i': case 'I':
-            Diagnostics_ArmHeadingTest(HEADING_DIAG_TURN_NEGATIVE, now_ms); break;
+            (void)Diagnostics_ArmHeadingTest(HEADING_DIAG_TURN_NEGATIVE,
+                HEADING_STRAIGHT_TEST_SPEED_MM_S,
+                HEADING_STRAIGHT_TEST_DURATION_MS, now_ms); break;
         case 'w':
-            Diagnostics_ArmHeadingTest(HEADING_DIAG_HOLD, now_ms); break;
+            (void)Diagnostics_ArmHeadingTest(HEADING_DIAG_HOLD,
+                HEADING_STRAIGHT_TEST_SPEED_MM_S,
+                HEADING_STRAIGHT_TEST_DURATION_MS, now_ms); break;
         case 'q': case 'Q':
             Grayscale_GetSnapshot(&gray);
             gray_requested_scan_count = gray.scan_count;
@@ -1071,7 +1188,7 @@ void Diagnostics_Poll(void)
                         debug_println("M5 line following running; 0=normal stop, S/space=e-stop.");
                     } else debug_println("M5 start rejected: arm expired or line unavailable.");
                 } else if (heading_diag_state == HEADING_DIAG_ARMED)
-                Diagnostics_StartHeadingTest(now_ms);
+                (void)Diagnostics_StartHeadingTest(now_ms);
                 else if (speed_diag_state == SPEED_DIAG_ARMED)
                 Diagnostics_StartSpeedTest(now_ms);
                 else

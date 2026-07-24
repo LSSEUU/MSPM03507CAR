@@ -8,6 +8,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_UART_0_init();
     SYSCFG_DL_UART_2_init();
     SYSCFG_DL_PWM_0_init();
+    SYSCFG_DL_IR_CAPTURE_init();
 }
 
 
@@ -18,12 +19,14 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOB);
     DL_UART_Main_reset(UART_0_INST);
     DL_UART_Main_reset(UART_2_INST);
+    DL_TimerG_reset(IR_CAPTURE_INST);
 
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
     DL_UART_Main_enablePower(UART_0_INST);
     DL_UART_Main_enablePower(UART_2_INST);
     DL_TimerA_enablePower(PWM_0_INST);
+    DL_TimerG_enablePower(IR_CAPTURE_INST);
     delay_cycles(POWER_STARTUP_DELAY);
 }
 
@@ -61,6 +64,9 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
         ENC_B_E2A_PIN | ENC_B_E2B_PIN);
     DL_GPIO_enableInterrupt(ENC_B_PORT,
         ENC_B_E2A_PIN | ENC_B_E2B_PIN);
+
+    DL_GPIO_initPeripheralInputFunction(
+        IR_CAPTURE_IOMUX, IR_CAPTURE_IOMUX_FUNC);
 
     NVIC_EnableIRQ(GPIOA_INT_IRQn);
     NVIC_EnableIRQ(GPIOB_INT_IRQn);
@@ -145,6 +151,33 @@ SYSCONFIG_WEAK void SYSCFG_DL_UART_2_init(void)
     DL_UART_Main_setRXFIFOThreshold(UART_2_INST,
         DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_enable(UART_2_INST);
+}
+
+static const DL_TimerG_ClockConfig gIR_CAPTURE_ClockConfig = {
+    .clockSel    = DL_TIMER_CLOCK_BUSCLK,
+    .divideRatio = DL_TIMER_CLOCK_DIVIDE_8,
+    .prescale    = 0U,
+};
+
+static const DL_TimerG_CaptureConfig gIR_CAPTURE_Config = {
+    .captureMode  = DL_TIMER_CAPTURE_MODE_EDGE_TIME,
+    .period       = IR_CAPTURE_INST_LOAD_VALUE,
+    .startTimer   = DL_TIMER_STOP,
+    .edgeCaptMode = DL_TIMER_CAPTURE_EDGE_DETECTION_MODE_EDGE,
+    .inputChan    = DL_TIMER_INPUT_CHAN_1,
+    .inputInvMode = DL_TIMER_CC_INPUT_INV_NOINVERT,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_IR_CAPTURE_init(void)
+{
+    DL_TimerG_setClockConfig(IR_CAPTURE_INST,
+        (DL_TimerG_ClockConfig *)&gIR_CAPTURE_ClockConfig);
+    DL_TimerG_initCaptureMode(IR_CAPTURE_INST,
+        (DL_TimerG_CaptureConfig *)&gIR_CAPTURE_Config);
+    DL_TimerG_enableInterrupt(IR_CAPTURE_INST,
+        DL_TIMERG_INTERRUPT_CC1_DN_EVENT);
+    DL_TimerG_enableClock(IR_CAPTURE_INST);
+    DL_TimerG_startCounter(IR_CAPTURE_INST);
 }
 
 static const DL_TimerA_ClockConfig gPWM_0ClockConfig = {

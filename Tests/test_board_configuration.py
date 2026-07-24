@@ -10,6 +10,34 @@ PROJECT = ROOT / "keil" / "empty_LP_MSPM0G3507_nortos_keil.uvprojx"
 
 
 class FrozenBoardConfigurationTests(unittest.TestCase):
+    def test_pb11_nec_capture_is_frozen_without_uart_or_motor_remap(self):
+        header = (ROOT / "Source" / "ti_msp_dl_config.h").read_text(
+            encoding="utf-8"
+        )
+        source = (ROOT / "Source" / "ti_msp_dl_config.c").read_text(
+            encoding="utf-8"
+        )
+        project = (
+            ROOT / "keil" / "empty_LP_MSPM0G3507_nortos_keil.uvprojx"
+        ).read_text(encoding="utf-8")
+        remote_config = (ROOT / "Config" / "remote_config.h").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("IR_CAPTURE_INST                                                   TIMG0", header)
+        self.assertIn("IR_CAPTURE_PIN                                           DL_GPIO_PIN_11", header)
+        self.assertIn("IOMUX_PINCM28_PF_TIMG0_CCP1", header)
+        self.assertIn("DL_TIMER_CLOCK_DIVIDE_8", source)
+        self.assertIn("DL_TIMER_CAPTURE_MODE_EDGE_TIME", source)
+        self.assertIn("DL_TIMER_CAPTURE_EDGE_DETECTION_MODE_EDGE", source)
+        self.assertIn("DL_TIMER_INPUT_CHAN_1", source)
+        self.assertIn("../Hardware/ir_receiver.c", project)
+        self.assertIn("../Hardware/ir_nec.c", project)
+        self.assertIn("../App/app_remote.c", project)
+        self.assertIn("IOMUX_PINCM22_PF_UART0_RX", header)
+        self.assertIn("IOMUX_PINCM47_PF_UART2_RX", header)
+        self.assertIn("IOMUX_PINCM15_PF_TIMA1_CCP0", header)
+        self.assertIn("#define IR_REMOTE_KEYMAP_VERIFIED              0", remote_config)
+
     def test_no_stale_sysconfig_source_can_overwrite_frozen_configuration(self):
         syscfg_sources = list((ROOT / "Source").glob("*.syscfg"))
         syscfg_sources += list((ROOT / "syscfg").glob("*.syscfg"))

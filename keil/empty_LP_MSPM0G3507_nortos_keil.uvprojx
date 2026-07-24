@@ -464,6 +464,21 @@
               <FileType>1</FileType>
               <FilePath>../Hardware/watchdog.c</FilePath>
             </File>
+            <File>
+              <FileName>ir_nec.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/ir_nec.c</FilePath>
+            </File>
+            <File>
+              <FileName>ir_event_queue.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/ir_event_queue.c</FilePath>
+            </File>
+            <File>
+              <FileName>ir_receiver.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/ir_receiver.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -538,6 +553,11 @@
               <FileName>app_line.c</FileName>
               <FileType>1</FileType>
               <FilePath>../App/app_line.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_remote.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/app_remote.c</FilePath>
             </File>
           </Files>
         </Group>
