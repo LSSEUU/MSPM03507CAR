@@ -23,7 +23,7 @@
 | 功能 | MCU 引脚 | 当前配置/接线 |
 |---|---|---|
 | UART0 诊断 | PA10 TX / PA11 RX | 115200 8N1；当前无线入口为 Horco 无线 DAP 虚拟串口 `COM10`，HC-04BLE `COM7` 和独立 USB-UART COM5 保留为已验证备用 |
-| Horco 无线 DAP | RX←PA10 / TX→PA11；DIO→PA19 / CLK→PA20 | 车端接收机由 U20 的 5 V/GND 供电，电脑端枚举为 `Horco CMSIS-DAP v2`、`COM10`；RST/3.3 V 不接 |
+| Horco 无线 DAP | RX←PA10 / TX→PA11；DIO→PA19 / CLK→PA20；RST→NRST | 车端接收机由 U20 的 5 V/GND 供电，电脑端枚举为 `Horco CMSIS-DAP v2`、`COM10`；3.3 V 不接。电脑端 `CONF.TXT` 当前误设 `esp_down=enable`，MSPM0 使用前主从两端都必须改为 `disable` |
 | HC-04BLE 调车器 | TX→PA11 / RX←PA10 | 已验证备用；接入 Horco DAP 串口时必须断开 HC-04 的 TX/RX，避免两个发送端同时驱动 PA11 |
 | ESP32 BLE 调车器 | GPIO16 RX2 / GPIO17 TX2 | 历史已验证备用桥，当前不接 UART0；重新接入时不得与 HC-04/USB-UART 同时驱动 PA11 |
 | JY61P | PA22 UART2_RX | 9600；JY61P TX→PA22，RX 不接；PCB 平面与地面平行、正面朝上，避免 pitch 接近 ±90° 的欧拉角万向节锁 |
@@ -156,7 +156,7 @@ print(asyncio.run(command(b"h")).decode("utf-8", "replace"))
 | 功能 | 当前证据 | 状态 |
 |---|---|---|
 | Keil 工程/HEX | ARM Compiler 6.22 全量重建 0 error、0 warning；AXF/HEX 非空 | 已编译，M0 完成 |
-| 下载链路 | 历史有线 DAP 未接 RST 时已得到 `Erase Done / Programming Done / Verify OK / Application running`；2026-07-24 Horco 无线 DAP 命令行首次到达 SWD power-up 后 `Erase Failed`，相同命令唯一重试报 `E310 / Cannot access Memory` | 无线下载未验收；需用户手动下载恢复 |
+| 下载链路 | 历史有线 DAP 未接 RST 时已得到 `Erase Done / Programming Done / Verify OK / Application running`；2026-07-24 Horco 无线 DAP 命令行首次到达 SWD power-up 后 `Erase Failed`，相同命令唯一重试报 `E310 / Cannot access Memory`。补接 RST 后 Normal 模式仍偶发超时，改为 under Reset/HW RESET 后稳定报 `Could not stop Cortex-M device` | 无线下载未验收；先修正 DAP 的 ESP 模式配置 |
 | UART0 | Horco 无线 DAP `COM10`、HC-04BLE `COM7` 与历史 CH340 COM5 均已验证 115200 双向命令和输出 | 已上板 |
 | 电机与急停 | 历史台架完成 A/B 正反转，dEdgeA=1543、dEdgeB=1402，`S` 急停有效；本次清理未重复运动测试 | 已上板 |
 | 编码器 | 手转 A count=1076/edge=1084，B count=-1041/edge=1041；电机联测两路边沿均增长 | 已上板 |
@@ -189,7 +189,7 @@ print(asyncio.run(command(b"h")).decode("utf-8", "replace"))
 
 最新验证：31 项主机回归全部通过；Keil V6.22 降激进调参版全量构建为 0 error、0 warning，已下载。该版落地运行 22.4 s 收到 224 个样本，TRACK=207、SEARCH=17、故障码始终为 0，用户观察表现基本没有问题；随后因外界原因人工断电，不将串口中断判为固件故障，也不计完整单圈。本次仅同步实测证据，无功能变化。完整单圈与多圈仍待验收。M4 已完成证据不变。完整记录见 `docs/2026-07-22-M3验证记录.md`、`docs/2026-07-22-M4验证记录.md` 和 `docs/2026-07-24-M5临时数字灰度模块适配记录.md`。
 
-无线链路最新验证：Horco 电脑端正常枚举 CMSIS-DAP v2、U 盘与 `COM10`，车端接收机通过 U20 的 5 V/GND、PA19/PA20 SWD 和 PA10/PA11 UART 接入；下载前 `h` 命令完整返回。正式工程全量重建仍为 `Code=22324, RO-data=4616, RW-data=4, ZI-data=19652`、0 error、0 warning、AXF 279932 字节、HEX 75860 字节，无功能变化。命令行无线下载按规则执行两次：首次 SWD power-up 后擦除失败，完全相同命令重试在 DebugPortStart 报 `E310 / Cannot access Memory`，之后 `COM10` 对 `s/h` 均无返回，当前目标固件运行状态不能确认。已停止尝试，必须由用户手动下载后再复验，不能据此宣称无线下载通过。历史 HC-04BLE 与 ESP32 NUS 证据保留为备用。
+无线链路最新验证：Horco 电脑端正常枚举 CMSIS-DAP v2、U 盘与 `COM10`，车端接收机通过 U20 的 5 V/GND、PA19/PA20 SWD、PA10/PA11 UART 和 NRST 接入；下载前 `h` 命令完整返回。正式工程全量重建仍为 `Code=22324, RO-data=4616, RW-data=4, ZI-data=19652`、0 error、0 warning、AXF 279932 字节、HEX 75860 字节，无功能变化。命令行无线下载按规则执行两次：首次 SWD power-up 后擦除失败，完全相同命令重试在 DebugPortStart 报 `E310 / Cannot access Memory`。用户手动下载时 Normal/SYSRESETREQ 偶发成功但常见 Flash Timeout；改为 under Reset/HW RESET 后报 `Could not stop Cortex-M device`，进入 Settings 探测目标也会触发旧固件重启。只读检查发现电脑端 U 盘 `CONF.TXT` 为 `mode=master`、`addr=4bd48f2a`、`rate=2M`、`esp_down=enable`；该设置启用了手册所述乐鑫下载模式并改变 RST/TDI 用途，是当前最高概率配置原因。已停止下载尝试，需先将主从两端 `esp_down` 都改为 `disable` 并重新上电，再按手册的 Normal/SYSRESETREQ 基线复验。历史 HC-04BLE 与 ESP32 NUS 证据保留为备用。
 
 ## 6. 构建与仓库规则
 
