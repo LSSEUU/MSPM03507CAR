@@ -59,10 +59,10 @@
 #define LINE_VALID_RELEASE_SAMPLES                 2U
 #define LINE_EXPECTED_ACTIVE_SUM                 1.50f
 
-#define LINE_FOLLOW_BASE_SPEED_MM_S             180.0f
-#define LINE_FOLLOW_KP_MM_S                     190.0f
-#define LINE_FOLLOW_KD_MM_S_PER_UNIT_S            3.0f
-#define LINE_FOLLOW_MAX_CORRECTION_MM_S         170.0f
+#define LINE_FOLLOW_BASE_SPEED_MM_S             160.0f
+#define LINE_FOLLOW_KP_MM_S                     150.0f
+#define LINE_FOLLOW_KD_MM_S_PER_UNIT_S            1.0f
+#define LINE_FOLLOW_MAX_CORRECTION_MM_S         150.0f
 #define LINE_SEARCH_FORWARD_MM_S                 45.0f
 #define LINE_SEARCH_TURN_MM_S                   105.0f
 #define LINE_LOST_TIMEOUT_MS                    1500U

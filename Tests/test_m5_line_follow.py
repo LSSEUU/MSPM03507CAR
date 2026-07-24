@@ -74,6 +74,15 @@ class M5LineFollowTests(unittest.TestCase):
             "case 'v': case 'V': Diagnostics_PrintSafety()", diagnostics
         )
 
+    def test_first_landing_tuning_is_frozen(self):
+        config = (ROOT / "Config" / "control_config.h").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("LINE_FOLLOW_BASE_SPEED_MM_S             160.0f", config)
+        self.assertIn("LINE_FOLLOW_KP_MM_S                     150.0f", config)
+        self.assertIn("LINE_FOLLOW_KD_MM_S_PER_UNIT_S            1.0f", config)
+        self.assertIn("LINE_FOLLOW_MAX_CORRECTION_MM_S         150.0f", config)
+
 
 if __name__ == "__main__":
     unittest.main()
