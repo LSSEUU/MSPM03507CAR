@@ -1,5 +1,6 @@
 #include "board.h"
 
+#include "app_line.h"
 #include "diagnostics.h"
 #include "encoder.h"
 #include "grayscale.h"
@@ -51,6 +52,7 @@ int main(void)
     Encoder_Init();
     WheelSpeed_Init();
     Heading_Init();
+    AppLine_Init();
     Grayscale_Init();
     Gyro_Init();
     LED_Init();
@@ -130,6 +132,7 @@ int main(void)
             Grayscale_GetSnapshot(&gray);
             if ((gray.scan_count != last_gray_scan) && gray.last_scan_ok) {
                 last_gray_scan = gray.scan_count;
+                AppLine_ProcessGrayscale(&gray);
                 Safety_NotifySensor(SAFETY_SENSOR_GRAYSCALE,
                                     gray.last_update_ms);
             }
@@ -150,6 +153,7 @@ int main(void)
                 WheelSpeed_SetTarget(heading.left_target_mm_s,
                                      heading.right_target_mm_s);
             }
+            AppLine_Task20ms(started);
             Main_CompleteTask(SCHEDULER_TASK_20MS, started,
                               TASK_20MS_PERIOD_MS);
             if (Scheduler_ConsumeHealthyWindow()) {
@@ -167,6 +171,7 @@ int main(void)
                               TASK_100MS_PERIOD_MS);
         }
 
+        Grayscale_Task(SystemTime_Now());
         OLED_Service();
         __WFI();
     }

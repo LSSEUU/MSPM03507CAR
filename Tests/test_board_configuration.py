@@ -42,19 +42,16 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         for pincm in ("IOMUX_PINCM40", "IOMUX_PINCM41", "IOMUX_PINCM42"):
             self.assertNotIn(pincm, combined)
 
-    def test_grayscale_uses_pa25_adc_with_bounded_polling(self):
+    def test_grayscale_uses_pa25_digital_input_with_bounded_scanning(self):
         config = CONFIG_SOURCE.read_text(encoding="utf-8")
         driver = (ROOT / "Hardware" / "grayscale.c").read_text(encoding="utf-8")
-        self.assertIn("DL_ADC12_initSingleSample(GRAY_ADC_INST", config)
-        self.assertIn("GRAY_ADC_INPUT_CHAN", config)
-        self.assertIn("DL_ADC12_INPUT_CHAN_2", HEADER.read_text(encoding="utf-8"))
-        self.assertIn("DL_ADC12_getRawInterruptStatus", driver)
-        self.assertIn("GRAY_ADC_TIMEOUT_LOOPS", driver)
-        read_adc = driver.index("static bool Gray_ReadADC")
-        self.assertIn("DL_ADC12_isConversionsEnabled", driver[read_adc:])
-        self.assertLess(driver.index("DL_ADC12_enableConversions", read_adc),
-                        driver.index("DL_ADC12_startConversion", read_adc))
-        self.assertNotIn("DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX", driver)
+        combined = config + "\n" + HEADER.read_text(encoding="utf-8")
+        self.assertNotIn("GRAY_ADC", combined)
+        self.assertNotIn("DL_ADC12_", driver)
+        self.assertIn("DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX", driver)
+        self.assertIn("DL_GPIO_RESISTOR_NONE", driver)
+        self.assertIn("GRAY_CH_SWITCH_DELAY_CYCLES 1600U", driver)
+        self.assertIn("static uint8_t Gray_ReadDigital", driver)
         self.assertIn("DL_GPIO_initDigitalInputFeatures(GRAY_AD0_IOMUX", driver)
         self.assertIn("DL_GPIO_enableHiZ(GRAY_AD0_IOMUX)", driver)
         self.assertIn("DL_GPIO_RESISTOR_PULL_UP", driver)
@@ -92,10 +89,11 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertFalse((ROOT / "Source" / "empty.c").exists())
         self.assertEqual(root.findtext(".//pCCUsed"), "6220000::V6.22::ARMCLANG")
 
-    def test_grayscale_api_exposes_adc_scans_without_stale_line_state(self):
+    def test_grayscale_api_exposes_digital_scans_without_stale_line_state(self):
         header = (ROOT / "Hardware" / "grayscale.h").read_text(encoding="utf-8")
         self.assertIn("bool Grayscale_Scan(void)", header)
-        self.assertIn("uint16_t adc[GRAYSCALE_CHANNEL_COUNT]", header)
+        self.assertIn("uint8_t level[GRAYSCALE_CHANNEL_COUNT]", header)
+        self.assertIn("uint8_t high_mask", header)
         for stale_name in (
             "raw_state", "filtered_state", "position", "debounce_cnt",
             "min_bits", "Grayscale_SetMinBits", "extern Grayscale_t Gray",

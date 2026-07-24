@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>__MSPM0G3507__</Define>
               <Undefine></Undefine>
-              <IncludePath>../include,../Source,../Hardware,../System,../Control,../Config,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
+              <IncludePath>../include,../Source,../Hardware,../System,../Control,../App,../Config,../include/ti/devices/msp,../include/ti/driverlib,../include/ti/driverlib/m0p,../include/third_party/CMSIS/Core/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -523,6 +523,21 @@
               <FileName>heading.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Control/heading.c</FilePath>
+            </File>
+            <File>
+              <FileName>line_follow.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/line_follow.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>App</GroupName>
+          <Files>
+            <File>
+              <FileName>app_line.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/app_line.c</FilePath>
             </File>
           </Files>
         </Group>

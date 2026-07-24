@@ -21,7 +21,8 @@ typedef enum {
     SAFETY_FAULT_SCHEDULER_DEADLINE  = (1UL << 4),
     SAFETY_FAULT_WATCHDOG_RESET      = (1UL << 5),
     SAFETY_FAULT_ENCODER_INVALID     = (1UL << 6),
-    SAFETY_FAULT_WHEEL_STALL         = (1UL << 7)
+    SAFETY_FAULT_WHEEL_STALL         = (1UL << 7),
+    SAFETY_FAULT_LINE_LOST           = (1UL << 8)
 } SafetyFault_t;
 
 typedef struct {

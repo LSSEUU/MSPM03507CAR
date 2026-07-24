@@ -48,4 +48,24 @@
 #define HEADING_STRAIGHT_TEST_SPEED_MM_S      250.0f
 #define HEADING_STRAIGHT_TEST_DURATION_MS     5000U
 
+/* M5 line sensor calibration and line-following defaults.  Position is
+ * normalized to [-1, 1], negative on the left and positive on the right. */
+#define LINE_CALIBRATION_DURATION_MS           5000U
+#define LINE_CALIBRATION_MIN_SAMPLES             20U
+#define LINE_CALIBRATION_MIN_SPAN                  1U
+#define LINE_SIGNAL_FLOOR                       0.15f
+#define LINE_VALID_CONFIDENCE                   0.20f
+#define LINE_VALID_ACQUIRE_SAMPLES                 2U
+#define LINE_VALID_RELEASE_SAMPLES                 2U
+#define LINE_EXPECTED_ACTIVE_SUM                 1.50f
+
+#define LINE_FOLLOW_BASE_SPEED_MM_S             180.0f
+#define LINE_FOLLOW_KP_MM_S                     190.0f
+#define LINE_FOLLOW_KD_MM_S_PER_UNIT_S            3.0f
+#define LINE_FOLLOW_MAX_CORRECTION_MM_S         170.0f
+#define LINE_SEARCH_FORWARD_MM_S                 45.0f
+#define LINE_SEARCH_TURN_MM_S                   105.0f
+#define LINE_LOST_TIMEOUT_MS                    1500U
+#define LINE_FOLLOW_ACTION_TIMEOUT_MS         300000U
+
 #endif

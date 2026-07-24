@@ -5,19 +5,13 @@
 #include <stdint.h>
 
 #define GRAYSCALE_CHANNEL_COUNT       8U
-#define GRAYSCALE_SAMPLES_PER_CHANNEL 8U
-
 typedef struct {
-    uint16_t adc[GRAYSCALE_CHANNEL_COUNT];
+    uint8_t level[GRAYSCALE_CHANNEL_COUNT];
+    uint8_t high_mask;
     uint32_t scan_count;
     uint32_t last_update_ms;
     uint32_t error_count;
-    uint32_t last_adc_status;
-    uint32_t last_adc_flags;
     bool last_scan_ok;
-    bool adc_powered;
-    bool adc_enabled;
-    bool adc_started;
 } GrayscaleSnapshot_t;
 
 void Grayscale_Init(void);

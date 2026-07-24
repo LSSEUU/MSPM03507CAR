@@ -1,5 +1,6 @@
 #include "diagnostics.h"
 
+#include "app_line.h"
 #include "control_config.h"
 #include "encoder.h"
 #include "grayscale.h"
@@ -18,8 +19,6 @@
 
 #include <stdbool.h>
 #include <string.h>
-
-#define GRAY_ADC_RESPONSE_DELTA 128U
 
 typedef enum {
     MOTOR_DIAG_IDLE = 0,
@@ -54,6 +53,8 @@ static DiagReport_t reports[DIAG_PERIPHERAL_COUNT];
 static bool motor_test_passed;
 static bool oled_visual_passed;
 static bool gray_contrast_observed;
+static bool gray_high_observed;
+static bool gray_low_observed;
 static bool boot_reported;
 static uint32_t boot_started_ms;
 static MotorDiagState_t motor_diag_state;
@@ -80,6 +81,7 @@ static uint32_t heading_diag_started_ms;
 static uint32_t heading_diag_deadline_ms;
 static float heading_diag_final_error_deg;
 static bool heading_diag_completed;
+static AppLineState_t line_previous_state;
 
 #ifdef M2_FAULT_INJECTION_TEST
 static bool fault_injection_stop_watchdog;
@@ -129,10 +131,10 @@ static void Diagnostics_RefreshReports(void)
         (gray.error_count > 0U) ? DIAG_STATUS_FAULT :
             (gray_contrast_observed ? DIAG_STATUS_OK : DIAG_STATUS_DEGRADED),
         gray.scan_count, gray.error_count,
-        (gray.error_count > 0U) ? "address/ADC scan timeout" :
-            (gray_contrast_observed ? "ADC optical contrast observed" :
-                ((gray.scan_count > 0U) ? "ADC contrast below threshold" :
-                                          "waiting for scheduled ADC scan")));
+        (gray.error_count > 0U) ? "address scan timeout" :
+            (gray_contrast_observed ? "digital high/low response observed" :
+                ((gray.scan_count > 0U) ? "waiting for both digital levels" :
+                                          "waiting for scheduled GPIO scan")));
     Diagnostics_Set(DIAG_OLED,
         !oled.present ? DIAG_STATUS_FAULT :
             ((oled.ack_errors > 0U || !oled_visual_passed) ?
@@ -266,22 +268,52 @@ static void Diagnostics_PrintHeading(void)
 static void Diagnostics_PrintGraySnapshot(void)
 {
     GrayscaleSnapshot_t s;
-    uint16_t min_value;
-    uint16_t max_value;
     Grayscale_GetSnapshot(&s);
-    min_value = max_value = s.adc[0];
-    for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++) {
-        if (s.adc[i] < min_value) min_value = s.adc[i];
-        if (s.adc[i] > max_value) max_value = s.adc[i];
-    }
-    if ((uint16_t)(max_value - min_value) >= GRAY_ADC_RESPONSE_DELTA)
-        gray_contrast_observed = true;
-    debug_printf("GRAY adc=[%u,%u,%u,%u,%u,%u,%u,%u] span=%u scans=%lu errors=%lu pending=%u\r\n",
-        s.adc[0], s.adc[1], s.adc[2], s.adc[3],
-        s.adc[4], s.adc[5], s.adc[6], s.adc[7],
-        (uint16_t)(max_value - min_value), (unsigned long)s.scan_count,
+    if (s.high_mask != 0U) gray_high_observed = true;
+    if (s.high_mask != 0xFFU) gray_low_observed = true;
+    gray_contrast_observed = gray_high_observed && gray_low_observed;
+    debug_printf("GRAY digital=[%u,%u,%u,%u,%u,%u,%u,%u] high_mask=0x%02X scans=%lu errors=%lu pending=%u\r\n",
+        s.level[0], s.level[1], s.level[2], s.level[3],
+        s.level[4], s.level[5], s.level[6], s.level[7],
+        (unsigned int)s.high_mask, (unsigned long)s.scan_count,
         (unsigned long)s.error_count, Grayscale_IsScanPending());
     Diagnostics_RefreshReports();
+}
+
+static const char *Diagnostics_LinePolarityName(LinePolarity_t polarity)
+{
+    return (polarity == LINE_POLARITY_ACTIVE_HIGH) ? "HIGH" : "LOW";
+}
+
+static const char *Diagnostics_LineStateName(LineFollowState_t state)
+{
+    if (state == LINE_FOLLOW_TRACKING) return "TRACK";
+    if (state == LINE_FOLLOW_SEARCHING) return "SEARCH";
+    if (state == LINE_FOLLOW_LOST_TIMEOUT) return "TIMEOUT";
+    return "IDLE";
+}
+
+static void Diagnostics_PrintLine(void)
+{
+    AppLineSnapshot_t app;
+    AppLine_GetSnapshot(&app);
+    debug_printf("LINE app=%u state=%s polarity=%s cal=%u active=%u mask=0x%02X samples=%lu valid=%u pos_x1000=%ld conf_x1000=%lu correction=%ld target=%ld,%ld lost_ms=%lu age=%lu\r\n",
+        (unsigned int)app.state,
+        Diagnostics_LineStateName(app.control.state),
+        Diagnostics_LinePolarityName(app.control.polarity),
+        app.control.calibration.valid, app.control.calibration.active,
+        (unsigned int)app.control.calibration.valid_mask,
+        (unsigned long)app.control.calibration.sample_count,
+        app.control.line_valid,
+        (long)Diagnostics_Round(app.control.position * 1000.0f),
+        (unsigned long)Diagnostics_ScalePositive(
+            app.control.confidence, 1000.0f),
+        (long)Diagnostics_Round(app.control.correction_mm_s),
+        (long)Diagnostics_Round(app.control.left_target_mm_s),
+        (long)Diagnostics_Round(app.control.right_target_mm_s),
+        (unsigned long)((app.control.lost_since_ms == 0U) ? 0U :
+            (SystemTime_Now() - app.control.lost_since_ms)),
+        (unsigned long)(SystemTime_Now() - app.control.last_update_ms));
 }
 
 static void Diagnostics_PrintCommunication(void)
@@ -422,8 +454,11 @@ static void Diagnostics_ResetSpeedMetrics(void)
 
 static void Diagnostics_ArmSpeedTest(uint8_t wheel_mask, uint32_t now_ms)
 {
+    AppLineSnapshot_t app_line_snapshot;
+    AppLine_GetSnapshot(&app_line_snapshot);
     if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
-        (motor_diag_state != MOTOR_DIAG_IDLE)) {
+        (motor_diag_state != MOTOR_DIAG_IDLE) ||
+        (app_line_snapshot.state != APP_LINE_IDLE)) {
         debug_println("Speed test rejected: clear faults and return IDLE.");
         return;
     }
@@ -602,11 +637,14 @@ static void Diagnostics_ArmHeadingTest(HeadingDiagKind_t kind,
                                        uint32_t now_ms)
 {
     HeadingSnapshot_t heading_snapshot;
+    AppLineSnapshot_t app_line_snapshot;
     Heading_GetSnapshot(&heading_snapshot);
+    AppLine_GetSnapshot(&app_line_snapshot);
     if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
         (motor_diag_state != MOTOR_DIAG_IDLE) ||
         (speed_diag_state != SPEED_DIAG_IDLE) ||
-        (heading_diag_state != HEADING_DIAG_IDLE)) {
+        (heading_diag_state != HEADING_DIAG_IDLE) ||
+        (app_line_snapshot.state != APP_LINE_IDLE)) {
         debug_println("M4 test rejected: clear faults and return IDLE.");
         return;
     }
@@ -724,6 +762,8 @@ void Diagnostics_Init(void)
     motor_test_passed = false;
     oled_visual_passed = false;
     gray_contrast_observed = false;
+    gray_high_observed = false;
+    gray_low_observed = false;
     boot_reported = false;
     boot_started_ms = SystemTime_Now();
     motor_diag_state = MOTOR_DIAG_IDLE;
@@ -737,6 +777,7 @@ void Diagnostics_Init(void)
     heading_diag_state = HEADING_DIAG_IDLE;
     heading_diag_final_error_deg = 0.0f;
     heading_diag_completed = false;
+    line_previous_state = APP_LINE_IDLE;
     Diagnostics_ResetSpeedMetrics();
 #ifdef M2_FAULT_INJECTION_TEST
     fault_injection_stop_watchdog = false;
@@ -746,7 +787,7 @@ void Diagnostics_Init(void)
 
 void Diagnostics_RunBootSelfTest(void)
 {
-    debug_println("\r\n=== MSPM0 CAR M4 HEADING CONTROL ===");
+    debug_println("\r\n=== MSPM0 CAR M5 LINE FOLLOWING ===");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("*** FAULT INJECTION BUILD - ZERO PWM TESTS ONLY ***");
 #endif
@@ -761,6 +802,7 @@ void Diagnostics_PrintHelp(void)
     debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
     debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
     debug_println("          g=heading z=calibrate u=+90 i=-90 w=straight; A=arm");
+    debug_println("          r=line 1=qualify 2=active-level 3=arm line A=start 0=stop");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("TEST ONLY: T=action timeout G=gyro disconnect W=stop watchdog");
@@ -828,6 +870,31 @@ static void Diagnostics_ServiceReport(void)
     report_line++;
 }
 
+static void Diagnostics_ServiceLineEvents(void)
+{
+    AppLineSnapshot_t app;
+    AppLine_GetSnapshot(&app);
+    if ((line_previous_state == APP_LINE_CALIBRATING) &&
+        (app.state == APP_LINE_IDLE)) {
+        debug_printf("M5 CAL %s mask=0x%02X samples=%lu\r\n",
+            app.control.calibration.valid ? "OK" : "FAULT",
+            (unsigned int)app.control.calibration.valid_mask,
+            (unsigned long)app.control.calibration.sample_count);
+        Diagnostics_PrintLine();
+    } else if ((line_previous_state == APP_LINE_RUNNING) &&
+               (app.state == APP_LINE_IDLE)) {
+        debug_printf("M5 RESULT elapsed=%lu state=%s valid=%u pos_x1000=%ld conf_x1000=%lu\r\n",
+            (unsigned long)(SystemTime_Now() - app.started_ms),
+            Diagnostics_LineStateName(app.control.state),
+            app.control.line_valid,
+            (long)Diagnostics_Round(app.control.position * 1000.0f),
+            (unsigned long)Diagnostics_ScalePositive(
+                app.control.confidence, 1000.0f));
+        Diagnostics_PrintSafety();
+    }
+    line_previous_state = app.state;
+}
+
 void Diagnostics_Poll(void)
 {
     uint32_t now_ms = SystemTime_Now();
@@ -835,6 +902,7 @@ void Diagnostics_Poll(void)
     Diagnostics_ServiceMotorTest(now_ms);
     Diagnostics_ServiceSpeedTest(now_ms);
     Diagnostics_ServiceHeadingTest(now_ms);
+    Diagnostics_ServiceLineEvents();
 
     if (gray_print_pending) {
         Grayscale_GetSnapshot(&gray);
@@ -855,6 +923,32 @@ void Diagnostics_Poll(void)
         case 'e': case 'E': Diagnostics_PrintEncoder(); break;
         case 'y': case 'Y': Diagnostics_PrintGyro(); break;
         case 'g': Diagnostics_PrintHeading(); break;
+        case 'r': case 'R': Diagnostics_PrintLine(); break;
+        case '1':
+            if (AppLine_StartCalibration(now_ms))
+                debug_println("M5 qualification: sweep every sensor across line and background for 5 s.");
+            else
+                debug_println("M5 qualification rejected: clear faults and return IDLE.");
+            break;
+        case '2':
+            if (AppLine_TogglePolarity()) Diagnostics_PrintLine();
+            else debug_println("M5 active-level change rejected: return to IDLE.");
+            break;
+        case '3':
+            if ((motor_diag_state != MOTOR_DIAG_IDLE) ||
+                (speed_diag_state != SPEED_DIAG_IDLE) ||
+                (heading_diag_state != HEADING_DIAG_IDLE)) {
+                debug_println("M5 arm rejected: another action is active.");
+            } else if (AppLine_Arm(now_ms)) {
+                debug_println("Place car on line; type uppercase A within 10 s.");
+            } else {
+                debug_println("M5 arm rejected: qualify all channels and acquire the line first.");
+            }
+            break;
+        case '0':
+            if (AppLine_Stop(now_ms)) debug_println("M5 line action stopped; state=IDLE.");
+            else debug_println("M5 line action is not active.");
+            break;
         case 'z':
             if ((SystemState_Get() == SYSTEM_STATE_IDLE) &&
                 !Safety_HasFault() &&
@@ -904,11 +998,14 @@ void Diagnostics_Poll(void)
         case ']': Diagnostics_AdjustSpeedGain(true, 0.05f, now_ms); break;
         case ',': Diagnostics_AdjustSpeedGain(false, -0.25f, now_ms); break;
         case '.': Diagnostics_AdjustSpeedGain(false, 0.25f, now_ms); break;
-        case 'm': case 'M':
+        case 'm': case 'M': {
+            AppLineSnapshot_t app_line_snapshot;
+            AppLine_GetSnapshot(&app_line_snapshot);
             if ((SystemState_Get() != SYSTEM_STATE_IDLE) ||
                 Safety_HasFault() ||
                 (speed_diag_state != SPEED_DIAG_IDLE) ||
-                (heading_diag_state != HEADING_DIAG_IDLE)) {
+                (heading_diag_state != HEADING_DIAG_IDLE) ||
+                (app_line_snapshot.state != APP_LINE_IDLE)) {
                 debug_println("Motor test rejected: clear faults and return IDLE.");
             } else {
                 motor_diag_state = MOTOR_DIAG_ARMED;
@@ -916,13 +1013,23 @@ void Diagnostics_Poll(void)
                 debug_println("Lift wheels, then type uppercase A within 10 s.");
             }
             break;
+        }
         case 'A':
-            if (heading_diag_state == HEADING_DIAG_ARMED)
+            {
+                AppLineSnapshot_t app_line_snapshot;
+                AppLine_GetSnapshot(&app_line_snapshot);
+                if (app_line_snapshot.state == APP_LINE_ARMED) {
+                    if (AppLine_ConfirmStart(now_ms)) {
+                        debug_println("CSV: M5,time_ms,phase,state,polarity,position_x1000,confidence_x1000,correction,targetL,targetR,rampL,rampR,speedL,speedR,pwmL,pwmR,faults");
+                        debug_println("M5 line following running; 0=normal stop, S/space=e-stop.");
+                    } else debug_println("M5 start rejected: arm expired or line unavailable.");
+                } else if (heading_diag_state == HEADING_DIAG_ARMED)
                 Diagnostics_StartHeadingTest(now_ms);
-            else if (speed_diag_state == SPEED_DIAG_ARMED)
+                else if (speed_diag_state == SPEED_DIAG_ARMED)
                 Diagnostics_StartSpeedTest(now_ms);
-            else
+                else
                 Diagnostics_StartMotorTest(now_ms);
+            }
             break;
 #ifdef M2_FAULT_INJECTION_TEST
         case 'T':
@@ -948,6 +1055,7 @@ void Diagnostics_Poll(void)
                 Heading_Stop();
                 heading_diag_state = HEADING_DIAG_IDLE;
                 motor_diag_state = MOTOR_DIAG_IDLE;
+                (void)AppLine_Stop(now_ms);
                 debug_println("Faults cleared; state=IDLE.");
             } else {
                 debug_println("Fault clear rejected.");
@@ -1045,6 +1153,37 @@ void Diagnostics_Task100ms(void)
             wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
             wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
             (unsigned long)safety_snapshot.fault_bits);
+    }
+    {
+        AppLineSnapshot_t app;
+        AppLine_GetSnapshot(&app);
+        if (app.state == APP_LINE_RUNNING) {
+            SafetySnapshot_t safety_snapshot;
+            WheelSpeedSnapshot_t wheel_snapshot;
+            Safety_GetSnapshot(&safety_snapshot);
+            WheelSpeed_GetSnapshot(&wheel_snapshot);
+            debug_printf("M5,%lu,RUN,%s,%s,%ld,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,0x%08lX\r\n",
+                (unsigned long)now_ms,
+                Diagnostics_LineStateName(app.control.state),
+                Diagnostics_LinePolarityName(app.control.polarity),
+                (long)Diagnostics_Round(app.control.position * 1000.0f),
+                (unsigned long)Diagnostics_ScalePositive(
+                    app.control.confidence, 1000.0f),
+                (long)Diagnostics_Round(app.control.correction_mm_s),
+                (long)Diagnostics_Round(app.control.left_target_mm_s),
+                (long)Diagnostics_Round(app.control.right_target_mm_s),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
+                wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
+                wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
+                (unsigned long)safety_snapshot.fault_bits);
+        }
     }
 }
 
