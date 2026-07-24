@@ -156,7 +156,7 @@ print(asyncio.run(command(b"h")).decode("utf-8", "replace"))
 | 功能 | 当前证据 | 状态 |
 |---|---|---|
 | Keil 工程/HEX | ARM Compiler 6.22 全量重建 0 error、0 warning；AXF/HEX 非空 | 已编译，M0 完成 |
-| 下载链路 | 历史有线 DAP 未接 RST 时已得到 `Erase Done / Programming Done / Verify OK / Application running`；2026-07-24 Horco 无线 DAP 命令行首次到达 SWD power-up 后 `Erase Failed`，相同命令唯一重试报 `E310 / Cannot access Memory`。补接 RST 后 Normal 模式仍出现 `Flash Timeout`，under Reset/HW RESET 报 `Could not stop Cortex-M device`；关闭 ESP 模式后 `Flash Timeout` 不变 | 无线下载未验收；问题边界在复位后停核/Flash 传输链路 |
+| 下载链路 | 历史有线 DAP 未接 RST 时已得到 `Erase Done / Programming Done / Verify OK / Application running`；2026-07-24 Horco 无线 DAP 命令行首次到达 SWD power-up 后 `Erase Failed`，相同命令唯一重试报 `E310 / Cannot access Memory`。补接 RST 后 Normal 模式仍出现 `Flash Timeout`，under Reset/HW RESET 报 `Could not stop Cortex-M device`；关闭 ESP 模式后 `Flash Timeout` 不变；Keil 界面确认 Max Clock 已是 1 MHz | 无线下载未验收；停止 SWD 并先用已验证 BSL 流程恢复 |
 | UART0 | Horco 无线 DAP `COM10`、HC-04BLE `COM7` 与历史 CH340 COM5 均已验证 115200 双向命令和输出 | 已上板 |
 | 电机与急停 | 历史台架完成 A/B 正反转，dEdgeA=1543、dEdgeB=1402，`S` 急停有效；本次清理未重复运动测试 | 已上板 |
 | 编码器 | 手转 A count=1076/edge=1084，B count=-1041/edge=1041；电机联测两路边沿均增长 | 已上板 |
@@ -189,7 +189,7 @@ print(asyncio.run(command(b"h")).decode("utf-8", "replace"))
 
 最新验证：31 项主机回归全部通过；Keil V6.22 降激进调参版全量构建为 0 error、0 warning，已下载。该版落地运行 22.4 s 收到 224 个样本，TRACK=207、SEARCH=17、故障码始终为 0，用户观察表现基本没有问题；随后因外界原因人工断电，不将串口中断判为固件故障，也不计完整单圈。本次仅同步实测证据，无功能变化。完整单圈与多圈仍待验收。M4 已完成证据不变。完整记录见 `docs/2026-07-22-M3验证记录.md`、`docs/2026-07-22-M4验证记录.md` 和 `docs/2026-07-24-M5临时数字灰度模块适配记录.md`。
 
-无线链路最新验证：Horco 电脑端正常枚举 CMSIS-DAP v2、U 盘与 `COM10`，车端接收机通过 U20 的 5 V/GND、PA19/PA20 SWD、PA10/PA11 UART 和 NRST 接入；下载前 `h` 命令完整返回。正式工程全量重建仍为 `Code=22324, RO-data=4616, RW-data=4, ZI-data=19652`、0 error、0 warning、AXF 279932 字节、HEX 75860 字节，无功能变化。命令行无线下载按规则执行两次：首次 SWD power-up 后擦除失败，完全相同命令重试在 DebugPortStart 报 `E310 / Cannot access Memory`。用户手动下载时 Normal/SYSRESETREQ 常见 `Flash Timeout`，under Reset/HW RESET 报 `Could not stop Cortex-M device`；电脑端 `esp_down` 已确认关闭但现象不变。一次 45 s 定向串口监听中，点击下载后仅在 `t=1.679 s` 收到一次完整启动横幅，之后没有第二次启动，失败后再次发送 `h` 收到 0 字节。该证据排除“Flash 期间 WWDT 导致二次复位”，表明目标在初次复位后曾运行旧应用，随后停核或 Flash 算法/传输阶段挂起并最终超时。两项针对性修正均未解决同一问题，已停止继续换设置或反复下载；剩余高概率边界为 Horco 无线 CMSIS-DAP 在当前 10 MHz SWD 与 MSPM0 Flash 序列下的传输/时序兼容性，下一项单一诊断决策是保持其余配置不变并降低 SWD 时钟。本次仅同步诊断证据，无功能变化。历史 HC-04BLE 与 ESP32 NUS 证据保留为备用。
+无线链路最新验证：Horco 电脑端正常枚举 CMSIS-DAP v2、U 盘与 `COM10`，车端接收机通过 U20 的 5 V/GND、PA19/PA20 SWD、PA10/PA11 UART 和 NRST 接入；下载前 `h` 命令完整返回。正式工程全量重建仍为 `Code=22324, RO-data=4616, RW-data=4, ZI-data=19652`、0 error、0 warning、AXF 279932 字节、HEX 75860 字节，无功能变化。命令行无线下载按规则执行两次：首次 SWD power-up 后擦除失败，完全相同命令重试在 DebugPortStart 报 `E310 / Cannot access Memory`。用户手动下载时 Normal/SYSRESETREQ 常见 `Flash Timeout`，under Reset/HW RESET 报 `Could not stop Cortex-M device`；电脑端 `esp_down` 已确认关闭但现象不变。一次 45 s 定向串口监听中，点击下载后仅在 `t=1.679 s` 收到一次完整启动横幅，之后没有第二次启动，失败后再次发送 `h` 收到 0 字节。该证据排除“Flash 期间 WWDT 导致二次复位”，表明目标在初次复位后曾运行旧应用，随后停核或 Flash 擦写/传输阶段挂起并最终超时。用户确认 Keil Settings 显示 Max Clock 已为 1 MHz，故 10 MHz 时钟假设被排除；并报告失败后重新上电不能恢复正常，历史同类状态需通过 BSL 才恢复，当前 Main Flash 可能已被部分擦除或写坏。两项针对性修正均未解决同一问题，已停止继续换设置或反复下载；必须先用此前已验证的同一 BSL 流程恢复正式 HEX，再把 Horco 无线 SWD 作为未通过兼容性验证的链路隔离。本次仅同步诊断证据，无功能变化。历史 HC-04BLE 与 ESP32 NUS 证据保留为备用。
 
 ## 6. 构建与仓库规则
 
