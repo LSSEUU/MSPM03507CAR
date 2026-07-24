@@ -22,8 +22,9 @@
 
 | 功能 | MCU 引脚 | 当前配置/接线 |
 |---|---|---|
-| UART0 诊断 | PA10 TX / PA11 RX | 115200 8N1；当前无线调试使用 HC-04BLE Classic SPP `COM7`，有线备用为独立 USB-UART COM5 |
-| HC-04BLE 调车器 | TX→PA11 / RX←PA10 | 与主控共地；Windows 配对后使用设备地址匹配的 `COM7`，BLE `FFE1` 通知在本机不可用 |
+| UART0 诊断 | PA10 TX / PA11 RX | 115200 8N1；当前无线入口为 Horco 无线 DAP 虚拟串口 `COM10`，HC-04BLE `COM7` 和独立 USB-UART COM5 保留为已验证备用 |
+| Horco 无线 DAP | RX←PA10 / TX→PA11；DIO→PA19 / CLK→PA20 | 车端接收机由 U20 的 5 V/GND 供电，电脑端枚举为 `Horco CMSIS-DAP v2`、`COM10`；RST/3.3 V 不接 |
+| HC-04BLE 调车器 | TX→PA11 / RX←PA10 | 已验证备用；接入 Horco DAP 串口时必须断开 HC-04 的 TX/RX，避免两个发送端同时驱动 PA11 |
 | ESP32 BLE 调车器 | GPIO16 RX2 / GPIO17 TX2 | 历史已验证备用桥，当前不接 UART0；重新接入时不得与 HC-04/USB-UART 同时驱动 PA11 |
 | JY61P | PA22 UART2_RX | 9600；JY61P TX→PA22，RX 不接；PCB 平面与地面平行、正面朝上，避免 pitch 接近 ±90° 的欧拉角万向节锁 |
 | PA21 / VREF− | PA21 | 无上下拉高阻；不启用 UART2_TX，避免经 C44 耦合灰度 AD0 |
@@ -114,7 +115,7 @@ M5 临时数字灰度模块以 0/1 高低电平工作，默认高电平表示目
 
 ### 无线调车器
 
-当前无线入口是设备名 `HC-04BLE` 的 Classic SPP 虚拟串口 `COM7`，使用 `pyserial` 按 115200 8N1 访问。其硬件 ID 包含设备地址 `C4:25:07:09:0B:7B`；模块也暴露 BLE `FFE1`，但本机启用通知失败，因此不把 BLE 特征作为当前验收入口。历史 ESP32 NUS 桥仍保留为备用方案：BLE 名称 `MSPM0-CAR`，车辆侧 GPIO16/17 以 115200 8N1 透传 UART0。
+当前无线入口是 Horco 无线 DAP 的虚拟串口 `COM10`，使用 `pyserial` 按 115200 8N1 访问；2026-07-24 已通过 `h` 命令收到完整帮助菜单，证明供电、主从无线链路和 UART0 双向透传正常。HC-04BLE Classic SPP `COM7` 与历史 ESP32 NUS 桥均保留为已验证备用，但切换链路时只允许一个发送端驱动 PA11。
 
 以下端点仅用于历史 ESP32 NUS 备用桥：
 
@@ -155,8 +156,8 @@ print(asyncio.run(command(b"h")).decode("utf-8", "replace"))
 | 功能 | 当前证据 | 状态 |
 |---|---|---|
 | Keil 工程/HEX | ARM Compiler 6.22 全量重建 0 error、0 warning；AXF/HEX 非空 | 已编译，M0 完成 |
-| 下载链路 | 新 DAPLink 未接 RST；当前复核 `Erase Done / Programming Done / Verify OK / Application running` | 已上板 |
-| UART0 | 当前 HC-04BLE Classic SPP `COM7` 与历史 CH340 COM5 均已验证 115200 双向命令和输出 | 已上板 |
+| 下载链路 | 历史有线 DAP 未接 RST 时已得到 `Erase Done / Programming Done / Verify OK / Application running`；2026-07-24 Horco 无线 DAP 命令行首次到达 SWD power-up 后 `Erase Failed`，相同命令唯一重试报 `E310 / Cannot access Memory` | 无线下载未验收；需用户手动下载恢复 |
+| UART0 | Horco 无线 DAP `COM10`、HC-04BLE `COM7` 与历史 CH340 COM5 均已验证 115200 双向命令和输出 | 已上板 |
 | 电机与急停 | 历史台架完成 A/B 正反转，dEdgeA=1543、dEdgeB=1402，`S` 急停有效；本次清理未重复运动测试 | 已上板 |
 | 编码器 | 手转 A count=1076/edge=1084，B count=-1041/edge=1041；电机联测两路边沿均增长 | 已上板 |
 | JY61P | 最终固件有效帧 41→89，yaw/pitch/roll 有效，checksum=0、frame=0 | 已上板 |
@@ -165,7 +166,8 @@ print(asyncio.run(command(b"h")).decode("utf-8", "replace"))
 | OLED | 启动初始化 ACK 正常；4 字节后台刷新在首次 `t=2.7 s` 报告前完成，连续调度无复位 | 已上板 |
 | LED | 硬件无 MCU 可控状态 LED | 预期 `DEGRADED` |
 | ESP32 BLE 无线调车器 | BLE 名称 `MSPM0-CAR` 的 NUS 桥历史验证完整，当前已从 UART0 断开 | 已验证备用 |
-| HC-04BLE | Classic SPP `COM7`、115200 8N1 双向透传；M3 5 s 与多轮 M5 CSV 无 UART 丢包/格式错误 | 当前安装并验证 |
+| Horco 无线 DAP 串口 | `COM10`、115200 8N1 双向透传，下载尝试前 `h` 返回完整帮助菜单 | 当前安装并验证 |
+| HC-04BLE | Classic SPP `COM7`、115200 8N1 双向透传；M3 5 s 与多轮 M5 CSV 无 UART 丢包/格式错误 | 已验证备用 |
 | M2 状态机/安全模型 | 主机 C 回归覆盖合法状态迁移、调度漏期、动作超时、陀螺仪超时、急停锁存、PWM 否决和仅回到 IDLE 的清故障 | 主机测试通过 |
 | M2 目标构建 | ARM Compiler 6.22：`Code=12938, RO-data=1570, RW-data=4, ZI-data=18996`，0 error、0 warning；AXF 230068 字节、HEX 40895 字节 | 已编译并上板 |
 | M2 串口台架 | `miss=0/0/0/0`；急停 `0x01`、动作超时 `0x08`、JY61P 断开 `0x02`、停喂狗重启 `0x20` 均锁存且 PWM=0；完整电机测试 dEdgeA=1539、dEdgeB=1346；逐行报告和 OLED 刷新稳定 | 通过；物理响应延迟测量留作 M7 复核 |
@@ -187,7 +189,7 @@ print(asyncio.run(command(b"h")).decode("utf-8", "replace"))
 
 最新验证：31 项主机回归全部通过；Keil V6.22 降激进调参版全量构建为 0 error、0 warning，已下载。该版落地运行 22.4 s 收到 224 个样本，TRACK=207、SEARCH=17、故障码始终为 0，用户观察表现基本没有问题；随后因外界原因人工断电，不将串口中断判为固件故障，也不计完整单圈。本次仅同步实测证据，无功能变化。完整单圈与多圈仍待验收。M4 已完成证据不变。完整记录见 `docs/2026-07-22-M3验证记录.md`、`docs/2026-07-22-M4验证记录.md` 和 `docs/2026-07-24-M5临时数字灰度模块适配记录.md`。
 
-无线链路最新验证：当前 HC-04BLE 通过 Classic SPP `COM7` 以 115200 8N1 透传，完成静态灰度、覆盖确认、M3 5 s 与多轮 M5 CSV；UART 统计无丢包/格式错误。历史 ESP32 NUS 桥证据保留，但当前不接 UART0。
+无线链路最新验证：Horco 电脑端正常枚举 CMSIS-DAP v2、U 盘与 `COM10`，车端接收机通过 U20 的 5 V/GND、PA19/PA20 SWD 和 PA10/PA11 UART 接入；下载前 `h` 命令完整返回。正式工程全量重建仍为 `Code=22324, RO-data=4616, RW-data=4, ZI-data=19652`、0 error、0 warning、AXF 279932 字节、HEX 75860 字节，无功能变化。命令行无线下载按规则执行两次：首次 SWD power-up 后擦除失败，完全相同命令重试在 DebugPortStart 报 `E310 / Cannot access Memory`，之后 `COM10` 对 `s/h` 均无返回，当前目标固件运行状态不能确认。已停止尝试，必须由用户手动下载后再复验，不能据此宣称无线下载通过。历史 HC-04BLE 与 ESP32 NUS 证据保留为备用。
 
 ## 6. 构建与仓库规则
 
