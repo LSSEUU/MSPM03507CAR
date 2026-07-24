@@ -350,7 +350,7 @@ static void Diagnostics_PrintInfrared(void)
         (unsigned long)receiver.queued_events,
         receiver.nec.last_address, receiver.nec.last_command,
         (unsigned long)receiver.nec.last_raw);
-    debug_printf("IR EDGE count=%lu high=%lu low=%lu ticks=%u/%u/%u pin=%u\r\n",
+    debug_printf("IR EDGE count=%lu phase_high=%lu phase_low=%lu ticks=%u/%u/%u gpio_pin=%u\r\n",
         (unsigned long)receiver.capture_edges,
         (unsigned long)receiver.capture_high_edges,
         (unsigned long)receiver.capture_low_edges,

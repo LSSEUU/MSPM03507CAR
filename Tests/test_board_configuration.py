@@ -20,6 +20,9 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         project = (
             ROOT / "keil" / "empty_LP_MSPM0G3507_nortos_keil.uvprojx"
         ).read_text(encoding="utf-8")
+        receiver = (ROOT / "Hardware" / "ir_receiver.c").read_text(
+            encoding="utf-8"
+        )
         remote_config = (ROOT / "Config" / "remote_config.h").read_text(
             encoding="utf-8"
         )
@@ -37,6 +40,10 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("IOMUX_PINCM47_PF_UART2_RX", header)
         self.assertIn("IOMUX_PINCM15_PF_TIMA1_CCP0", header)
         self.assertIn("#define IR_REMOTE_KEYMAP_VERIFIED              0", remote_config)
+        self.assertIn("ir_phase_level_high = !ir_phase_level_high", receiver)
+        self.assertNotIn(
+            "bool level_high = (DL_GPIO_readPins", receiver
+        )
 
     def test_no_stale_sysconfig_source_can_overwrite_frozen_configuration(self):
         syscfg_sources = list((ROOT / "Source").glob("*.syscfg"))
