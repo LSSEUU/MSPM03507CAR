@@ -19,16 +19,6 @@ typedef enum {
 } LineFollowState_t;
 
 typedef struct {
-    uint16_t minimum[LINE_SENSOR_CHANNEL_COUNT];
-    uint16_t maximum[LINE_SENSOR_CHANNEL_COUNT];
-    uint8_t valid_mask;
-    uint32_t sample_count;
-    bool active;
-    bool valid;
-} LineCalibration_t;
-
-typedef struct {
-    LineCalibration_t calibration;
     LinePolarity_t polarity;
     LineFollowState_t state;
     bool line_valid;
@@ -46,8 +36,6 @@ typedef struct {
 
 void LineFollow_Init(LinePolarity_t polarity);
 void LineFollow_SetPolarity(LinePolarity_t polarity);
-void LineFollow_StartCalibration(void);
-bool LineFollow_FinishCalibration(void);
 void LineFollow_ProcessSample(const uint8_t level[LINE_SENSOR_CHANNEL_COUNT],
                               uint32_t scan_id, uint32_t now_ms);
 bool LineFollow_Start(uint32_t now_ms);

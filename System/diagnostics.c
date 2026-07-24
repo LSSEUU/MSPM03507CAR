@@ -310,13 +310,10 @@ static void Diagnostics_PrintLine(void)
 {
     AppLineSnapshot_t app;
     AppLine_GetSnapshot(&app);
-    debug_printf("LINE app=%u state=%s polarity=%s cal=%u active=%u mask=0x%02X samples=%lu valid=%u pos_x1000=%ld conf_x1000=%lu correction=%ld target=%ld,%ld lost_ms=%lu age=%lu\r\n",
+    debug_printf("LINE app=%u state=%s polarity=%s valid=%u pos_x1000=%ld conf_x1000=%lu correction=%ld target=%ld,%ld lost_ms=%lu age=%lu\r\n",
         (unsigned int)app.state,
         Diagnostics_LineStateName(app.control.state),
         Diagnostics_LinePolarityName(app.control.polarity),
-        app.control.calibration.valid, app.control.calibration.active,
-        (unsigned int)app.control.calibration.valid_mask,
-        (unsigned long)app.control.calibration.sample_count,
         app.control.line_valid,
         (long)Diagnostics_Round(app.control.position * 1000.0f),
         (unsigned long)Diagnostics_ScalePositive(
@@ -907,7 +904,7 @@ void Diagnostics_PrintHelp(void)
     debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
     debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
     debug_println("          g=heading z=calibrate u=+90 i=-90 w=straight; A=arm");
-    debug_println("          r=line 1=qualify 2=active-level 3=arm line A=start 0=stop");
+    debug_println("          r=line 2=active-level 3=arm line A=start 0=stop");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("TEST ONLY: T=action timeout G=gyro disconnect W=stop watchdog");
@@ -979,14 +976,7 @@ static void Diagnostics_ServiceLineEvents(void)
 {
     AppLineSnapshot_t app;
     AppLine_GetSnapshot(&app);
-    if ((line_previous_state == APP_LINE_CALIBRATING) &&
-        (app.state == APP_LINE_IDLE)) {
-        debug_printf("M5 CAL %s mask=0x%02X samples=%lu\r\n",
-            app.control.calibration.valid ? "OK" : "FAULT",
-            (unsigned int)app.control.calibration.valid_mask,
-            (unsigned long)app.control.calibration.sample_count);
-        Diagnostics_PrintLine();
-    } else if ((line_previous_state == APP_LINE_RUNNING) &&
+    if ((line_previous_state == APP_LINE_RUNNING) &&
                (app.state == APP_LINE_IDLE)) {
         debug_printf("M5 RESULT elapsed=%lu state=%s valid=%u pos_x1000=%ld conf_x1000=%lu\r\n",
             (unsigned long)(SystemTime_Now() - app.started_ms),
@@ -1109,10 +1099,7 @@ void Diagnostics_Poll(void)
             break;
         }
         case '1':
-            if (AppLine_StartCalibration(now_ms))
-                debug_println("M5 qualification: sweep every sensor across line and background for 5 s.");
-            else
-                debug_println("M5 qualification rejected: clear faults and return IDLE.");
+            debug_println("M5 qualification disabled: digital inputs use fixed 0/1 levels.");
             break;
         case '2':
             if (AppLine_TogglePolarity()) Diagnostics_PrintLine();
@@ -1126,7 +1113,7 @@ void Diagnostics_Poll(void)
             } else if (AppLine_Arm(now_ms)) {
                 debug_println("Place car on line; type uppercase A within 10 s.");
             } else {
-                debug_println("M5 arm rejected: qualify all channels and acquire the line first.");
+                debug_println("M5 arm rejected: acquire the line first.");
             }
             break;
         case '0':

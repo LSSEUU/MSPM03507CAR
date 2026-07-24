@@ -9,7 +9,6 @@
 
 typedef enum {
     APP_LINE_IDLE = 0,
-    APP_LINE_CALIBRATING,
     APP_LINE_ARMED,
     APP_LINE_RUNNING
 } AppLineState_t;
@@ -22,7 +21,6 @@ typedef struct {
 } AppLineSnapshot_t;
 
 void AppLine_Init(void);
-bool AppLine_StartCalibration(uint32_t now_ms);
 bool AppLine_TogglePolarity(void);
 bool AppLine_Arm(uint32_t now_ms);
 bool AppLine_ConfirmStart(uint32_t now_ms);

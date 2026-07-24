@@ -25,18 +25,6 @@ void AppLine_Init(void)
     LineFollow_Init(LINE_POLARITY_ACTIVE_HIGH);
 }
 
-bool AppLine_StartCalibration(uint32_t now_ms)
-{
-    if ((app_line.state != APP_LINE_IDLE) ||
-        (SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault())
-        return false;
-    LineFollow_StartCalibration();
-    app_line.state = APP_LINE_CALIBRATING;
-    app_line.started_ms = now_ms;
-    app_line.deadline_ms = now_ms + LINE_CALIBRATION_DURATION_MS;
-    return true;
-}
-
 bool AppLine_TogglePolarity(void)
 {
     LineFollowSnapshot_t snapshot;
@@ -57,7 +45,7 @@ bool AppLine_Arm(uint32_t now_ms)
         (SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault())
         return false;
     LineFollow_GetSnapshot(&snapshot);
-    if (!snapshot.calibration.valid || !snapshot.line_valid) return false;
+    if (!snapshot.line_valid) return false;
     app_line.state = APP_LINE_ARMED;
     app_line.deadline_ms = now_ms + DIAGNOSTIC_ARM_TIMEOUT_MS;
     return true;
@@ -95,7 +83,7 @@ bool AppLine_Stop(uint32_t now_ms)
     (void)now_ms;
     LineFollow_GetSnapshot(&control);
     was_active = (app_line.state != APP_LINE_IDLE) ||
-        (control.state != LINE_FOLLOW_IDLE) || control.calibration.active;
+        (control.state != LINE_FOLLOW_IDLE);
     if (app_line.state == APP_LINE_RUNNING) {
         WheelSpeed_Disable();
         Safety_EndAction();
@@ -116,13 +104,6 @@ void AppLine_ProcessGrayscale(const GrayscaleSnapshot_t *gray)
 void AppLine_Task20ms(uint32_t now_ms)
 {
     LineFollowSnapshot_t control;
-    if (app_line.state == APP_LINE_CALIBRATING) {
-        if (SystemTime_Reached(now_ms, app_line.deadline_ms)) {
-            (void)LineFollow_FinishCalibration();
-            AppLine_ReturnIdle();
-        }
-        return;
-    }
     if (app_line.state == APP_LINE_ARMED) {
         if (SystemTime_Reached(now_ms, app_line.deadline_ms))
             AppLine_ReturnIdle();

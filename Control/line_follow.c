@@ -38,64 +38,12 @@ void LineFollow_Init(LinePolarity_t polarity)
 
 void LineFollow_SetPolarity(LinePolarity_t polarity)
 {
-    if (line.state != LINE_FOLLOW_IDLE || line.calibration.active) return;
+    if (line.state != LINE_FOLLOW_IDLE) return;
     line.polarity = polarity;
     line.line_valid = false;
     line.confidence = 0.0f;
     valid_samples = 0U;
     invalid_samples = 0U;
-}
-
-void LineFollow_StartCalibration(void)
-{
-    uint32_t i;
-    if (line.state != LINE_FOLLOW_IDLE) return;
-    for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
-        line.calibration.minimum[i] = UINT16_MAX;
-        line.calibration.maximum[i] = 0U;
-    }
-    line.calibration.valid_mask = 0U;
-    line.calibration.sample_count = 0U;
-    line.calibration.valid = false;
-    line.calibration.active = true;
-    line.line_valid = false;
-    line.confidence = 0.0f;
-    valid_samples = 0U;
-    invalid_samples = 0U;
-}
-
-bool LineFollow_FinishCalibration(void)
-{
-    uint32_t i;
-    uint8_t valid_mask = 0U;
-    if (!line.calibration.active) return line.calibration.valid;
-    line.calibration.active = false;
-    if (line.calibration.sample_count < LINE_CALIBRATION_MIN_SAMPLES) {
-        line.calibration.valid = false;
-        return false;
-    }
-    for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
-        uint16_t span = (uint16_t)(line.calibration.maximum[i] -
-                                   line.calibration.minimum[i]);
-        if (span >= LINE_CALIBRATION_MIN_SPAN)
-            valid_mask |= (uint8_t)(1U << i);
-    }
-    line.calibration.valid_mask = valid_mask;
-    line.calibration.valid = (valid_mask == 0xFFU);
-    return line.calibration.valid;
-}
-
-static void LineFollow_UpdateCalibration(
-    const uint8_t level[LINE_SENSOR_CHANNEL_COUNT])
-{
-    uint32_t i;
-    for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
-        if (level[i] < line.calibration.minimum[i])
-            line.calibration.minimum[i] = level[i];
-        if (level[i] > line.calibration.maximum[i])
-            line.calibration.maximum[i] = level[i];
-    }
-    line.calibration.sample_count++;
 }
 
 void LineFollow_ProcessSample(const uint8_t level[LINE_SENSOR_CHANNEL_COUNT],
@@ -110,24 +58,11 @@ void LineFollow_ProcessSample(const uint8_t level[LINE_SENSOR_CHANNEL_COUNT],
     line.scan_id = scan_id;
     line.last_update_ms = now_ms;
     line.update_count++;
-    if (line.calibration.active) {
-        LineFollow_UpdateCalibration(level);
-        return;
-    }
-    if (!line.calibration.valid) return;
-
     for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
-        float span = (float)(line.calibration.maximum[i] -
-                             line.calibration.minimum[i]);
-        float normalized = ((float)level[i] -
-                            (float)line.calibration.minimum[i]) / span;
         float strength;
-        normalized = LineFollow_Clamp(normalized, 0.0f, 1.0f);
         strength = (line.polarity == LINE_POLARITY_ACTIVE_HIGH) ?
-            normalized : (1.0f - normalized);
-        strength = LineFollow_Clamp(
-            (strength - LINE_SIGNAL_FLOOR) / (1.0f - LINE_SIGNAL_FLOOR),
-            0.0f, 1.0f);
+            (level[i] != 0U ? 1.0f : 0.0f) :
+            (level[i] == 0U ? 1.0f : 0.0f);
         line.strength[i] = strength;
         active_sum += strength;
         weighted_sum += strength * line_channel_position[i];
@@ -157,8 +92,7 @@ void LineFollow_ProcessSample(const uint8_t level[LINE_SENSOR_CHANNEL_COUNT],
 
 bool LineFollow_Start(uint32_t now_ms)
 {
-    if ((line.state != LINE_FOLLOW_IDLE) || !line.calibration.valid ||
-        !line.line_valid || line.calibration.active)
+    if ((line.state != LINE_FOLLOW_IDLE) || !line.line_valid)
         return false;
     line.state = LINE_FOLLOW_TRACKING;
     line.lost_since_ms = 0U;
@@ -219,7 +153,6 @@ void LineFollow_Update(uint32_t now_ms)
 
 void LineFollow_Stop(void)
 {
-    line.calibration.active = false;
     line.state = LINE_FOLLOW_IDLE;
     line.lost_since_ms = 0U;
     line.correction_mm_s = 0.0f;
