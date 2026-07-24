@@ -77,20 +77,25 @@ static void test_checksum_noise_truncation_and_repeat(void)
     assert(!edge(&decoder, 1000U, true, 1U, &event));
     assert(!edge(&decoder, 0U, false, 2U, &event));
     IrNec_Timeout(&decoder);
+    assert(!send_repeat(&decoder, 5U, &event));
 
     /* Command inverse is wrong. */
     assert(!send_frame(&decoder, 0xFC02FF00UL, 10U,
         2240U, 2240U, 6760U, &event));
     assert(send_frame(&decoder, 0x9D62FF00UL, 100U,
         2240U, 2240U, 6760U, &event));
-    assert(send_repeat(&decoder, 180U, &event));
+    assert(send_repeat(&decoder, 280U, &event));
     assert(event.type == IR_NEC_EVENT_REPEAT);
     assert(event.command == 0x62U);
-    assert(!send_repeat(&decoder, 281U, &event));
+    /* Each accepted repeat renews the 180 ms inheritance window. */
+    assert(send_repeat(&decoder, 460U, &event));
+    assert(event.type == IR_NEC_EVENT_REPEAT);
+    assert(event.command == 0x62U);
+    assert(!send_repeat(&decoder, 641U, &event));
 
     IrNec_GetStats(&decoder, &stats);
     assert(stats.full_frames == 1U);
-    assert(stats.repeat_frames == 1U);
+    assert(stats.repeat_frames == 2U);
     assert(stats.checksum_errors == 1U);
     assert(stats.timing_errors >= 2U);
 }

@@ -119,7 +119,7 @@ bool IrNec_ProcessEdge(IrNecDecoder_t *decoder, uint16_t elapsed_ticks,
         decoder->state = IR_NEC_STATE_IDLE;
         if (completed_state == IR_NEC_STATE_REPEAT_MARK) {
             if (!decoder->stats.last_full_valid ||
-                ((uint32_t)(now_ms - decoder->stats.last_full_ms) >
+                ((uint32_t)(now_ms - decoder->repeat_reference_ms) >
                     IR_NEC_REPEAT_MAX_AGE_MS))
                 return false;
             event->type = IR_NEC_EVENT_REPEAT;
@@ -127,6 +127,7 @@ bool IrNec_ProcessEdge(IrNecDecoder_t *decoder, uint16_t elapsed_ticks,
             event->command = decoder->stats.last_command;
             event->raw = decoder->stats.last_raw;
             event->timestamp_ms = now_ms;
+            decoder->repeat_reference_ms = now_ms;
             decoder->stats.repeat_frames++;
             return true;
         }
@@ -151,6 +152,7 @@ bool IrNec_ProcessEdge(IrNecDecoder_t *decoder, uint16_t elapsed_ticks,
         decoder->stats.last_raw = decoder->raw;
         decoder->stats.last_full_ms = now_ms;
         decoder->stats.last_full_valid = true;
+        decoder->repeat_reference_ms = now_ms;
         return true;
     }
 

@@ -34,6 +34,8 @@ typedef struct {
     uint8_t state;
     uint8_t bit_index;
     uint32_t raw;
+    /* Freshness of the command inherited by a continuous repeat chain. */
+    uint32_t repeat_reference_ms;
     IrNecStats_t stats;
 } IrNecDecoder_t;
 
