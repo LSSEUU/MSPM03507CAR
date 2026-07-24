@@ -68,6 +68,10 @@ static bool gray_print_pending;
 static uint32_t gray_requested_scan_count;
 static bool report_pending;
 static uint8_t report_line;
+static bool infrared_report_pending;
+static uint8_t infrared_report_line;
+static IrReceiverStats_t infrared_report_receiver;
+static AppRemoteSnapshot_t infrared_report_app;
 static bool safety_report_pending;
 static uint8_t safety_report_line;
 static SystemState_t safety_report_system_state;
@@ -335,35 +339,52 @@ static void Diagnostics_PrintCommunication(void)
         (unsigned long)s.format_errors);
 }
 
-static void Diagnostics_PrintInfrared(void)
+static void Diagnostics_QueueInfraredReport(void)
 {
-    IrReceiverStats_t receiver;
-    AppRemoteSnapshot_t app;
-    IrReceiver_GetStats(&receiver);
-    AppRemote_GetSnapshot(&app);
-    debug_printf("IR full=%lu repeat=%lu checksum=%lu timing=%lu overflow=%lu queued=%lu last=0x%02X/0x%02X raw=0x%08lX\r\n",
-        (unsigned long)receiver.nec.full_frames,
-        (unsigned long)receiver.nec.repeat_frames,
-        (unsigned long)receiver.nec.checksum_errors,
-        (unsigned long)receiver.nec.timing_errors,
-        (unsigned long)receiver.queue_overflow,
-        (unsigned long)receiver.queued_events,
-        receiver.nec.last_address, receiver.nec.last_command,
-        (unsigned long)receiver.nec.last_raw);
-    debug_printf("IR EDGE count=%lu phase_high=%lu phase_low=%lu ticks=%u/%u/%u gpio_pin=%u\r\n",
-        (unsigned long)receiver.capture_edges,
-        (unsigned long)receiver.capture_high_edges,
-        (unsigned long)receiver.capture_low_edges,
-        receiver.capture_min_ticks, receiver.capture_max_ticks,
-        receiver.capture_last_ticks, receiver.pin_high);
-    debug_printf("REMOTE enabled=%u state=%u direction=%u speed=%u addr_reject=%lu unknown=%lu action_reject=%lu heartbeat_stop=%lu captured=%lu\r\n",
-        app.actions_enabled,
-        (unsigned int)app.state, (unsigned int)app.direction,
-        app.speed_mm_s, (unsigned long)app.address_rejects,
-        (unsigned long)app.unknown_commands,
-        (unsigned long)app.action_rejects,
-        (unsigned long)app.heartbeat_stops,
-        (unsigned long)app.captured_keys);
+    IrReceiver_GetStats(&infrared_report_receiver);
+    AppRemote_GetSnapshot(&infrared_report_app);
+    infrared_report_line = 0U;
+    infrared_report_pending = true;
+}
+
+static void Diagnostics_ServiceInfraredReport(void)
+{
+    if (!infrared_report_pending) return;
+    if (infrared_report_line == 0U) {
+        debug_printf("IR full=%lu repeat=%lu checksum=%lu timing=%lu overflow=%lu queued=%lu last=0x%02X/0x%02X raw=0x%08lX\r\n",
+            (unsigned long)infrared_report_receiver.nec.full_frames,
+            (unsigned long)infrared_report_receiver.nec.repeat_frames,
+            (unsigned long)infrared_report_receiver.nec.checksum_errors,
+            (unsigned long)infrared_report_receiver.nec.timing_errors,
+            (unsigned long)infrared_report_receiver.queue_overflow,
+            (unsigned long)infrared_report_receiver.queued_events,
+            infrared_report_receiver.nec.last_address,
+            infrared_report_receiver.nec.last_command,
+            (unsigned long)infrared_report_receiver.nec.last_raw);
+    } else if (infrared_report_line == 1U) {
+        debug_printf("IR EDGE count=%lu phase_high=%lu phase_low=%lu ticks=%u/%u/%u gpio_pin=%u\r\n",
+            (unsigned long)infrared_report_receiver.capture_edges,
+            (unsigned long)infrared_report_receiver.capture_high_edges,
+            (unsigned long)infrared_report_receiver.capture_low_edges,
+            infrared_report_receiver.capture_min_ticks,
+            infrared_report_receiver.capture_max_ticks,
+            infrared_report_receiver.capture_last_ticks,
+            infrared_report_receiver.pin_high);
+    } else {
+        debug_printf("REMOTE enabled=%u state=%u direction=%u speed=%u addr_reject=%lu unknown=%lu action_reject=%lu heartbeat_stop=%lu captured=%lu\r\n",
+            infrared_report_app.actions_enabled,
+            (unsigned int)infrared_report_app.state,
+            (unsigned int)infrared_report_app.direction,
+            infrared_report_app.speed_mm_s,
+            (unsigned long)infrared_report_app.address_rejects,
+            (unsigned long)infrared_report_app.unknown_commands,
+            (unsigned long)infrared_report_app.action_rejects,
+            (unsigned long)infrared_report_app.heartbeat_stops,
+            (unsigned long)infrared_report_app.captured_keys);
+        infrared_report_pending = false;
+        return;
+    }
+    infrared_report_line++;
 }
 
 static void Diagnostics_QueueSafetyReport(void)
@@ -848,6 +869,8 @@ void Diagnostics_Init(void)
     gray_print_pending = false;
     report_pending = false;
     report_line = 0U;
+    infrared_report_pending = false;
+    infrared_report_line = 0U;
     safety_report_pending = false;
     safety_report_line = 0U;
     speed_diag_state = SPEED_DIAG_IDLE;
@@ -1064,11 +1087,14 @@ void Diagnostics_Poll(void)
     if (!debug_kbhit()) return;
     switch (debug_getc()) {
         case 'h': case 'H': Diagnostics_PrintHelp(); break;
-        case 's': Diagnostics_PrintInfrared(); Diagnostics_PrintReport(); break;
+        case 's':
+            Diagnostics_QueueInfraredReport();
+            Diagnostics_PrintReport();
+            break;
         case 'd': case 'D':
             Diagnostics_PrintEncoder(); Diagnostics_PrintGyro();
             Diagnostics_PrintGraySnapshot(); Diagnostics_PrintCommunication();
-            Diagnostics_PrintWheelSpeed(); Diagnostics_PrintInfrared();
+            Diagnostics_PrintWheelSpeed(); Diagnostics_QueueInfraredReport();
             Diagnostics_QueueSafetyReport(); break;
         case 'e': case 'E': Diagnostics_PrintEncoder(); break;
         case 'y': case 'Y': Diagnostics_PrintGyro(); break;
@@ -1245,7 +1271,9 @@ void Diagnostics_Task100ms(void)
         Diagnostics_PrintReport();
         if (!Safety_HasFault()) (void)SystemState_CompleteSelfTest(true);
     }
-    if (report_pending)
+    if (infrared_report_pending)
+        Diagnostics_ServiceInfraredReport();
+    else if (report_pending)
         Diagnostics_ServiceReport();
     else
         Diagnostics_ServiceSafetyReport();

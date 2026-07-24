@@ -76,11 +76,16 @@ class M2SystemTests(unittest.TestCase):
         service = diagnostics.split(
             "static void Diagnostics_ServiceReport(void)", 1)[1].split(
             "void Diagnostics_Poll", 1)[0]
+        poll = diagnostics.split("void Diagnostics_Poll(void)", 1)[1].split(
+            "void Diagnostics_Task100ms", 1)[0]
 
         self.assertNotIn("for (", queue)
         self.assertIn("report_pending = true", queue)
         self.assertIn("report_line", service)
         self.assertIn("Diagnostics_ServiceReport();", diagnostics)
+        self.assertIn("Diagnostics_QueueInfraredReport();", poll)
+        self.assertNotIn("Diagnostics_PrintInfrared();", poll)
+        self.assertIn("Diagnostics_ServiceInfraredReport();", diagnostics)
 
     def test_fault_injection_is_excluded_from_production_target(self):
         project = (ROOT / "keil" /
