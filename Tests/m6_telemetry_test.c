@@ -67,6 +67,7 @@ int main(void)
     memset(&debug_stats, 0, sizeof(debug_stats));
     wheel.requested_mm_s[0] = 160.0f;
     wheel.requested_mm_s[1] = 160.0f;
+    wheel.raw_mm_s[0] = -2147483648.0f;
     wheel.actual_dt_us = 5000U;
     heading.yaw_deg = 1.25f;
     heading.yaw_rate_deg_s = -2.5f;
@@ -75,6 +76,7 @@ int main(void)
     app_line.control.active_count = 2U;
     app_line.control.cluster_count = 1U;
     app_line.control.dynamic_base_mm_s = 160.0f;
+    debug_stats.rx_dropped = UINT32_MAX;
 
     M6Telemetry_Init();
     assert(!M6Telemetry_IsLogging());
@@ -131,6 +133,8 @@ int main(void)
     row_end = strstr(row_start, "\r\n");
     assert(row_end != NULL);
     assert(comma_count(row_start, row_end) == 41U);
+    assert(strstr(row_start, ",-2147483648,") != NULL);
+    assert(strstr(row_start, ",4294967295,") != NULL);
     assert(strstr(uart_output, ",3\r\n") != NULL);
 
     M6Telemetry_StopFromISR();

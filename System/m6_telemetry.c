@@ -10,7 +10,6 @@
 
 #include <limits.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <string.h>
 
 #define M6_TELEMETRY_QUEUE_SIZE 8U
@@ -63,6 +62,13 @@ static char s_formatted_line[640];
 static size_t s_formatted_length;
 static bool s_formatted_pending;
 
+typedef struct {
+    char *data;
+    size_t capacity;
+    size_t length;
+    bool valid;
+} M6CsvWriter_t;
+
 static const char k_header[] =
     "M6,time_ms,revision,request_l,request_r,ramp_l,ramp_r,raw_l,raw_r,"
     "filter_l,filter_r,error_l,error_r,p_l,p_r,i_l,i_r,ff_l,ff_r,pwm_l,"
@@ -74,6 +80,119 @@ static const char k_header[] =
 static uint8_t next_index(uint8_t index)
 {
     return (uint8_t)((index + 1U) % M6_TELEMETRY_QUEUE_SIZE);
+}
+
+static void csv_put_char(M6CsvWriter_t *writer, char value)
+{
+    if (!writer->valid) return;
+    if (writer->length >= writer->capacity) {
+        writer->valid = false;
+        return;
+    }
+    writer->data[writer->length++] = value;
+}
+
+static void csv_put_text(M6CsvWriter_t *writer, const char *text)
+{
+    while (*text != '\0') csv_put_char(writer, *text++);
+}
+
+static void csv_put_u32(M6CsvWriter_t *writer, uint32_t value)
+{
+    char digits[10];
+    uint8_t count = 0U;
+
+    do {
+        digits[count++] = (char)('0' + (value % 10U));
+        value /= 10U;
+    } while ((value != 0U) && (count < (uint8_t)sizeof(digits)));
+    while (count != 0U) csv_put_char(writer, digits[--count]);
+}
+
+static void csv_put_i32(M6CsvWriter_t *writer, int32_t value)
+{
+    uint32_t magnitude;
+
+    if (value < 0) {
+        csv_put_char(writer, '-');
+        magnitude = (uint32_t)(-(value + 1)) + 1U;
+    } else {
+        magnitude = (uint32_t)value;
+    }
+    csv_put_u32(writer, magnitude);
+}
+
+static void csv_put_u32_field(M6CsvWriter_t *writer, uint32_t value)
+{
+    csv_put_char(writer, ',');
+    csv_put_u32(writer, value);
+}
+
+static void csv_put_i32_field(M6CsvWriter_t *writer, int32_t value)
+{
+    csv_put_char(writer, ',');
+    csv_put_i32(writer, value);
+}
+
+static bool format_sample(const M6TelemetrySample_t *sample)
+{
+    M6CsvWriter_t writer;
+
+    writer.data = s_formatted_line;
+    writer.capacity = sizeof(s_formatted_line);
+    writer.length = 0U;
+    writer.valid = true;
+
+    csv_put_text(&writer, "M6");
+    csv_put_u32_field(&writer, sample->time_ms);
+    csv_put_u32_field(&writer, sample->revision);
+    csv_put_i32_field(&writer, sample->request[0]);
+    csv_put_i32_field(&writer, sample->request[1]);
+    csv_put_i32_field(&writer, sample->ramp[0]);
+    csv_put_i32_field(&writer, sample->ramp[1]);
+    csv_put_i32_field(&writer, sample->raw[0]);
+    csv_put_i32_field(&writer, sample->raw[1]);
+    csv_put_i32_field(&writer, sample->filtered[0]);
+    csv_put_i32_field(&writer, sample->filtered[1]);
+    csv_put_i32_field(&writer, sample->error[0]);
+    csv_put_i32_field(&writer, sample->error[1]);
+    csv_put_i32_field(&writer, sample->proportional[0]);
+    csv_put_i32_field(&writer, sample->proportional[1]);
+    csv_put_i32_field(&writer, sample->integral[0]);
+    csv_put_i32_field(&writer, sample->integral[1]);
+    csv_put_i32_field(&writer, sample->feedforward[0]);
+    csv_put_i32_field(&writer, sample->feedforward[1]);
+    csv_put_i32_field(&writer, sample->pwm[0]);
+    csv_put_i32_field(&writer, sample->pwm[1]);
+    csv_put_u32_field(&writer, sample->dt_us);
+    csv_put_i32_field(&writer, sample->encoder_delta[0]);
+    csv_put_i32_field(&writer, sample->encoder_delta[1]);
+    csv_put_u32_field(&writer, sample->saturation_ms[0]);
+    csv_put_u32_field(&writer, sample->saturation_ms[1]);
+    csv_put_i32_field(&writer, sample->yaw_x100);
+    csv_put_i32_field(&writer, sample->rate_x100);
+    csv_put_u32_field(&writer, sample->rate_source);
+    csv_put_u32_field(&writer, sample->gray_mask);
+    csv_put_u32_field(&writer, sample->line_info);
+    csv_put_i32_field(&writer, sample->position_raw_x1000);
+    csv_put_i32_field(&writer, sample->position_filtered_x1000);
+    csv_put_i32_field(&writer, sample->derivative_x1000);
+    csv_put_i32_field(&writer, sample->dynamic_base);
+    csv_put_i32_field(&writer, sample->correction);
+    csv_put_u32_field(&writer, sample->saturation_bits);
+    csv_put_u32_field(&writer, sample->fault_bits);
+    csv_put_u32_field(&writer, sample->missed_tasks);
+    csv_put_u32_field(&writer, sample->rx_dropped);
+    csv_put_u32_field(&writer, sample->tx_dropped);
+    csv_put_u32_field(&writer, sample->telemetry_dropped);
+    csv_put_text(&writer, "\r\n");
+
+    if (!writer.valid) {
+        s_formatted_length = 0U;
+        return false;
+    }
+    s_formatted_length = writer.length;
+    return true;
 }
 
 static int32_t rounded(float value, float scale)
@@ -205,7 +324,6 @@ void M6Telemetry_Capture20ms(uint32_t now_ms)
 void M6Telemetry_Service(void)
 {
     M6TelemetrySample_t *s;
-    int length;
 
     if (s_header_pending) {
         if (!debug_try_write(k_header, sizeof(k_header) - 1U)) return;
@@ -214,40 +332,12 @@ void M6Telemetry_Service(void)
     if (!s_formatted_pending) {
         if (s_read == s_write) return;
         s = &s_queue[s_read];
-        length = snprintf(s_formatted_line, sizeof(s_formatted_line),
-            "M6,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,"
-            "%ld,%ld,%ld,%ld,%ld,%ld,%lu,%ld,%ld,%lu,%lu,%ld,%ld,%lu,%lu,"
-            "%lu,%ld,%ld,%ld,%ld,%ld,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
-            (unsigned long)s->time_ms, (unsigned long)s->revision,
-            (long)s->request[0], (long)s->request[1],
-            (long)s->ramp[0], (long)s->ramp[1],
-            (long)s->raw[0], (long)s->raw[1],
-            (long)s->filtered[0], (long)s->filtered[1],
-            (long)s->error[0], (long)s->error[1],
-            (long)s->proportional[0], (long)s->proportional[1],
-            (long)s->integral[0], (long)s->integral[1],
-            (long)s->feedforward[0], (long)s->feedforward[1],
-            (long)s->pwm[0], (long)s->pwm[1],
-            (unsigned long)s->dt_us,
-            (long)s->encoder_delta[0], (long)s->encoder_delta[1],
-            (unsigned long)s->saturation_ms[0],
-            (unsigned long)s->saturation_ms[1],
-            (long)s->yaw_x100, (long)s->rate_x100,
-            (unsigned long)s->rate_source, (unsigned long)s->gray_mask,
-            (unsigned long)s->line_info, (long)s->position_raw_x1000,
-            (long)s->position_filtered_x1000, (long)s->derivative_x1000,
-            (long)s->dynamic_base, (long)s->correction,
-            (unsigned long)s->saturation_bits, (unsigned long)s->fault_bits,
-            (unsigned long)s->missed_tasks, (unsigned long)s->rx_dropped,
-            (unsigned long)s->tx_dropped,
-            (unsigned long)s->telemetry_dropped);
         s_formatted++;
-        if ((length <= 0) || (length >= (int)sizeof(s_formatted_line))) {
+        if (!format_sample(s)) {
             s_dropped++;
             s_read = next_index(s_read);
             return;
         }
-        s_formatted_length = (size_t)length;
         s_formatted_pending = true;
     }
     if (!debug_try_write(s_formatted_line, s_formatted_length)) return;

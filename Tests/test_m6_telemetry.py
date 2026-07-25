@@ -91,6 +91,7 @@ class M6TelemetryTests(unittest.TestCase):
         ).split("void M6Telemetry_Service(void)", 1)[1].split(
             "void M6Telemetry_GetStats", 1
         )[0]
+        self.assertNotIn("snprintf", service)
         self.assertIn("if (!s_formatted_pending)", service)
         self.assertIn(
             "debug_try_write(s_formatted_line, s_formatted_length)", service
