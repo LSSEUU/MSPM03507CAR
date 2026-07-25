@@ -9,8 +9,8 @@
 - 项目：立创·天猛星 MSPM0G3507-64P 两轮差速小车固件，系统时钟 32 MHz，Keil ARM Compiler 6.22。
 - 当前入口：`Source/main.c`；`Source/ti_msp_dl_config.c/.h` 是受回归测试保护的唯一冻结板级配置，修订号 `20260725`，不得用旧 `.syscfg` 覆盖。
 - 里程碑：M0–M5 已完成；PB11 红外遥控阶段一完成、阶段二车辆验收进行中；M6 软件基础设施已实现并通过主机/目标构建验证，下载、参数实测、220 mm/s×5 圈和掉电保持验收尚未完成；M7 尚未开始。
-- 当前主线：重新连接 Horco CMSIS-DAP 和 UART 后下载 M6 兼容基线；先完成 PB11 阶段二，再按架空轮速、低速航向、100→220 mm/s 巡线顺序采集和调参。PB11 门槛关闭前禁止高速落地。
-- 当前验证基线：76 项整库主机回归通过；最新 M6 固件经 Keil ARMCLANG 6.22 全量 Rebuild，0 error、0 warning，`Code=38524, RO-data=7796, RW-data=8, ZI-data=22784`，最高普通镜像地址 `0x0000B4F7`。Horco 预检因探针未枚举而停止，没有执行下载或硬件验证。
+- 当前主线：命令行下载已按规则原样尝试两次并停止；车轮架空后，在 Keil 中手动打开隔离工作树的 M6 工程、选择已连接的 Horco CMSIS-DAP 并完成下载，再用 COM10 核对固件身份。随后先完成 PB11 阶段二，再按架空轮速、低速航向、100→220 mm/s 巡线顺序采集和调参。PB11 门槛关闭前禁止高速落地。
+- 当前验证基线：77 项整库主机回归通过；最新 M6 固件经 Keil ARMCLANG 6.22 全量 Rebuild，0 error、0 warning，`Code=38524, RO-data=7796, RW-data=8, ZI-data=22784`，最高普通镜像地址 `0x0000B4F7`。Horco 与 COM10 已重新枚举，但新固件尚未成功下载或完成硬件验证。
 - 开始任何工作前先执行 `git status --short`，保留所有不属于当前任务的改动。需要细节时按第 9 节只读取对应文档，不要一次加载全部验证记录或 PDF。
 
 ## 2. 当前待办与停止条件
@@ -28,10 +28,11 @@
 
 ### P1：下载链路可靠性
 
-- 正式脚本为 `scripts/flash.ps1`：先检查 Keil 6.22、MSPM0G3507 工程、Horco 名称/序列号和最新构建证据，再用 CMSIS-DAP/SWD 下载并要求日志包含 `Verify OK`，最后通过 UART 核对固件 ID、schema、revision 和参数来源。
-- 2026-07-25 预检未发现序列号 `4041840e` 的 Horco CMSIS-DAP，串口仅枚举 COM1、COM7/COM8 蓝牙端口；脚本在发出下载命令前停止。当前不需要进入 BSL。
+- 正式脚本为 `scripts/flash.ps1`：先检查 Keil 6.22、MSPM0G3507 工程、相邻 `.uvoptx` 中的 Use Target/CMSIS-AGDI/Horco 序列号/SWD 1 MHz/Flash 算法、探针枚举和最新构建证据，再用 CMSIS-DAP/SWD 下载并要求日志包含 `Verify OK`，最后通过 UART 核对固件 ID、schema、revision 和参数来源。缺失或选错 Debug 配置会在擦写前停止。
+- 2026-07-25 已枚举 Horco CMSIS-DAP v2（父设备序列号 `4041840e`）和 COM10。一次正式脚本调用按规则执行了两次完全相同的下载命令，两次均报 `Internal DLL Error`、`Flash Download failed - Target DLL has been cancelled`，没有 `Verify OK`，也没有新固件运行证据。
+- 高概率根因是脚本选择了隔离工作树中的 M6 工程，而该目录缺少被 Git 忽略的 `.uvoptx`；主目录工程虽有已验证的 Horco Debug 配置，但当前固件仍是旧主线，不能用它替代 M6 镜像下载。`UV4 -f` 的下载语义正确，不应改成启动调试会话的 `-d`。
 - 当前 SWD 下载偶发 `RDDI-DAP Error`、`Erase Failed`、`Flash Timeout` 或校验不一致；问题早于 Horco 无线 DAP，不能归因于当前应用 WWDT。
-- 临时流程固定为：保持现有 Keil/SWD 方法与配置，首次命令行失败后原命令原样重试一次；第二次仍失败即停止并请用户手动下载，不切换 GUI 或尝试配置变体。
+- 本轮两次命令行额度已用完，必须由用户在 Keil 中手动打开精确的 M6 工作树工程、补齐 Debug/Utilities 选择并下载；不得进行第三次自动下载，也不切换 BSL。后续新的下载周期仍遵守首次失败后只原样重试一次的上限。
 - 成功后必须用启动串口或应用命令确认固件实际运行。剩余高概率边界是目标 3.3 V/5 V 供电完整性、反灌/上电顺序及 SWDIO/SWCLK/NRST/GND 信号质量；Keil/TI Pack 兼容性是次级边界。
 - 无线 UART ROM BSL 的手动 BSL+RST 握手已验证，自动 Invoke/Reset 未验证且暂缓。完整证据见 `docs/2026-07-24-下载链路诊断记录.md`。
 
@@ -63,8 +64,8 @@
 
 | 功能 | MCU 引脚 | 当前配置/约束 |
 |---|---|---|
-| UART0 诊断 | PA10 TX / PA11 RX | 115200 8N1；Horco 历史虚拟串口为 `COM10`，但 2026-07-25 未枚举；当前仅见 COM1 和 COM7/COM8 蓝牙端口。任何时刻只允许一个发送端驱动 PA11 |
-| Horco DAP | PA19 SWDIO / PA20 SWCLK / NRST | 序列号 `4041840e`；2026-07-25 未枚举。车端由 5 V/GND 供电，3.3 V 不接；正式 M6 下载走 CMSIS-DAP/SWD，不走 BSL |
+| UART0 诊断 | PA10 TX / PA11 RX | 115200 8N1；2026-07-25 已重新枚举 Horco 虚拟串口 `COM10`。任何时刻只允许一个发送端驱动 PA11 |
+| Horco DAP | PA19 SWDIO / PA20 SWCLK / NRST | Horco CMSIS-DAP v2 已枚举，父设备序列号 `4041840e`。车端由 5 V/GND 供电，3.3 V 不接；正式 M6 下载走 CMSIS-DAP/SWD，不走 BSL |
 | JY61P | PA22 UART2_RX | 9600；仅接模块 TX→PA22，模块 PCB 平面与地面平行 |
 | PA21 / VREF− | PA21 | 必须保持无上下拉高阻，不启用 UART2_TX |
 | VS1838B 红外 | PB11 TIMG0_CCP1 | 4 MHz、16 位、双边沿捕获；与旋转编码器按压开关不可同时使用 |
@@ -133,8 +134,8 @@ PA23/VREF+ 与 PA21/VREF− 通过 C44（1 µF）耦合，因此 PA21 必须高�
 | M5 巡线 | 完成；用户确认全白拒绝、黑线居中直接启动、完整单圈、至少连续 3 圈和 1500 ms 失线停车；最终串口快照未取得，证据明确为人工确认 | `docs/2026-07-24-M5临时数字灰度模块适配记录.md` |
 | PB11 红外阶段一 | 完成；17 个 NEC 键实测唯一且反码正确，键表冻结；连续长按和运行期 `s` 复位缺陷已关闭 | `docs/2026-07-24-PB11红外遥控接入验证记录.md` |
 | PB11 红外阶段二 | 进行中；160 mm/s 架空四方向通过，前进快照为目标 160/160、速度 152/162、PWM 106/106、故障 0、漏期 0；其余见 P0 | 同上 |
-| M6 软件基础设施 | 已实现并通过主机与 Keil 验证；下载预检因 Horco 不在线而安全停止。尚无新固件上板、参数保存、架空或落地结果，220 mm/s/250 mm/s 均未验收 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md` |
-| 当前正式构建证据 | M6 兼容基线：76 项主机回归通过；Keil ARMCLANG 6.22 Rebuild 为 `Code=38524, RO-data=7796, RW-data=8, ZI-data=22784`，0 error、0 warning；AXF 486908 B、HEX 130355 B；最高普通字节 `0x0000B4F7`，`.ramfunc` 写入器执行地址 `0x20200001` | 同上 |
+| M6 软件基础设施 | 已实现并通过主机与 Keil 验证；Horco/COM10 已连接，但工作树缺少 Keil Debug 选项导致两次命令行下载失败，本轮已停止并等待手动下载。尚无新固件上板、参数保存、架空或落地结果，220 mm/s/250 mm/s 均未验收 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md` |
+| 当前正式构建证据 | M6 兼容基线：77 项主机回归通过；Keil ARMCLANG 6.22 Rebuild 为 `Code=38524, RO-data=7796, RW-data=8, ZI-data=22784`，0 error、0 warning；AXF 486908 B、HEX 130355 B；最高普通字节 `0x0000B4F7`，`.ramfunc` 写入器执行地址 `0x20200001`。本轮仅修改主机下载脚本/测试/文档，未改变固件镜像 | 同上 |
 
 这些是已有证据的摘要。只有实际重新运行主机测试、Keil 构建或硬件测试后，才能更新相应证据；源代码检查不能写成目标编译或上板验证。
 
@@ -188,3 +189,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 2026-07-25：实现 M6 运行期参数、事务协议、A/B Flash 持久化、控制优化分支、50 Hz 非阻塞遥测、主机调参与正式 SWD 下载工具；76 项主机回归和 Keil 6.22 Rebuild 通过，镜像边界与 RAM Flash 写入器通过 MAP/HEX 检查。Horco 探针未枚举，预检在下载前停止；无上板、掉电或高速赛道功能结论。
 
 2026-07-25：删除项目内全部 OpenSpec 工件，并改由 `docs/` 保存 M6 工程记录；禁用规则已写入 `AGENTS.md`。无功能变化；未因本次流程清理重新运行主机测试、Keil 构建或硬件验证。
+
+2026-07-25：修正复合 USB 设备下 Horco 父子拓扑识别，并强制下载前校验当前工程的 `.uvoptx` Debug/探针/SWD/Flash 算法配置；整库 77 项主机测试通过。Horco 与 COM10 已连接，但工作树此前缺少该选项文件，两次相同命令均以 Target DLL 取消失败；没有 `Verify OK` 或新固件运行证据，本轮按重试上限停止并转人工下载。

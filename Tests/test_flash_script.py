@@ -56,6 +56,8 @@ class FlashScriptTests(unittest.TestCase):
         source = FLASH_SCRIPT.read_text(encoding="utf-8")
 
         self.assertIn("Assert-HorcoCmsisDap", source)
+        self.assertIn("Assert-KeilDebugConfiguration", source)
+        self.assertIn(".uvoptx", source)
         self.assertIn("4041840e", source)
         self.assertIn("6220000::V6\\.22::ARMCLANG", source)
         self.assertIn("UL2CM3\\.DLL", source)
@@ -78,8 +80,14 @@ class FlashScriptTests(unittest.TestCase):
 
     def test_probe_preflight_requires_matching_horco_name_and_serial(self):
         result = run_harness(
-            "$good = { ,([pscustomobject]@{FriendlyName='Horco CMSIS-DAP v2'; InstanceId='USB\\VID_1234\\4041840e'; Status='OK'}) }\n"
-            "$bad = { ,([pscustomobject]@{FriendlyName='Horco CMSIS-DAP v2'; InstanceId='USB\\VID_1234\\different'; Status='OK'}) }\n"
+            "$good = { @(\n"
+            "  [pscustomobject]@{FriendlyName='USB Composite Device'; InstanceId='USB\\VID_FAED&PID_4873\\4041840e'; Status='OK'},\n"
+            "  [pscustomobject]@{FriendlyName='Horco CMSIS-DAP v2'; InstanceId='USB\\VID_FAED&PID_4873&MI_00\\child'; ParentInstanceId='USB\\VID_FAED&PID_4873\\4041840e'; Status='OK'}\n"
+            ") }\n"
+            "$bad = { @(\n"
+            "  [pscustomobject]@{FriendlyName='USB Composite Device'; InstanceId='USB\\VID_FAED&PID_4873\\different'; Status='OK'},\n"
+            "  [pscustomobject]@{FriendlyName='Horco CMSIS-DAP v2'; InstanceId='USB\\VID_FAED&PID_4873&MI_00\\child'; ParentInstanceId='USB\\VID_FAED&PID_4873\\different'; Status='OK'}\n"
+            ") }\n"
             "$matched = Assert-HorcoCmsisDap -SerialNumber '4041840e' -DeviceProvider $good\n"
             "$rejected = $false\n"
             "try { Assert-HorcoCmsisDap -SerialNumber '4041840e' -DeviceProvider $bad | Out-Null } catch { $rejected = $true }\n"
@@ -87,6 +95,45 @@ class FlashScriptTests(unittest.TestCase):
         )
 
         self.assertEqual(result["Name"], "Horco CMSIS-DAP v2")
+        self.assertTrue(result["Rejected"])
+
+    def test_debug_preflight_requires_use_target_and_matching_registry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            good_project = root / "good.uvprojx"
+            bad_project = root / "bad.uvprojx"
+            good_project.write_text("<Project/>", encoding="utf-8")
+            bad_project.write_text("<Project/>", encoding="utf-8")
+
+            template = """<?xml version="1.0" encoding="UTF-8"?>
+<ProjectOpt><Target>
+  <TargetName>empty_LP_MSPM0G3507_nortos_keil</TargetName>
+  <TargetOption>
+    <OPTTT><RunTarget>1</RunTarget></OPTTT>
+    <OPTFL><IsCurrentTarget>1</IsCurrentTarget></OPTFL>
+    <DebugOpt><uSim>{use_simulator}</uSim><uTrg>{use_target}</uTrg><pMon>BIN\\CMSIS_AGDI.dll</pMon></DebugOpt>
+    <TargetDriverDllRegistry><SetRegEntry><Key>CMSIS_AGDI</Key>
+      <Name>-X&quot;Horco CMSIS-DAP v2&quot; -U4041840e -S0 -FF0MSPM0G1X0X_G3X0X_MAIN_128KB.FLM</Name>
+    </SetRegEntry></TargetDriverDllRegistry>
+    <DebugDescription><Enable>1</Enable><EnableFlashSeq>1</EnableFlashSeq><Protocol>2</Protocol><DbgClock>1000000</DbgClock></DebugDescription>
+  </TargetOption>
+</Target></ProjectOpt>
+"""
+            good_project.with_suffix(".uvoptx").write_text(
+                template.format(use_simulator=0, use_target=1), encoding="utf-8"
+            )
+            bad_project.with_suffix(".uvoptx").write_text(
+                template.format(use_simulator=1, use_target=0), encoding="utf-8"
+            )
+            result = run_harness(
+                "$target = 'empty_LP_MSPM0G3507_nortos_keil'\n"
+                f"$good = Assert-KeilDebugConfiguration -ProjectPath {ps_literal(good_project)} -TargetName $target -SerialNumber '4041840e'\n"
+                "$rejected = $false\n"
+                f"try {{ Assert-KeilDebugConfiguration -ProjectPath {ps_literal(bad_project)} -TargetName $target -SerialNumber '4041840e' | Out-Null }} catch {{ $rejected = $true }}\n"
+                "[pscustomobject]@{Target=[string]$good.TargetName; Rejected=$rejected} | ConvertTo-Json -Compress\n"
+            )
+
+        self.assertEqual(result["Target"], "empty_LP_MSPM0G3507_nortos_keil")
         self.assertTrue(result["Rejected"])
 
     def test_first_failure_retries_identical_command_once(self):

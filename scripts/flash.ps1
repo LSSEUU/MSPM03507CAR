@@ -50,6 +50,66 @@ function Assert-KeilProjectConfiguration {
     return $target
 }
 
+function Assert-KeilDebugConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectPath,
+        [Parameter(Mandatory = $true)]
+        [string]$TargetName,
+        [Parameter(Mandatory = $true)]
+        [string]$SerialNumber
+    )
+
+    $optionsPath = [System.IO.Path]::ChangeExtension($ProjectPath, '.uvoptx')
+    if (-not (Test-Path -LiteralPath $optionsPath -PathType Leaf)) {
+        throw ("Keil debug options are missing: $optionsPath. Open this exact " +
+               'project and select Use Target / CMSIS-DAP before downloading.')
+    }
+    [xml]$options = Get-Content -LiteralPath $optionsPath -Raw
+    $debugTarget = @($options.ProjectOpt.Target | Where-Object {
+        [string]$_.TargetName -eq $TargetName
+    }) | Select-Object -First 1
+    if ($null -eq $debugTarget) {
+        throw "Keil debug options do not contain target ${TargetName}: $optionsPath"
+    }
+    $targetOptions = $debugTarget.TargetOption
+    if (([string]$targetOptions.OPTTT.RunTarget -ne '1') -or
+        ([string]$targetOptions.OPTFL.IsCurrentTarget -ne '1')) {
+        throw 'Keil options do not select this target as the current hardware target.'
+    }
+    if (([string]$targetOptions.DebugOpt.uTrg -ne '1') -or
+        ([string]$targetOptions.DebugOpt.uSim -ne '0')) {
+        throw 'Keil Debug is not set to Use Target.'
+    }
+    if ([string]$targetOptions.DebugOpt.pMon -notmatch '(?i)CMSIS_AGDI\.dll$') {
+        throw 'Keil Debug is not configured for CMSIS-AGDI/CMSIS-DAP.'
+    }
+    if (([string]$targetOptions.DebugDescription.Enable -ne '1') -or
+        ([string]$targetOptions.DebugDescription.EnableFlashSeq -ne '1')) {
+        throw 'Keil target debugging or its flash sequence is disabled.'
+    }
+    if (([string]$targetOptions.DebugDescription.Protocol -ne '2') -or
+        ([string]$targetOptions.DebugDescription.DbgClock -ne '1000000')) {
+        throw 'Keil Debug is not configured for the verified 1 MHz SWD link.'
+    }
+
+    $serialPattern = [regex]::Escape($SerialNumber)
+    $matchingRegistry = @(
+        $targetOptions.TargetDriverDllRegistry.SetRegEntry | Where-Object {
+            ([string]$_.Key -eq 'CMSIS_AGDI') -and
+            ([string]$_.Name -match '(?i)Horco CMSIS-DAP') -and
+            ([string]$_.Name -match "(?i)-U$serialPattern(?:\s|$)") -and
+            ([string]$_.Name -match
+             '(?i)MSPM0G1X0X_G3X0X_MAIN_128KB\.FLM')
+        }
+    )
+    if ($matchingRegistry.Count -eq 0) {
+        throw ("Keil Debug does not select Horco CMSIS-DAP serial " +
+               "$SerialNumber in $optionsPath")
+    }
+    return $debugTarget
+}
+
 function Assert-HorcoCmsisDap {
     param(
         [Parameter(Mandatory = $true)]
@@ -71,9 +131,37 @@ function Assert-HorcoCmsisDap {
     if ($matchingSerial.Count -eq 0) {
         throw "Horco CMSIS-DAP serial $SerialNumber is not present; no download was attempted."
     }
-    $dap = @($matchingSerial | Where-Object {
+    $serialInstanceIds = @($matchingSerial | ForEach-Object {
+        [string]$_.InstanceId
+    })
+    $dap = @($devices | Where-Object {
+        $isDap =
         ([string]$_.FriendlyName -match '(?i)(horco|cmsis.?dap)') -or
         ([string]$_.Name -match '(?i)(horco|cmsis.?dap)')
+        if (-not $isDap) { return $false }
+
+        $directSerialMatch =
+            ([string]$_.InstanceId -match "(?i)$serialPattern") -or
+            ([string]$_.SerialNumber -eq $SerialNumber)
+        if ($directSerialMatch) { return $true }
+
+        $parentInstanceId = ''
+        if ($_.PSObject.Properties.Name -contains 'ParentInstanceId') {
+            $parentInstanceId = [string]$_.ParentInstanceId
+        } elseif ($_.PSObject.Properties.Name -contains 'Parent') {
+            $parentInstanceId = [string]$_.Parent
+        } elseif ([string]$_.InstanceId -ne '') {
+            try {
+                $parentInstanceId = [string](Get-PnpDeviceProperty `
+                    -InstanceId ([string]$_.InstanceId) `
+                    -KeyName 'DEVPKEY_Device_Parent' `
+                    -ErrorAction Stop).Data
+            } catch {
+                $parentInstanceId = ''
+            }
+        }
+        return ($parentInstanceId -ne '') -and
+            ($serialInstanceIds -icontains $parentInstanceId)
     })
     if ($dap.Count -eq 0) {
         throw "USB device serial $SerialNumber is present but is not identified as Horco CMSIS-DAP."
@@ -285,10 +373,13 @@ function Invoke-M6Flash {
     $project = Join-Path $repositoryRoot 'keil\empty_LP_MSPM0G3507_nortos_keil.uvprojx'
 
     $target = Assert-KeilProjectConfiguration -ProjectPath $project
+    $null = Assert-KeilDebugConfiguration -ProjectPath $project `
+        -TargetName $target.TargetName -SerialNumber $SerialNumber
     $probe = Assert-HorcoCmsisDap -SerialNumber $SerialNumber
     $build = Assert-ProductionBuildEvidence -RepositoryRoot $repositoryRoot
     Write-Output "Keil: $uv4"
     Write-Output "Target: $($target.TargetName), ARMCLANG 6.22, MSPM0G3507"
+    Write-Output "Debug: Use Target, CMSIS-AGDI, Horco serial=$SerialNumber"
     Write-Output "Probe: $($probe.FriendlyName), serial=$SerialNumber"
     Write-Output "Build evidence: $($build.AxF)"
     if ($OnlyPreflight) {
