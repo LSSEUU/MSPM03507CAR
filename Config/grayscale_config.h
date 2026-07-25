@@ -6,16 +6,17 @@
  *
  * Keep this at 0 until scripts/calibrate_grayscale.py has collected 64 valid
  * scans over the installed white background and black line, and the emitted
- * arrays have replaced the placeholders below. Line motion is rejected while
- * the lock is 0 or any channel span is invalid.
+ * arrays have replaced the invalid paired historical data below. Line motion
+ * is rejected while the lock is 0 or any channel span is invalid.
  */
 #ifndef GRAYSCALE_CALIBRATION_VERIFIED
-#define GRAYSCALE_CALIBRATION_VERIFIED          1U
+#define GRAYSCALE_CALIBRATION_VERIFIED          0U
 #endif
 
 #define GRAYSCALE_CALIBRATION_MIN_SPAN_ADC    512U
 
 #ifndef GRAYSCALE_WHITE_ADC_VALUES
+/* Invalid paired historical values: do not unlock until recalibrated. */
 #define GRAYSCALE_WHITE_ADC_VALUES \
     { 2419U, 2420U, 2886U, 2887U, 940U, 941U, 3006U, 3007U }
 #endif

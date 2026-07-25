@@ -8,7 +8,6 @@
 #include <string.h>
 
 #define GRAY_CH_SWITCH_DELAY_CYCLES  320U
-#define GRAY_AD0_RISE_TIMEOUT_MS     200U
 #define GRAY_ADC_TIMEOUT_LOOPS        32000U
 
 static GrayscaleSnapshot_t gray_state;
@@ -16,7 +15,6 @@ static GrayscaleSnapshot_t gray_state;
 typedef enum {
     GRAY_ASYNC_IDLE = 0,
     GRAY_ASYNC_SELECT,
-    GRAY_ASYNC_WAIT_AD0,
     GRAY_ASYNC_SAMPLE
 } GrayAsyncPhase_t;
 
@@ -25,39 +23,17 @@ static const uint8_t gray_scan_order[GRAYSCALE_CHANNEL_COUNT] = {
 };
 static GrayAsyncPhase_t gray_async_phase;
 static uint8_t gray_async_index;
-static uint32_t gray_async_deadline_ms;
 static bool gray_async_ok;
 
-static bool Gray_SetAD0(bool high)
+static void Gray_SelectChannel(uint8_t channel)
 {
-    if (!high) {
-        DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
-        DL_GPIO_disableHiZ(GRAY_AD0_IOMUX);
-        return true;
-    }
-
-    /* Tianmengxing-64P couples PA23/VREF+ to undriven PA21/VREF- through
-     * C44 (1 uF). Release AD0 and raise it through the internal pull-up so
-     * no push-pull edge is injected through that capacitor. */
-    DL_GPIO_setPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
-    DL_GPIO_enableHiZ(GRAY_AD0_IOMUX);
-    for (uint16_t elapsed = 0U; elapsed < GRAY_AD0_RISE_TIMEOUT_MS; elapsed++) {
-        if (DL_GPIO_readPins(GRAY_AD0_PORT, GRAY_AD0_PIN) != 0U) return true;
-        delay_ms(1U);
-    }
-    return false;
-}
-
-static bool Gray_SetChannel(uint8_t channel)
-{
-    bool ad0_ok;
+    if ((channel & 0x01U) != 0U) DL_GPIO_setPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
+    else                         DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
     if ((channel & 0x02U) != 0U) DL_GPIO_setPins(GRAY_AD1_PORT, GRAY_AD1_PIN);
     else                         DL_GPIO_clearPins(GRAY_AD1_PORT, GRAY_AD1_PIN);
     if ((channel & 0x04U) != 0U) DL_GPIO_setPins(GRAY_AD2_PORT, GRAY_AD2_PIN);
     else                         DL_GPIO_clearPins(GRAY_AD2_PORT, GRAY_AD2_PIN);
-    ad0_ok = Gray_SetAD0((channel & 0x01U) != 0U);
     delay_cycles(GRAY_CH_SWITCH_DELAY_CYCLES);
-    return ad0_ok;
 }
 
 static bool Gray_ReadADC(uint16_t *value)
@@ -118,32 +94,8 @@ static bool Gray_SampleSelectedChannel(uint16_t *value)
 
 static bool Gray_SampleChannel(uint8_t channel, uint16_t *value)
 {
-    if (!Gray_SetChannel(channel)) return false;
+    Gray_SelectChannel(channel);
     return Gray_SampleSelectedChannel(value);
-}
-
-static void Gray_SelectChannelAsync(uint8_t channel, uint32_t now_ms)
-{
-    if ((channel & 0x02U) != 0U) DL_GPIO_setPins(GRAY_AD1_PORT, GRAY_AD1_PIN);
-    else                         DL_GPIO_clearPins(GRAY_AD1_PORT, GRAY_AD1_PIN);
-    if ((channel & 0x04U) != 0U) DL_GPIO_setPins(GRAY_AD2_PORT, GRAY_AD2_PIN);
-    else                         DL_GPIO_clearPins(GRAY_AD2_PORT, GRAY_AD2_PIN);
-
-    if ((channel & 0x01U) == 0U) {
-        DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
-        DL_GPIO_disableHiZ(GRAY_AD0_IOMUX);
-        gray_async_phase = GRAY_ASYNC_SAMPLE;
-    } else {
-        DL_GPIO_setPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
-        DL_GPIO_enableHiZ(GRAY_AD0_IOMUX);
-        if (DL_GPIO_readPins(GRAY_AD0_PORT, GRAY_AD0_PIN) != 0U) {
-            gray_async_phase = GRAY_ASYNC_SAMPLE;
-        } else {
-            gray_async_deadline_ms = now_ms + GRAY_AD0_RISE_TIMEOUT_MS;
-            gray_async_phase = GRAY_ASYNC_WAIT_AD0;
-        }
-    }
-    delay_cycles(GRAY_CH_SWITCH_DELAY_CYCLES);
 }
 
 static void Gray_FinishAsyncScan(uint32_t now_ms)
@@ -160,31 +112,23 @@ void Grayscale_Init(void)
     memset(&gray_state, 0, sizeof(gray_state));
     gray_async_phase = GRAY_ASYNC_IDLE;
     gray_async_index = 0U;
-    gray_async_deadline_ms = 0U;
     gray_async_ok = false;
 
-    /* Enable PA23 input readback for the open-drain rise check. PA25 remains
+    /* PB1, PA24, and PA26 drive the 74HC4051 address inputs. PA25 remains
      * disconnected from the digital pad and is sampled only as ADC0 A0_2. */
-    DL_GPIO_initDigitalInputFeatures(GRAY_AD0_IOMUX,
-        DL_GPIO_INVERSION_DISABLE,
-        DL_GPIO_RESISTOR_PULL_UP,
-        DL_GPIO_HYSTERESIS_ENABLE,
-        DL_GPIO_WAKEUP_DISABLE);
-    DL_GPIO_enableHiZ(GRAY_AD0_IOMUX);
+    DL_GPIO_initDigitalOutput(GRAY_AD0_IOMUX);
     DL_GPIO_initDigitalOutput(GRAY_AD1_IOMUX);
     DL_GPIO_initDigitalOutput(GRAY_AD2_IOMUX);
-    DL_GPIO_clearPins(GRAY_AD0_PORT,
-        GRAY_AD0_PIN | GRAY_AD1_PIN | GRAY_AD2_PIN);
-    DL_GPIO_enableOutput(GRAY_AD0_PORT,
-        GRAY_AD0_PIN | GRAY_AD1_PIN | GRAY_AD2_PIN);
+    DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN);
+    DL_GPIO_clearPins(GRAY_AD1_PORT, GRAY_AD1_PIN | GRAY_AD2_PIN);
+    DL_GPIO_enableOutput(GRAY_AD0_PORT, GRAY_AD0_PIN);
+    DL_GPIO_enableOutput(GRAY_AD1_PORT, GRAY_AD1_PIN | GRAY_AD2_PIN);
 }
 
 bool Grayscale_Scan(void)
 {
     bool scan_ok = true;
 
-    /* Read evens first and odds second so PA23/C44 makes only one slow
-     * low-to-high transition per complete scan. */
     for (uint8_t i = 0U; i < GRAYSCALE_CHANNEL_COUNT; i++) {
         uint8_t channel = gray_scan_order[i];
         uint16_t value;
@@ -220,20 +164,8 @@ void Grayscale_Task(uint32_t now_ms)
     channel = gray_scan_order[gray_async_index];
 
     if (gray_async_phase == GRAY_ASYNC_SELECT) {
-        Gray_SelectChannelAsync(channel, now_ms);
-        if (gray_async_phase != GRAY_ASYNC_SAMPLE) return;
-    }
-    if (gray_async_phase == GRAY_ASYNC_WAIT_AD0) {
-        if (DL_GPIO_readPins(GRAY_AD0_PORT, GRAY_AD0_PIN) != 0U) {
-            delay_cycles(GRAY_CH_SWITCH_DELAY_CYCLES);
-            gray_async_phase = GRAY_ASYNC_SAMPLE;
-        } else if (SystemTime_Reached(now_ms, gray_async_deadline_ms)) {
-            gray_async_ok = false;
-            Gray_FinishAsyncScan(now_ms);
-            return;
-        } else {
-            return;
-        }
+        Gray_SelectChannel(channel);
+        gray_async_phase = GRAY_ASYNC_SAMPLE;
     }
 
     if (!Gray_SampleSelectedChannel(&value)) {

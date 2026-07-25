@@ -91,7 +91,7 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         for pincm in ("IOMUX_PINCM40", "IOMUX_PINCM41", "IOMUX_PINCM42"):
             self.assertNotIn(pincm, combined)
 
-    def test_grayscale_uses_pa25_adc_with_bounded_scanning(self):
+    def test_grayscale_uses_pb1_address_and_pa25_adc_with_bounded_scanning(self):
         config = CONFIG_SOURCE.read_text(encoding="utf-8")
         driver = (ROOT / "Hardware" / "grayscale.c").read_text(encoding="utf-8")
         header = HEADER.read_text(encoding="utf-8")
@@ -102,9 +102,18 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("GRAY_ADC_TIMEOUT_LOOPS", driver)
         self.assertIn("static bool Gray_ReadADC", driver)
         self.assertNotIn("DL_GPIO_initDigitalInputFeatures(GRAY_OUT_IOMUX", driver)
-        self.assertIn("DL_GPIO_initDigitalInputFeatures(GRAY_AD0_IOMUX", driver)
-        self.assertIn("DL_GPIO_enableHiZ(GRAY_AD0_IOMUX)", driver)
-        self.assertIn("DL_GPIO_RESISTOR_PULL_UP", driver)
+        self.assertRegex(header, r"#define\s+GRAY_AD0_PORT\s+\(GPIOB\)")
+        self.assertRegex(header, r"#define\s+GRAY_AD0_PIN\s+\(DL_GPIO_PIN_1\)")
+        self.assertRegex(header, r"#define\s+GRAY_AD0_IOMUX\s+\(IOMUX_PINCM13\)")
+        self.assertIn("DL_GPIO_initDigitalOutput(GRAY_AD0_IOMUX)", driver)
+        self.assertIn("DL_GPIO_clearPins(GRAY_AD0_PORT, GRAY_AD0_PIN)", driver)
+        self.assertIn("DL_GPIO_enableOutput(GRAY_AD0_PORT, GRAY_AD0_PIN)", driver)
+        self.assertNotIn("GRAY_AD0_PIN | GRAY_AD1_PIN", driver)
+        self.assertNotIn("DL_GPIO_enableHiZ(GRAY_AD0_IOMUX)", driver)
+        self.assertNotIn("DL_GPIO_RESISTOR_PULL_UP", driver)
+        self.assertNotIn("GRAY_ASYNC_WAIT_AD0", driver)
+        self.assertNotIn("GRAY_AD0_RISE_TIMEOUT_MS", driver)
+        self.assertNotIn("IOMUX_PINCM53", header + config + driver)
         self.assertIn("0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U", driver)
         self.assertNotIn("while (false ==", driver)
 

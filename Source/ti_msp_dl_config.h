@@ -107,9 +107,9 @@ extern "C" {
 #define ENC_B_E2B_IOMUX                                         (IOMUX_PINCM25)
 
 /* ── 八路灰度传感器 ── */
-#define GRAY_AD0_PORT                                                   (GPIOA)
-#define GRAY_AD0_PIN                                            (DL_GPIO_PIN_23)
-#define GRAY_AD0_IOMUX                                          (IOMUX_PINCM53)
+#define GRAY_AD0_PORT                                                   (GPIOB)
+#define GRAY_AD0_PIN                                             (DL_GPIO_PIN_1)
+#define GRAY_AD0_IOMUX                                          (IOMUX_PINCM13)
 #define GRAY_AD1_PORT                                                   (GPIOA)
 #define GRAY_AD1_PIN                                            (DL_GPIO_PIN_24)
 #define GRAY_AD1_IOMUX                                          (IOMUX_PINCM54)
