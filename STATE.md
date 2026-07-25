@@ -2,7 +2,7 @@
 
 更新时间：2026-07-25
 
-本文是当前实现状态的唯一事实来源，只保留继续工程工作所需的事实、约束和未完成项。详细验证过程在 `docs/` 的日期记录中，当前 M6 设计工件在 `openspec/changes/m6-runtime-tuning-and-motion-optimization/`，历史状态通过 Git 追溯；它们都不能覆盖本文的当前结论。
+本文是当前实现状态的唯一事实来源，只保留继续工程工作所需的事实、约束和未完成项。详细验证过程和 M6 工程记录在 `docs/` 的日期记录中，历史状态通过 Git 追溯；它们都不能覆盖本文的当前结论。
 
 ## 1. 新对话快速启动
 
@@ -150,6 +150,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 
 - Keil 工程：`keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx`。
 - 新克隆先运行 `scripts/setup_git_hooks.ps1`；pre-commit 要求工程状态变化同步 `STATE.md`。
+- 本仓库不使用 OpenSpec；不得创建或调用 `openspec/`、`.openspec.yaml`、OpenSpec CLI 或项目级 OpenSpec 技能。设计、实施计划和日期证据统一保存在 `docs/`。
 - `scripts/build_fault_injection.ps1` 只在临时测试工程加入 `M2_FAULT_INJECTION_TEST`；正式 target 不含故障注入入口。
 - `keil/Objects`、`keil/ObjectsFaultInjection`、临时工程、构建/下载日志不纳入版本控制。
 - 命令行固件下载必须遵守第 2 节 P1 的一次原样重试上限。
@@ -161,7 +162,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 | 当前接线/换模块 | `docs/接线说明.md`，必要时再看对应原理图/手册 |
 | 红外使用或验收 | `docs/PB11红外遥控器使用指南.md`、`docs/2026-07-24-PB11红外遥控接入验证记录.md` |
 | 下载失败 | `docs/2026-07-24-下载链路诊断记录.md` |
-| M6 参数、遥测、下载或实车调参 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md`、`openspec/changes/m6-runtime-tuning-and-motion-optimization/` |
+| M6 参数、遥测、下载或实车调参 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md` |
 | M2–M5 回归或复核 | 对应的单个日期验证记录 |
 | 里程碑范围/新赛题设计 | `docs/superpowers/specs/2026-07-21-competition-car-platform-design.md`；其中历史路径不代表当前代码结构 |
 | 载板接口或 MCU 约束 | `docs/天猛星V2_小车主控板_工程参考.md`、`docs/MSPM0最小系统板解析.md` |
@@ -185,3 +186,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 2026-07-24：将当前摘要、活动待办、安全边界和按需读取地图前置，把下载故障的长诊断证据迁入独立记录，并删除与日期验证记录重复的历史叙述。无功能变化；未重新运行主机测试、Keil 构建或硬件验证，所有功能结论均沿用第 7 节列出的既有证据。
 
 2026-07-25：实现 M6 运行期参数、事务协议、A/B Flash 持久化、控制优化分支、50 Hz 非阻塞遥测、主机调参与正式 SWD 下载工具；76 项主机回归和 Keil 6.22 Rebuild 通过，镜像边界与 RAM Flash 写入器通过 MAP/HEX 检查。Horco 探针未枚举，预检在下载前停止；无上板、掉电或高速赛道功能结论。
+
+2026-07-25：删除项目内全部 OpenSpec 工件，并改由 `docs/` 保存 M6 工程记录；禁用规则已写入 `AGENTS.md`。无功能变化；未因本次流程清理重新运行主机测试、Keil 构建或硬件验证。

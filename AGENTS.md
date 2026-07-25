@@ -2,6 +2,13 @@
 
 These instructions apply to the entire repository.
 
+## Planning workflow
+
+OpenSpec is not used in this repository. Do not create or use an `openspec/`
+directory, `.openspec.yaml` files, the OpenSpec CLI, or project-local OpenSpec
+skills. Keep design and implementation plans under `docs/`, keep dated evidence
+under `docs/`, and keep the current implementation truth in `STATE.md`.
+
 ## STATE.md is mandatory
 
 `STATE.md` is the sole source of truth for the current implementation state. Whenever a task changes source code, hardware configuration, project configuration, build/debug configuration, or engineering scripts, update `STATE.md` in the same task and commit.
