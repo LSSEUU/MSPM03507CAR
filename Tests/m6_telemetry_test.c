@@ -77,11 +77,14 @@ int main(void)
     app_line.control.dynamic_base_mm_s = 160.0f;
 
     M6Telemetry_Init();
+    assert(!M6Telemetry_IsLogging());
     M6Telemetry_SetLogging(true, 20U);
+    assert(M6Telemetry_IsLogging());
     for (index = 0U; index < 10U; index++)
         M6Telemetry_Capture20ms(100U + (index * 20U));
     M6Telemetry_GetStats(&stats);
     assert(stats.captured == 7U);
+    assert(stats.formatted == 0U);
     assert(stats.dropped == 3U);
     assert(stats.queued == 7U);
 
@@ -94,10 +97,28 @@ int main(void)
     uart_accept = true;
     M6Telemetry_Service();
     M6Telemetry_Capture20ms(400U);
+    M6Telemetry_GetStats(&stats);
+    assert(stats.formatted == 1U);
+    assert(stats.transmitted == 1U);
+
+    uart_accept = false;
+    for (index = 0U; index < 20U; index++)
+        M6Telemetry_Service();
+    M6Telemetry_GetStats(&stats);
+    assert(stats.formatted == 2U);
+    assert(stats.transmitted == 1U);
+    assert(stats.queued == 7U);
+
+    uart_accept = true;
+    M6Telemetry_Service();
+    M6Telemetry_GetStats(&stats);
+    assert(stats.formatted == 2U);
+    assert(stats.transmitted == 2U);
     for (index = 0U; index < 10U; index++)
         M6Telemetry_Service();
     M6Telemetry_GetStats(&stats);
     assert(stats.captured == 8U);
+    assert(stats.formatted == 8U);
     assert(stats.transmitted == 8U);
     assert(stats.dropped == 3U);
     assert(stats.queued == 0U);
@@ -113,6 +134,7 @@ int main(void)
     assert(strstr(uart_output, ",3\r\n") != NULL);
 
     M6Telemetry_StopFromISR();
+    assert(!M6Telemetry_IsLogging());
     M6Telemetry_Capture20ms(500U);
     M6Telemetry_GetStats(&stats);
     assert(!stats.enabled);

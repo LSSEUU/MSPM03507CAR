@@ -8,6 +8,7 @@ typedef struct {
     bool enabled;
     uint16_t period_ms;
     uint32_t captured;
+    uint32_t formatted;
     uint32_t transmitted;
     uint32_t dropped;
     uint8_t queued;
@@ -16,6 +17,7 @@ typedef struct {
 void M6Telemetry_Init(void);
 void M6Telemetry_SetLogging(bool enabled, uint16_t period_ms);
 void M6Telemetry_StopFromISR(void);
+bool M6Telemetry_IsLogging(void);
 void M6Telemetry_Capture20ms(uint32_t now_ms);
 void M6Telemetry_Service(void);
 void M6Telemetry_GetStats(M6TelemetryStats_t *stats);

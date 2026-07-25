@@ -10,6 +10,7 @@
 #include "heading.h"
 #include "ir_receiver.h"
 #include "led.h"
+#include "m6_telemetry.h"
 #include "motor.h"
 #include "oled.h"
 #include "parameter_store.h"
@@ -1319,6 +1320,7 @@ void Diagnostics_Poll(void)
 void Diagnostics_Task100ms(void)
 {
     uint32_t now_ms = SystemTime_Now();
+    bool legacy_csv_enabled = !M6Telemetry_IsLogging();
     if (!boot_reported &&
         ((uint32_t)(now_ms - boot_started_ms) >= BOOT_SELF_TEST_SETTLE_MS)) {
         boot_reported = true;
@@ -1334,32 +1336,35 @@ void Diagnostics_Task100ms(void)
     if ((speed_diag_state == SPEED_DIAG_RUNNING) ||
         (speed_diag_state == SPEED_DIAG_RAMP_DOWN)) {
         WheelSpeedSnapshot_t wheel_snapshot;
-        SafetySnapshot_t safety_snapshot;
         uint32_t i;
-        uint32_t saturated;
         WheelSpeed_GetSnapshot(&wheel_snapshot);
-        Safety_GetSnapshot(&safety_snapshot);
-        saturated = (wheel_snapshot.saturated[WHEEL_SPEED_LEFT] ? 1U : 0U) |
-            (wheel_snapshot.saturated[WHEEL_SPEED_RIGHT] ? 2U : 0U);
-        debug_printf("M3,%lu,%s,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,%lu,0x%08lX\r\n",
-            (unsigned long)now_ms,
-            (speed_diag_state == SPEED_DIAG_RUNNING) ? "RUN" : "STOP",
-            (long)Diagnostics_Round(
-                wheel_snapshot.requested_mm_s[WHEEL_SPEED_LEFT]),
-            (long)Diagnostics_Round(
-                wheel_snapshot.requested_mm_s[WHEEL_SPEED_RIGHT]),
-            (long)Diagnostics_Round(
-                wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
-            (long)Diagnostics_Round(
-                wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
-            (long)Diagnostics_Round(
-                wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
-            (long)Diagnostics_Round(
-                wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
-            wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
-            wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
-            (unsigned long)saturated,
-            (unsigned long)safety_snapshot.fault_bits);
+        if (legacy_csv_enabled) {
+            SafetySnapshot_t safety_snapshot;
+            uint32_t saturated;
+            Safety_GetSnapshot(&safety_snapshot);
+            saturated =
+                (wheel_snapshot.saturated[WHEEL_SPEED_LEFT] ? 1U : 0U) |
+                (wheel_snapshot.saturated[WHEEL_SPEED_RIGHT] ? 2U : 0U);
+            debug_printf("M3,%lu,%s,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,%lu,0x%08lX\r\n",
+                (unsigned long)now_ms,
+                (speed_diag_state == SPEED_DIAG_RUNNING) ? "RUN" : "STOP",
+                (long)Diagnostics_Round(
+                    wheel_snapshot.requested_mm_s[WHEEL_SPEED_LEFT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.requested_mm_s[WHEEL_SPEED_RIGHT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
+                wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
+                wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
+                (unsigned long)saturated,
+                (unsigned long)safety_snapshot.fault_bits);
+        }
 
         if ((speed_diag_state == SPEED_DIAG_RUNNING) &&
             ((uint32_t)(now_ms - speed_diag_started_ms) >=
@@ -1383,8 +1388,9 @@ void Diagnostics_Task100ms(void)
             }
         }
     }
-    if ((heading_diag_state == HEADING_DIAG_RUNNING) ||
-        (heading_diag_state == HEADING_DIAG_RAMP_DOWN)) {
+    if (legacy_csv_enabled &&
+        ((heading_diag_state == HEADING_DIAG_RUNNING) ||
+         (heading_diag_state == HEADING_DIAG_RAMP_DOWN))) {
         HeadingSnapshot_t heading_snapshot;
         SafetySnapshot_t safety_snapshot;
         Heading_GetSnapshot(&heading_snapshot);
@@ -1392,24 +1398,29 @@ void Diagnostics_Task100ms(void)
         WheelSpeedSnapshot_t wheel_snapshot;
         WheelSpeed_GetSnapshot(&wheel_snapshot);
         debug_printf("M4,%lu,%s,%s,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,0x%08lX\r\n",
-            (unsigned long)now_ms,
-            (heading_diag_state == HEADING_DIAG_RUNNING) ? "RUN" : "STOP",
-            Diagnostics_HeadingModeName(heading_snapshot.mode),
-            (long)Diagnostics_Round(heading_snapshot.yaw_deg * 100.0f),
-            (long)Diagnostics_Round(heading_snapshot.yaw_rate_deg_s * 100.0f),
-            (long)Diagnostics_Round(heading_snapshot.target_deg * 100.0f),
-            (long)Diagnostics_Round(heading_snapshot.error_deg * 100.0f),
-            (long)Diagnostics_Round(heading_snapshot.left_target_mm_s),
-            (long)Diagnostics_Round(heading_snapshot.right_target_mm_s),
-            (long)Diagnostics_Round(wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
-            (long)Diagnostics_Round(wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
-            (long)Diagnostics_Round(wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
-            (long)Diagnostics_Round(wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
-            wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
-            wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
+                (unsigned long)now_ms,
+                (heading_diag_state == HEADING_DIAG_RUNNING) ? "RUN" : "STOP",
+                Diagnostics_HeadingModeName(heading_snapshot.mode),
+                (long)Diagnostics_Round(heading_snapshot.yaw_deg * 100.0f),
+                (long)Diagnostics_Round(
+                    heading_snapshot.yaw_rate_deg_s * 100.0f),
+                (long)Diagnostics_Round(heading_snapshot.target_deg * 100.0f),
+                (long)Diagnostics_Round(heading_snapshot.error_deg * 100.0f),
+                (long)Diagnostics_Round(heading_snapshot.left_target_mm_s),
+                (long)Diagnostics_Round(heading_snapshot.right_target_mm_s),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
+                (long)Diagnostics_Round(
+                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
+                wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
+                wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
             (unsigned long)safety_snapshot.fault_bits);
     }
-    {
+    if (legacy_csv_enabled) {
         AppLineSnapshot_t app;
         AppLine_GetSnapshot(&app);
         if (app.state == APP_LINE_RUNNING) {

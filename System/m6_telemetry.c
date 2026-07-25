@@ -55,9 +55,13 @@ static volatile bool s_enabled;
 static uint16_t s_period_ms;
 static uint32_t s_last_capture_ms;
 static uint32_t s_captured;
+static uint32_t s_formatted;
 static uint32_t s_transmitted;
 static uint32_t s_dropped;
 static bool s_header_pending;
+static char s_formatted_line[640];
+static size_t s_formatted_length;
+static bool s_formatted_pending;
 
 static const char k_header[] =
     "M6,time_ms,revision,request_l,request_r,ramp_l,ramp_r,raw_l,raw_r,"
@@ -88,9 +92,12 @@ void M6Telemetry_Init(void)
     s_period_ms = 0U;
     s_last_capture_ms = 0U;
     s_captured = 0U;
+    s_formatted = 0U;
     s_transmitted = 0U;
     s_dropped = 0U;
     s_header_pending = false;
+    s_formatted_length = 0U;
+    s_formatted_pending = false;
 }
 
 void M6Telemetry_SetLogging(bool enabled, uint16_t period_ms)
@@ -102,11 +109,18 @@ void M6Telemetry_SetLogging(bool enabled, uint16_t period_ms)
     s_last_capture_ms = 0U;
     s_read = s_write = 0U;
     s_header_pending = enabled;
+    s_formatted_length = 0U;
+    s_formatted_pending = false;
 }
 
 void M6Telemetry_StopFromISR(void)
 {
     s_enabled = false;
+}
+
+bool M6Telemetry_IsLogging(void)
+{
+    return s_enabled;
 }
 
 void M6Telemetry_Capture20ms(uint32_t now_ms)
@@ -190,7 +204,6 @@ void M6Telemetry_Capture20ms(uint32_t now_ms)
 
 void M6Telemetry_Service(void)
 {
-    char line[640];
     M6TelemetrySample_t *s;
     int length;
 
@@ -198,41 +211,48 @@ void M6Telemetry_Service(void)
         if (!debug_try_write(k_header, sizeof(k_header) - 1U)) return;
         s_header_pending = false;
     }
-    if (s_read == s_write) return;
-    s = &s_queue[s_read];
-    length = snprintf(line, sizeof(line),
-        "M6,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,"
-        "%ld,%ld,%ld,%ld,%ld,%ld,%lu,%ld,%ld,%lu,%lu,%ld,%ld,%lu,%lu,"
-        "%lu,%ld,%ld,%ld,%ld,%ld,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
-        (unsigned long)s->time_ms, (unsigned long)s->revision,
-        (long)s->request[0], (long)s->request[1],
-        (long)s->ramp[0], (long)s->ramp[1],
-        (long)s->raw[0], (long)s->raw[1],
-        (long)s->filtered[0], (long)s->filtered[1],
-        (long)s->error[0], (long)s->error[1],
-        (long)s->proportional[0], (long)s->proportional[1],
-        (long)s->integral[0], (long)s->integral[1],
-        (long)s->feedforward[0], (long)s->feedforward[1],
-        (long)s->pwm[0], (long)s->pwm[1],
-        (unsigned long)s->dt_us,
-        (long)s->encoder_delta[0], (long)s->encoder_delta[1],
-        (unsigned long)s->saturation_ms[0],
-        (unsigned long)s->saturation_ms[1],
-        (long)s->yaw_x100, (long)s->rate_x100,
-        (unsigned long)s->rate_source, (unsigned long)s->gray_mask,
-        (unsigned long)s->line_info, (long)s->position_raw_x1000,
-        (long)s->position_filtered_x1000, (long)s->derivative_x1000,
-        (long)s->dynamic_base, (long)s->correction,
-        (unsigned long)s->saturation_bits, (unsigned long)s->fault_bits,
-        (unsigned long)s->missed_tasks, (unsigned long)s->rx_dropped,
-        (unsigned long)s->tx_dropped,
-        (unsigned long)s->telemetry_dropped);
-    if ((length <= 0) || (length >= (int)sizeof(line))) {
-        s_dropped++;
-        s_read = next_index(s_read);
-        return;
+    if (!s_formatted_pending) {
+        if (s_read == s_write) return;
+        s = &s_queue[s_read];
+        length = snprintf(s_formatted_line, sizeof(s_formatted_line),
+            "M6,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,"
+            "%ld,%ld,%ld,%ld,%ld,%ld,%lu,%ld,%ld,%lu,%lu,%ld,%ld,%lu,%lu,"
+            "%lu,%ld,%ld,%ld,%ld,%ld,%lu,%lu,%lu,%lu,%lu,%lu\r\n",
+            (unsigned long)s->time_ms, (unsigned long)s->revision,
+            (long)s->request[0], (long)s->request[1],
+            (long)s->ramp[0], (long)s->ramp[1],
+            (long)s->raw[0], (long)s->raw[1],
+            (long)s->filtered[0], (long)s->filtered[1],
+            (long)s->error[0], (long)s->error[1],
+            (long)s->proportional[0], (long)s->proportional[1],
+            (long)s->integral[0], (long)s->integral[1],
+            (long)s->feedforward[0], (long)s->feedforward[1],
+            (long)s->pwm[0], (long)s->pwm[1],
+            (unsigned long)s->dt_us,
+            (long)s->encoder_delta[0], (long)s->encoder_delta[1],
+            (unsigned long)s->saturation_ms[0],
+            (unsigned long)s->saturation_ms[1],
+            (long)s->yaw_x100, (long)s->rate_x100,
+            (unsigned long)s->rate_source, (unsigned long)s->gray_mask,
+            (unsigned long)s->line_info, (long)s->position_raw_x1000,
+            (long)s->position_filtered_x1000, (long)s->derivative_x1000,
+            (long)s->dynamic_base, (long)s->correction,
+            (unsigned long)s->saturation_bits, (unsigned long)s->fault_bits,
+            (unsigned long)s->missed_tasks, (unsigned long)s->rx_dropped,
+            (unsigned long)s->tx_dropped,
+            (unsigned long)s->telemetry_dropped);
+        s_formatted++;
+        if ((length <= 0) || (length >= (int)sizeof(s_formatted_line))) {
+            s_dropped++;
+            s_read = next_index(s_read);
+            return;
+        }
+        s_formatted_length = (size_t)length;
+        s_formatted_pending = true;
     }
-    if (!debug_try_write(line, (size_t)length)) return;
+    if (!debug_try_write(s_formatted_line, s_formatted_length)) return;
+    s_formatted_pending = false;
+    s_formatted_length = 0U;
     s_read = next_index(s_read);
     s_transmitted++;
 }
@@ -243,6 +263,7 @@ void M6Telemetry_GetStats(M6TelemetryStats_t *stats)
     stats->enabled = s_enabled;
     stats->period_ms = s_period_ms;
     stats->captured = s_captured;
+    stats->formatted = s_formatted;
     stats->transmitted = s_transmitted;
     stats->dropped = s_dropped;
     stats->queued = (s_write >= s_read) ? (uint8_t)(s_write - s_read) :

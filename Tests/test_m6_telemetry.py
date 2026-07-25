@@ -69,6 +69,33 @@ class M6TelemetryTests(unittest.TestCase):
         self.assertNotIn("snprintf", capture)
         self.assertNotIn("debug_try_write", capture)
 
+    def test_m6_logging_suppresses_duplicate_legacy_csv_and_runs_after_tasks(self):
+        diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
+            encoding="utf-8"
+        )
+        task = diagnostics.split("void Diagnostics_Task100ms(void)", 1)[1].split(
+            "const DiagReport_t *Diagnostics_GetReports", 1
+        )[0]
+        main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "bool legacy_csv_enabled = !M6Telemetry_IsLogging();", task
+        )
+        self.assertGreaterEqual(task.count("legacy_csv_enabled"), 4)
+        self.assertLess(
+            main.index("if (Scheduler_Take(SCHEDULER_TASK_100MS))"),
+            main.index("M6Telemetry_Service();"),
+        )
+        service = (ROOT / "System" / "m6_telemetry.c").read_text(
+            encoding="utf-8"
+        ).split("void M6Telemetry_Service(void)", 1)[1].split(
+            "void M6Telemetry_GetStats", 1
+        )[0]
+        self.assertIn("if (!s_formatted_pending)", service)
+        self.assertIn(
+            "debug_try_write(s_formatted_line, s_formatted_length)", service
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

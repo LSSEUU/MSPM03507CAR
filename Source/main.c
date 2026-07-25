@@ -99,7 +99,6 @@ int main(void)
 
         AppRemote_Poll();
         Diagnostics_Poll();
-        M6Telemetry_Service();
 
         if (Scheduler_Take(SCHEDULER_TASK_5MS)) {
             uint32_t started = SystemTime_Now();
@@ -199,6 +198,7 @@ int main(void)
                               TASK_100MS_PERIOD_MS);
         }
 
+        M6Telemetry_Service();
         Grayscale_Task(SystemTime_Now());
         OLED_Service();
         __WFI();
