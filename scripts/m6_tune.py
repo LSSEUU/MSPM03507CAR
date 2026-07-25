@@ -950,6 +950,7 @@ class TelemetryRecorder:
         csv_path = output_base.with_suffix(".csv")
         json_path = output_base.with_suffix(".json")
         samples: list[dict[str, int]] = []
+        events: list[dict[str, Any]] = []
         started = utc_now()
         abort_reason: str | None = None
         self.client.log("m6", period_ms)
@@ -969,9 +970,31 @@ class TelemetryRecorder:
                 try:
                     sample = parse_telemetry_line(line)
                 except ValueError:
+                    events.append(
+                        {
+                            "elapsed_ms": round(
+                                (time.monotonic() - capture_start) * 1000
+                            ),
+                            "firmware_time_ms": (
+                                int(samples[-1]["time_ms"]) if samples else None
+                            ),
+                            "line": line,
+                        }
+                    )
                     abort_reason = "malformed_telemetry"
                     raise SafetyAbort(abort_reason, samples)
                 if sample is None:
+                    events.append(
+                        {
+                            "elapsed_ms": round(
+                                (time.monotonic() - capture_start) * 1000
+                            ),
+                            "firmware_time_ms": (
+                                int(samples[-1]["time_ms"]) if samples else None
+                            ),
+                            "line": line,
+                        }
+                    )
                     continue
                 samples.append(sample)
                 last_sample_at = time.monotonic()
@@ -1018,6 +1041,7 @@ class TelemetryRecorder:
                 "start_time": started,
                 "end_time": utc_now(),
                 "parameters": dict(parameters),
+                "events": events,
                 "abort_reason": abort_reason,
                 "metrics": metrics,
             }

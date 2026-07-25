@@ -344,7 +344,12 @@ class TelemetryAndScoringTests(unittest.TestCase):
     def test_record_writes_csv_and_json_metadata(self):
         values = [sample(t) for t in (0, 20, 40)]
         responses = [b"ok,1,log,m6,20\r\n"]
-        responses += [(line_for(value) + "\r\n").encode() for value in values]
+        responses += [
+            (line_for(values[0]) + "\r\n").encode(),
+            b"IR manual heartbeat expired; normal brake to IDLE.\r\n",
+            (line_for(values[1]) + "\r\n").encode(),
+            (line_for(values[2]) + "\r\n").encode(),
+        ]
 
         class RecordTransport(FakeTransport):
             def write(self, value):
@@ -375,6 +380,9 @@ class TelemetryAndScoringTests(unittest.TestCase):
         self.assertIn("M6,time_ms,revision", csv_text)
         self.assertEqual(summary["firmware"], "M6-test")
         self.assertEqual(summary["parameters"]["wheel.left.kp"], 0.7)
+        self.assertEqual(len(summary["events"]), 1)
+        self.assertEqual(summary["events"][0]["firmware_time_ms"], 0)
+        self.assertIn("heartbeat expired", summary["events"][0]["line"])
 
 
 class FakeSearchClient:
