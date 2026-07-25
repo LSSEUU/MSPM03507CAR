@@ -21,21 +21,7 @@ static void AppLine_ReturnIdle(void)
 void AppLine_Init(void)
 {
     memset(&app_line, 0, sizeof(app_line));
-    /* Vendor documentation defines an illuminated channel indicator as 1. */
-    LineFollow_Init(LINE_POLARITY_ACTIVE_HIGH);
-}
-
-bool AppLine_TogglePolarity(void)
-{
-    LineFollowSnapshot_t snapshot;
-    if ((app_line.state != APP_LINE_IDLE) ||
-        (SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault())
-        return false;
-    LineFollow_GetSnapshot(&snapshot);
-    LineFollow_SetPolarity(
-        (snapshot.polarity == LINE_POLARITY_ACTIVE_HIGH) ?
-            LINE_POLARITY_ACTIVE_LOW : LINE_POLARITY_ACTIVE_HIGH);
-    return true;
+    LineFollow_Init();
 }
 
 bool AppLine_Arm(uint32_t now_ms)
@@ -45,7 +31,7 @@ bool AppLine_Arm(uint32_t now_ms)
         (SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault())
         return false;
     LineFollow_GetSnapshot(&snapshot);
-    if (!snapshot.line_valid) return false;
+    if (!snapshot.calibration.valid || !snapshot.line_valid) return false;
     app_line.state = APP_LINE_ARMED;
     app_line.deadline_ms = now_ms + DIAGNOSTIC_ARM_TIMEOUT_MS;
     return true;
@@ -97,7 +83,7 @@ bool AppLine_Stop(uint32_t now_ms)
 void AppLine_ProcessGrayscale(const GrayscaleSnapshot_t *gray)
 {
     if ((gray == NULL) || !gray->last_scan_ok) return;
-    LineFollow_ProcessSample(gray->level, gray->scan_count,
+    LineFollow_ProcessSample(gray->adc, gray->scan_count,
                              gray->last_update_ms);
 }
 

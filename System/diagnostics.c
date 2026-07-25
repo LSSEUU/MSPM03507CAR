@@ -54,9 +54,6 @@ typedef enum {
 static DiagReport_t reports[DIAG_PERIPHERAL_COUNT];
 static bool motor_test_passed;
 static bool oled_visual_passed;
-static bool gray_contrast_observed;
-static bool gray_high_observed;
-static bool gray_low_observed;
 static bool boot_reported;
 static uint32_t boot_started_ms;
 static MotorDiagState_t motor_diag_state;
@@ -77,6 +74,9 @@ static uint8_t safety_report_line;
 static SystemState_t safety_report_system_state;
 static SafetySnapshot_t safety_report_snapshot;
 static SchedulerStats_t safety_report_scheduler;
+static bool line_calibration_report_pending;
+static uint8_t line_calibration_report_line;
+static LineCalibration_t line_calibration_report;
 static SpeedDiagState_t speed_diag_state;
 static uint8_t speed_diag_wheel_mask;
 static uint32_t speed_diag_started_ms;
@@ -115,6 +115,7 @@ static void Diagnostics_RefreshReports(void)
     EncoderSnapshot_t encoder;
     GyroSnapshot_t gyro;
     GrayscaleSnapshot_t gray;
+    AppLineSnapshot_t line_app;
     OLED_Stats_t oled;
     DebugStats_t debug;
 
@@ -122,6 +123,7 @@ static void Diagnostics_RefreshReports(void)
     Encoder_GetSnapshot(&encoder);
     Gyro_GetSnapshot(&gyro);
     Grayscale_GetSnapshot(&gray);
+    AppLine_GetSnapshot(&line_app);
     OLED_GetStats(&oled);
     debug_get_stats(&debug);
 
@@ -142,12 +144,16 @@ static void Diagnostics_RefreshReports(void)
                                   "no valid 0x55 0x53 frame");
     Diagnostics_Set(DIAG_GRAYSCALE,
         (gray.error_count > 0U) ? DIAG_STATUS_FAULT :
-            (gray_contrast_observed ? DIAG_STATUS_OK : DIAG_STATUS_DEGRADED),
+            ((line_app.control.calibration.valid && gray.scan_count > 0U) ?
+                DIAG_STATUS_OK : DIAG_STATUS_DEGRADED),
         gray.scan_count, gray.error_count,
-        (gray.error_count > 0U) ? "address scan timeout" :
-            (gray_contrast_observed ? "digital high/low response observed" :
-                ((gray.scan_count > 0U) ? "waiting for both digital levels" :
-                                          "waiting for scheduled GPIO scan")));
+        (gray.error_count > 0U) ? "ADC/address scan error" :
+            (!line_app.control.calibration.compiled_verified ?
+                "ADC ready; compile-time calibration locked" :
+                (!line_app.control.calibration.valid ?
+                    "ADC ready; calibration constants invalid" :
+                    ((gray.scan_count > 0U) ? "analog scan and calibration ready" :
+                                              "waiting for scheduled ADC scan"))));
     Diagnostics_Set(DIAG_OLED,
         !oled.present ? DIAG_STATUS_FAULT :
             ((oled.ack_errors > 0U || !oled_visual_passed) ?
@@ -282,15 +288,72 @@ static void Diagnostics_PrintGraySnapshot(void)
 {
     GrayscaleSnapshot_t s;
     Grayscale_GetSnapshot(&s);
-    if (s.high_mask != 0U) gray_high_observed = true;
-    if (s.high_mask != 0xFFU) gray_low_observed = true;
-    gray_contrast_observed = gray_high_observed && gray_low_observed;
-    debug_printf("GRAY digital=[%u,%u,%u,%u,%u,%u,%u,%u] high_mask=0x%02X scans=%lu errors=%lu pending=%u\r\n",
-        s.level[0], s.level[1], s.level[2], s.level[3],
-        s.level[4], s.level[5], s.level[6], s.level[7],
-        (unsigned int)s.high_mask, (unsigned long)s.scan_count,
-        (unsigned long)s.error_count, Grayscale_IsScanPending());
+    debug_printf("GRAY adc=[%u,%u,%u,%u,%u,%u,%u,%u] scans=%lu errors=%lu pending=%u power=%u enabled=%u started=%u status=0x%08lX flags=0x%08lX\r\n",
+        s.adc[0], s.adc[1], s.adc[2], s.adc[3],
+        s.adc[4], s.adc[5], s.adc[6], s.adc[7],
+        (unsigned long)s.scan_count, (unsigned long)s.error_count,
+        Grayscale_IsScanPending(), s.adc_powered, s.adc_enabled,
+        s.adc_started, (unsigned long)s.last_adc_status,
+        (unsigned long)s.last_adc_flags);
     Diagnostics_RefreshReports();
+}
+
+static void Diagnostics_QueueLineCalibrationReport(void)
+{
+    AppLineSnapshot_t app;
+    if (line_calibration_report_pending) {
+        debug_println("Line calibration report already queued.");
+        return;
+    }
+    AppLine_GetSnapshot(&app);
+    line_calibration_report = app.control.calibration;
+    line_calibration_report_line = 0U;
+    line_calibration_report_pending = true;
+}
+
+static void Diagnostics_ServiceLineCalibrationReport(void)
+{
+    LineCalibration_t *cal = &line_calibration_report;
+    if (!line_calibration_report_pending) return;
+
+    if (line_calibration_report_line == 0U) {
+        debug_printf("LINE CAL verified=%u valid=%u mask=0x%02X min_span=512\r\n",
+            cal->compiled_verified, cal->valid,
+            (unsigned int)cal->valid_mask);
+    } else if (line_calibration_report_line == 1U) {
+        debug_printf("LINE CAL white=[%u,%u,%u,%u,%u,%u,%u,%u]\r\n",
+            cal->white_adc[0], cal->white_adc[1], cal->white_adc[2],
+            cal->white_adc[3], cal->white_adc[4], cal->white_adc[5],
+            cal->white_adc[6], cal->white_adc[7]);
+    } else if (line_calibration_report_line == 2U) {
+        debug_printf("LINE CAL black=[%u,%u,%u,%u,%u,%u,%u,%u]\r\n",
+            cal->black_adc[0], cal->black_adc[1], cal->black_adc[2],
+            cal->black_adc[3], cal->black_adc[4], cal->black_adc[5],
+            cal->black_adc[6], cal->black_adc[7]);
+    } else if (line_calibration_report_line == 3U) {
+        uint16_t span[LINE_SENSOR_CHANNEL_COUNT];
+        uint8_t i;
+        for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; ++i) {
+            span[i] = (cal->white_adc[i] > cal->black_adc[i])
+                ? (uint16_t)(cal->white_adc[i] - cal->black_adc[i]) : 0U;
+        }
+        debug_printf("LINE CAL span=[%u,%u,%u,%u,%u,%u,%u,%u]\r\n",
+            span[0], span[1], span[2], span[3],
+            span[4], span[5], span[6], span[7]);
+    } else {
+        debug_printf("LINE CAL enter=[%u,%u,%u,%u,%u,%u,%u,%u] exit=[%u,%u,%u,%u,%u,%u,%u,%u]\r\n",
+            cal->enter_black_adc[0], cal->enter_black_adc[1],
+            cal->enter_black_adc[2], cal->enter_black_adc[3],
+            cal->enter_black_adc[4], cal->enter_black_adc[5],
+            cal->enter_black_adc[6], cal->enter_black_adc[7],
+            cal->exit_black_adc[0], cal->exit_black_adc[1],
+            cal->exit_black_adc[2], cal->exit_black_adc[3],
+            cal->exit_black_adc[4], cal->exit_black_adc[5],
+            cal->exit_black_adc[6], cal->exit_black_adc[7]);
+        line_calibration_report_pending = false;
+        return;
+    }
+    line_calibration_report_line++;
 }
 
 static const char *Diagnostics_LinePolarityName(LinePolarity_t polarity)
@@ -310,10 +373,13 @@ static void Diagnostics_PrintLine(void)
 {
     AppLineSnapshot_t app;
     AppLine_GetSnapshot(&app);
-    debug_printf("LINE app=%u state=%s polarity=%s valid=%u pos_x1000=%ld conf_x1000=%lu correction=%ld target=%ld,%ld lost_ms=%lu age=%lu\r\n",
+    debug_printf("LINE app=%u state=%s polarity=%s cal=%u mask=0x%02X active=0x%02X valid=%u pos_x1000=%ld conf_x1000=%lu correction=%ld target=%ld,%ld lost_ms=%lu age=%lu\r\n",
         (unsigned int)app.state,
         Diagnostics_LineStateName(app.control.state),
         Diagnostics_LinePolarityName(app.control.polarity),
+        app.control.calibration.valid,
+        (unsigned int)app.control.calibration.valid_mask,
+        (unsigned int)app.control.active_mask,
         app.control.line_valid,
         (long)Diagnostics_Round(app.control.position * 1000.0f),
         (unsigned long)Diagnostics_ScalePositive(
@@ -857,9 +923,6 @@ void Diagnostics_Init(void)
     memset(reports, 0, sizeof(reports));
     motor_test_passed = false;
     oled_visual_passed = false;
-    gray_contrast_observed = false;
-    gray_high_observed = false;
-    gray_low_observed = false;
     boot_reported = false;
     boot_started_ms = SystemTime_Now();
     motor_diag_state = MOTOR_DIAG_IDLE;
@@ -870,6 +933,8 @@ void Diagnostics_Init(void)
     infrared_report_line = 0U;
     safety_report_pending = false;
     safety_report_line = 0U;
+    line_calibration_report_pending = false;
+    line_calibration_report_line = 0U;
     speed_diag_state = SPEED_DIAG_IDLE;
     speed_diag_wheel_mask = SPEED_DIAG_LEFT_MASK |
                             SPEED_DIAG_RIGHT_MASK;
@@ -904,7 +969,7 @@ void Diagnostics_PrintHelp(void)
     debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
     debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
     debug_println("          g=heading z=calibrate u=+90 i=-90 w=straight; A=arm");
-    debug_println("          r=line 2=active-level 3=arm line A=start 0=stop");
+    debug_println("          r=line 1=calibration 3=arm line A=start 0=stop");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("TEST ONLY: T=action timeout G=gyro disconnect W=stop watchdog");
@@ -1099,23 +1164,28 @@ void Diagnostics_Poll(void)
             break;
         }
         case '1':
-            debug_println("M5 qualification disabled: digital inputs use fixed 0/1 levels.");
+            Diagnostics_QueueLineCalibrationReport();
             break;
         case '2':
-            if (AppLine_TogglePolarity()) Diagnostics_PrintLine();
-            else debug_println("M5 active-level change rejected: return to IDLE.");
+            debug_println("M5 active-level fixed: black line is derived from compile-time ADC calibration.");
             break;
         case '3':
+        {
+            AppLineSnapshot_t line_app;
+            AppLine_GetSnapshot(&line_app);
             if ((motor_diag_state != MOTOR_DIAG_IDLE) ||
                 (speed_diag_state != SPEED_DIAG_IDLE) ||
                 (heading_diag_state != HEADING_DIAG_IDLE)) {
                 debug_println("M5 arm rejected: another action is active.");
+            } else if (!line_app.control.calibration.valid) {
+                debug_println("M5 arm rejected: compile and verify analog calibration first.");
             } else if (AppLine_Arm(now_ms)) {
                 debug_println("Place car on line; type uppercase A within 10 s.");
             } else {
                 debug_println("M5 arm rejected: acquire the line first.");
             }
             break;
+        }
         case '0':
             if (AppRemote_NormalStop(now_ms))
                 debug_println("Action cancelled normally; state=IDLE.");
@@ -1262,6 +1332,8 @@ void Diagnostics_Task100ms(void)
         Diagnostics_ServiceInfraredReport();
     else if (report_pending)
         Diagnostics_ServiceReport();
+    else if (line_calibration_report_pending)
+        Diagnostics_ServiceLineCalibrationReport();
     else
         Diagnostics_ServiceSafetyReport();
     if ((speed_diag_state == SPEED_DIAG_RUNNING) ||
