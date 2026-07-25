@@ -49,7 +49,15 @@ class M5LineFollowTests(unittest.TestCase):
         )
 
     def test_unverified_compile_time_calibration_locks_motion(self):
-        self._compile_and_run(ROOT / "Tests" / "m5_line_lock_test.c")
+        self._compile_and_run(
+            ROOT / "Tests" / "m5_line_lock_test.c",
+            ("-DGRAYSCALE_CALIBRATION_VERIFIED=0U",),
+        )
+
+    def test_verified_production_calibration_is_valid(self):
+        self._compile_and_run(
+            ROOT / "Tests" / "m5_line_production_calibration_test.c"
+        )
 
     def test_runtime_routes_line_app_through_control_and_safety(self):
         main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")
