@@ -1,6 +1,6 @@
 # MSPM03507CAR 当前状态
 
-更新时间：2026-07-24
+更新时间：2026-07-25
 
 本文是当前实现状态的唯一事实来源，只保留继续工程工作所需的事实、约束和未完成项。详细验证过程在 `docs/` 的日期记录中，设计意图在 `docs/superpowers/specs/`，历史状态通过 Git 追溯；它们都不能覆盖本文的当前结论。
 
@@ -141,6 +141,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 
 - Keil 工程：`keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx`。
 - 新克隆先运行 `scripts/setup_git_hooks.ps1`；pre-commit 要求工程状态变化同步 `STATE.md`。
+- 本仓库不使用 OpenSpec；不得创建或调用 `openspec/`、`.openspec.yaml`、OpenSpec CLI 或项目级 OpenSpec 技能。设计、实施计划和日期证据统一保存在 `docs/`。
 - `scripts/build_fault_injection.ps1` 只在临时测试工程加入 `M2_FAULT_INJECTION_TEST`；正式 target 不含故障注入入口。
 - `keil/Objects`、`keil/ObjectsFaultInjection`、临时工程、构建/下载日志不纳入版本控制。
 - 命令行固件下载必须遵守第 2 节 P1 的一次原样重试上限。
@@ -171,3 +172,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 ## 11. 本次文档整理记录
 
 2026-07-24：将当前摘要、活动待办、安全边界和按需读取地图前置，把下载故障的长诊断证据迁入独立记录，并删除与日期验证记录重复的历史叙述。无功能变化；未重新运行主机测试、Keil 构建或硬件验证，所有功能结论均沿用第 7 节列出的既有证据。
+
+2026-07-25：删除项目内全部 OpenSpec 工件与项目级 OpenSpec 技能，移除对应本地忽略项，并将禁用规则写入 `AGENTS.md`。无功能变化；未运行主机测试、Keil 构建或硬件验证。
