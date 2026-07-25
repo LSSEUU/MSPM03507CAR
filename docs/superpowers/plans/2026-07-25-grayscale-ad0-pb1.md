@@ -13,7 +13,7 @@
 - Work only in the existing isolated worktree `C:\Users\Administrator\Desktop\DXS\MSPM03507CAR\User_Project\MSPM03507CAR-analog` on branch `codex/restore-analog-grayscale`.
 - Preserve the existing Keil project file and do not regenerate frozen board configuration from old SysConfig input.
 - AD0 is PB1/H13-6; AD1 remains PA24; AD2 remains PA26; OUT remains PA25/ADC0 A0_2.
-- PA23 and PA21 must remain unconfigured high-impedance pins; UART2 remains receive-only on PA22.
+- PA23 must not be configured by the application. PA21 retains the existing pull-less digital-input configuration so it stays high impedance; UART2 remains receive-only on PA22.
 - Keep bounded ADC polling, eight samples per channel, diagnostic reporting, line confirmation, lost-line handling, emergency stop, WWDT, and infrared entry behavior.
 - Default `GRAYSCALE_CALIBRATION_VERIFIED` must be `0U`; no line action may start before new calibration is compiled and verified.
 - Any source or hardware-state change must update `STATE.md` in the same implementation commit.
@@ -54,6 +54,7 @@ self.assertNotIn("DL_GPIO_enableHiZ(GRAY_AD0_IOMUX)", driver)
 self.assertNotIn("DL_GPIO_RESISTOR_PULL_UP", driver)
 self.assertNotIn("GRAY_ASYNC_WAIT_AD0", driver)
 self.assertNotIn("GRAY_AD0_RISE_TIMEOUT_MS", driver)
+self.assertNotIn("IOMUX_PINCM53", header + config + driver)
 ```
 
 The production break caught by this test is mapping AD0 back to PA23 or reintroducing a shared GPIO-port mask after AD0 moves to GPIOB.
