@@ -21,7 +21,6 @@ typedef struct {
 } AppLineSnapshot_t;
 
 void AppLine_Init(void);
-bool AppLine_TogglePolarity(void);
 bool AppLine_Arm(uint32_t now_ms);
 bool AppLine_ConfirmStart(uint32_t now_ms);
 bool AppLine_Stop(uint32_t now_ms);

@@ -107,9 +107,9 @@ extern "C" {
 #define ENC_B_E2B_IOMUX                                         (IOMUX_PINCM25)
 
 /* ── 八路灰度传感器 ── */
-#define GRAY_AD0_PORT                                                   (GPIOA)
-#define GRAY_AD0_PIN                                            (DL_GPIO_PIN_23)
-#define GRAY_AD0_IOMUX                                          (IOMUX_PINCM53)
+#define GRAY_AD0_PORT                                                   (GPIOB)
+#define GRAY_AD0_PIN                                             (DL_GPIO_PIN_1)
+#define GRAY_AD0_IOMUX                                          (IOMUX_PINCM13)
 #define GRAY_AD1_PORT                                                   (GPIOA)
 #define GRAY_AD1_PIN                                            (DL_GPIO_PIN_24)
 #define GRAY_AD1_IOMUX                                          (IOMUX_PINCM54)
@@ -119,6 +119,9 @@ extern "C" {
 #define GRAY_OUT_PORT                                                   (GPIOA)
 #define GRAY_OUT_PIN                                            (DL_GPIO_PIN_25)
 #define GRAY_OUT_IOMUX                                          (IOMUX_PINCM55)
+#define GRAY_ADC_INST                                                    (ADC0)
+#define GRAY_ADC_MEM_IDX                                      (DL_ADC12_MEM_IDX_0)
+#define GRAY_ADC_INPUT_CHAN                                (DL_ADC12_INPUT_CHAN_2)
 
 /* SSD1306 connector: software I2C, address is probed at 0x3C/0x3D. */
 #define OLED_SDA_PORT                                                   (GPIOA)
@@ -155,6 +158,7 @@ void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
 void SYSCFG_DL_UART_0_init(void);
 void SYSCFG_DL_UART_2_init(void);
+void SYSCFG_DL_GRAY_ADC_init(void);
 void SYSCFG_DL_PWM_0_init(void);
 void SYSCFG_DL_IR_CAPTURE_init(void);
 

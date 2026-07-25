@@ -32,8 +32,21 @@ typedef struct {
 } LineFollowConfig_t;
 
 typedef struct {
+    uint16_t white_adc[LINE_SENSOR_CHANNEL_COUNT];
+    uint16_t black_adc[LINE_SENSOR_CHANNEL_COUNT];
+    uint16_t enter_black_adc[LINE_SENSOR_CHANNEL_COUNT];
+    uint16_t exit_black_adc[LINE_SENSOR_CHANNEL_COUNT];
+    uint8_t valid_mask;
+    bool compiled_verified;
+    bool valid;
+} LineCalibration_t;
+
+typedef struct {
+    LineCalibration_t calibration;
+    /* The calibrated conditioner always emits black line as active-high. */
     LinePolarity_t polarity;
     LineFollowState_t state;
+    uint8_t level[LINE_SENSOR_CHANNEL_COUNT];
     bool line_valid;
     bool ambiguous;
     uint8_t active_mask;
@@ -57,12 +70,11 @@ typedef struct {
     float right_target_mm_s;
 } LineFollowSnapshot_t;
 
-void LineFollow_Init(LinePolarity_t polarity);
+void LineFollow_Init(void);
 void LineFollow_GetDefaultConfig(LineFollowConfig_t *config);
 void LineFollow_GetConfig(LineFollowConfig_t *config);
 bool LineFollow_ApplyConfig(const LineFollowConfig_t *config);
-void LineFollow_SetPolarity(LinePolarity_t polarity);
-void LineFollow_ProcessSample(const uint8_t level[LINE_SENSOR_CHANNEL_COUNT],
+void LineFollow_ProcessSample(const uint16_t adc[LINE_SENSOR_CHANNEL_COUNT],
                               uint32_t scan_id, uint32_t now_ms);
 bool LineFollow_Start(uint32_t now_ms);
 void LineFollow_Update(uint32_t now_ms);

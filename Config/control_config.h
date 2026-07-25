@@ -48,8 +48,8 @@
 #define HEADING_STRAIGHT_TEST_SPEED_MM_S      250.0f
 #define HEADING_STRAIGHT_TEST_DURATION_MS     5000U
 
-/* M5 fixed digital line-sensor and line-following defaults. Position is
- * normalized to [-1, 1], negative on the left and positive on the right. */
+/* M5 calibrated analog sensor is conditioned to active-high black-line bits.
+ * Position is normalized to [-1, 1], left negative and right positive. */
 #define LINE_VALID_CONFIDENCE                   0.20f
 #define LINE_VALID_ACQUIRE_SAMPLES                 2U
 #define LINE_VALID_RELEASE_SAMPLES                 2U

@@ -1,6 +1,7 @@
 #include "line_follow.h"
 
 #include "control_config.h"
+#include "grayscale_config.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -9,6 +10,11 @@ static const float line_channel_position[LINE_SENSOR_CHANNEL_COUNT] = {
     -1.0f, -0.7142857f, -0.4285714f, -0.1428571f,
      0.1428571f, 0.4285714f,  0.7142857f,  1.0f
 };
+
+static const uint16_t configured_white_adc[LINE_SENSOR_CHANNEL_COUNT] =
+    GRAYSCALE_WHITE_ADC_VALUES;
+static const uint16_t configured_black_adc[LINE_SENSOR_CHANNEL_COUNT] =
+    GRAYSCALE_BLACK_ADC_VALUES;
 
 static LineFollowSnapshot_t line;
 static LineFollowConfig_t active_config;
@@ -103,32 +109,45 @@ bool LineFollow_ApplyConfig(const LineFollowConfig_t *config)
     return true;
 }
 
-void LineFollow_Init(LinePolarity_t polarity)
+static void LineFollow_InitCalibration(void)
+{
+    uint32_t i;
+    uint8_t valid_mask = 0U;
+
+    line.calibration.compiled_verified =
+        (GRAYSCALE_CALIBRATION_VERIFIED != 0U);
+    for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
+        uint16_t white = configured_white_adc[i];
+        uint16_t black = configured_black_adc[i];
+        line.calibration.white_adc[i] = white;
+        line.calibration.black_adc[i] = black;
+        line.calibration.enter_black_adc[i] = (uint16_t)(
+            ((2U * (uint32_t)black) + (uint32_t)white) / 3U);
+        line.calibration.exit_black_adc[i] = (uint16_t)(
+            ((uint32_t)black + (2U * (uint32_t)white)) / 3U);
+        if ((white > black) &&
+            ((uint16_t)(white - black) >=
+             GRAYSCALE_CALIBRATION_MIN_SPAN_ADC)) {
+            valid_mask |= (uint8_t)(1U << i);
+        }
+    }
+    line.calibration.valid_mask = valid_mask;
+    line.calibration.valid = line.calibration.compiled_verified &&
+        (valid_mask == 0xFFU);
+}
+
+void LineFollow_Init(void)
 {
     memset(&line, 0, sizeof(line));
     LineFollow_GetDefaultConfig(&active_config);
-    line.polarity = polarity;
+    line.polarity = LINE_POLARITY_ACTIVE_HIGH;
     line.state = LINE_FOLLOW_IDLE;
+    LineFollow_InitCalibration();
     valid_samples = 0U;
     invalid_samples = 0U;
     previous_position = 0.0f;
     previous_control_ms = 0U;
     last_valid_position = 0.0f;
-    position_initialized = false;
-    derivative_initialized = false;
-    derivative_reset_pending = true;
-    previous_raw_valid = false;
-}
-
-void LineFollow_SetPolarity(LinePolarity_t polarity)
-{
-    if (line.state != LINE_FOLLOW_IDLE) return;
-    line.polarity = polarity;
-    line.line_valid = false;
-    line.ambiguous = false;
-    line.confidence = 0.0f;
-    valid_samples = 0U;
-    invalid_samples = 0U;
     position_initialized = false;
     derivative_initialized = false;
     derivative_reset_pending = true;
@@ -148,7 +167,7 @@ static uint8_t LineFollow_CountClusters(uint8_t active_mask)
     return clusters;
 }
 
-void LineFollow_ProcessSample(const uint8_t level[LINE_SENSOR_CHANNEL_COUNT],
+void LineFollow_ProcessSample(const uint16_t adc[LINE_SENSOR_CHANNEL_COUNT],
                               uint32_t scan_id, uint32_t now_ms)
 {
     uint32_t i;
@@ -157,14 +176,34 @@ void LineFollow_ProcessSample(const uint8_t level[LINE_SENSOR_CHANNEL_COUNT],
     float raw_confidence;
     bool raw_valid;
     uint8_t active_mask = 0U;
-    if ((level == NULL) || (scan_id == line.scan_id)) return;
+    if ((adc == NULL) || (scan_id == line.scan_id)) return;
     line.scan_id = scan_id;
     line.last_update_ms = now_ms;
     line.update_count++;
+
+    if (!line.calibration.valid) {
+        memset(line.level, 0, sizeof(line.level));
+        memset(line.strength, 0, sizeof(line.strength));
+        line.active_mask = 0U;
+        line.active_count = 0U;
+        line.cluster_count = 0U;
+        line.ambiguous = false;
+        line.line_valid = false;
+        line.confidence = 0.0f;
+        valid_samples = 0U;
+        invalid_samples = 0U;
+        return;
+    }
+
     for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
-        float strength = (line.polarity == LINE_POLARITY_ACTIVE_HIGH) ?
-            (level[i] != 0U ? 1.0f : 0.0f) :
-            (level[i] == 0U ? 1.0f : 0.0f);
+        float strength;
+        if (line.level[i] == 0U) {
+            if (adc[i] <= line.calibration.enter_black_adc[i])
+                line.level[i] = 1U;
+        } else if (adc[i] >= line.calibration.exit_black_adc[i]) {
+            line.level[i] = 0U;
+        }
+        strength = (line.level[i] != 0U) ? 1.0f : 0.0f;
         line.strength[i] = strength;
         if (strength > 0.5f) active_mask |= (uint8_t)(1U << i);
         active_sum += strength;
@@ -213,7 +252,8 @@ void LineFollow_ProcessSample(const uint8_t level[LINE_SENSOR_CHANNEL_COUNT],
 
 bool LineFollow_Start(uint32_t now_ms)
 {
-    if ((line.state != LINE_FOLLOW_IDLE) || !line.line_valid ||
+    if ((line.state != LINE_FOLLOW_IDLE) || !line.calibration.valid ||
+        !line.line_valid ||
         line.ambiguous) return false;
     line.state = LINE_FOLLOW_TRACKING;
     line.lost_since_ms = 0U;
