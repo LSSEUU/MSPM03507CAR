@@ -10,7 +10,7 @@
 - 当前入口：`Source/main.c`；`Source/ti_msp_dl_config.c/.h` 是受回归测试保护的唯一冻结板级配置，修订号 `20260725`，不得用旧 `.syscfg` 覆盖。
 - 里程碑：M0–M4 已完成；M5 的临时数字模块版本曾完成验收，但当前已切换为新感为模拟模块专用固件，标定和车辆复验未完成；PB11 红外阶段一完成、阶段二仍在进行。
 - 当前主线：重新把灰度模块 AD0 接至 PB1/H13-6 后，完成独立八路响应、重新标定以及 M5 架空与落地复验。
-- 当前验证基线：PB1 AD0 推挽地址选择与 `GRAYSCALE_CALIBRATION_VERIFIED=0` 已通过 40 项完整主机回归；未执行 Keil 构建、下载或 PB1 硬件测试。原 PA23 路径下的白/黑成对数据和解锁结论均已失效。
+- 当前验证基线：PB1 AD0 推挽地址选择与 `GRAYSCALE_CALIBRATION_VERIFIED=0` 已通过完整主机回归和 Keil 6.22 目标 Rebuild；尚未下载，也未完成车端 AD0 至 PB1/H13-6 的物理改线、独立八路响应或新标定。原 PA23 路径下的白/黑成对数据和解锁结论均已失效。
 - 开始任何工作前先执行 `git status --short`，保留所有不属于当前任务的改动。需要细节时按第 9 节只读取对应文档，不要一次加载全部验证记录或 PDF。
 
 ## 2. 当前待办与停止条件
@@ -198,3 +198,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 2026-07-25：灰度 AD0 从 PA23 改接为 PB1/H13-6 推挽输出，删除 PA23 高阻上拉状态机并让同步/异步扫描共用地址选择函数；PA23 与 PA21 保持高阻。原 PA23 路径的成对白/黑标定数据作废，`GRAYSCALE_CALIBRATION_VERIFIED` 恢复为 0，巡线启动被锁定。PB1 回归测试与完整主机回归共 40 项通过；未执行 Keil 构建、下载或硬件验证。
 
 2026-07-25：分支提交 `a2a47a0 fix: remap grayscale AD0 to PB1` 后，`scripts/test.ps1` 完整主机回归 40 项通过（0 failures/errors）；`scripts/build.ps1 -Mode Rebuild` 的 Keil 6.22 目标构建为 0 error、0 warning，`Code=26260, RO-data=5356, RW-data=4, ZI-data=20156`，AXF 329608 字节、HEX 89000 字节。PB1 固件已通过主机回归和目标构建，但尚未证明车端 AD0 已改接 H13-6、八路可独立选择或新标定有效；默认验证锁保持 0，巡线启动应拒绝。未下载或进行硬件验证。
+
+2026-07-25：修复灰度标定脚本的 `q` 报告生命周期竞争：解析并保留第二阶段 `GRAY adc=...` 样本后，必须继续读取第三阶段 `GRAY ADC ...` 终止行才允许下一次 `q`。双事务假串口聚焦测试先按预期失败、修复后通过；`scripts/test.ps1` 完整主机回归 41 项通过（0 failures/errors）。本次未改动固件、未重新运行 Keil 构建、未下载或进行硬件验证，`GRAYSCALE_CALIBRATION_VERIFIED` 保持 0。

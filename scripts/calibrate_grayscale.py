@@ -131,6 +131,7 @@ def format_config(white: StageStats, black: StageStats) -> str:
 
 def _read_sample(serial_port, timeout_s: float) -> GraySample:
     deadline = time.monotonic() + timeout_s
+    sample = None
     serial_port.write(b"q")
     serial_port.flush()
     while time.monotonic() < deadline:
@@ -138,14 +139,15 @@ def _read_sample(serial_port, timeout_s: float) -> GraySample:
         if not raw:
             continue
         line = raw.decode("utf-8", errors="replace").strip()
-        sample = parse_gray_line(line)
-        if sample is None:
-            continue
-        if sample.error_count != 0:
-            raise RuntimeError(
-                f"firmware reports grayscale errors={sample.error_count}"
-            )
-        return sample
+        parsed = parse_gray_line(line)
+        if parsed is not None:
+            if parsed.error_count != 0:
+                raise RuntimeError(
+                    f"firmware reports grayscale errors={parsed.error_count}"
+                )
+            sample = parsed
+        elif sample is not None and line.startswith("GRAY ADC "):
+            return sample
     raise TimeoutError("timed out waiting for a GRAY adc response")
 
 

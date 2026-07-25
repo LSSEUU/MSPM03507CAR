@@ -3,6 +3,7 @@ import json
 import pathlib
 import sys
 import unittest
+from collections import deque
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -23,6 +24,49 @@ def samples(base, offsets=range(-4, 4), count=64):
             MODULE.GraySample(tuple(value + delta for value in base), index + 1, 0)
         )
     return result
+
+
+class FakeGraySerial:
+    def __init__(self):
+        self._transactions = deque(
+            (
+                (
+                    b"GRAY scan requested (non-blocking).\r\n",
+                    b"GRAY adc=[1000,1001,1002,1003,",
+                    b"1004,1005,1006,1007] scans=41 errors=0\r\n",
+                    b"GRAY ADC pending=0 power=1 enabled=0 started=0 "
+                    b"status=0x00000000 flags=0x00000100\r\n",
+                ),
+                (
+                    b"GRAY scan requested (non-blocking).\r\n",
+                    b"GRAY adc=[2000,2001,2002,2003,",
+                    b"2004,2005,2006,2007] scans=42 errors=0\r\n",
+                    b"GRAY ADC pending=0 power=1 enabled=0 started=0 "
+                    b"status=0x00000000 flags=0x00000100\r\n",
+                ),
+            )
+        )
+        self._chunks = deque()
+        self.writes = []
+
+    def write(self, command):
+        if self._chunks:
+            raise AssertionError(
+                "next q issued before the prior GRAY ADC terminator was consumed"
+            )
+        self.writes.append(command)
+        self._chunks.extend(self._transactions.popleft())
+
+    def flush(self):
+        pass
+
+    def readline(self):
+        line = bytearray()
+        while self._chunks:
+            line.extend(self._chunks.popleft())
+            if line.endswith(b"\n"):
+                break
+        return bytes(line)
 
 
 class GrayscaleCalibrationTests(unittest.TestCase):
@@ -79,6 +123,16 @@ class GrayscaleCalibrationTests(unittest.TestCase):
             MODULE.parse_gray_line(
                 "GRAY adc=[5000,2,3,4,5,6,7,8] scans=1 errors=0"
             )
+
+    def test_consecutive_q_transactions_consume_report_terminators(self):
+        serial_port = FakeGraySerial()
+
+        first = MODULE._read_sample(serial_port, 0.1)
+        second = MODULE._read_sample(serial_port, 0.1)
+
+        self.assertEqual(first.scan_count, 41)
+        self.assertEqual(second.scan_count, 42)
+        self.assertEqual(serial_port.writes, [b"q", b"q"])
 
 
 if __name__ == "__main__":
