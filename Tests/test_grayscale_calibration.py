@@ -4,6 +4,9 @@ import pathlib
 import sys
 import unittest
 from collections import deque
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -133,6 +136,33 @@ class GrayscaleCalibrationTests(unittest.TestCase):
         self.assertEqual(first.scan_count, 41)
         self.assertEqual(second.scan_count, 42)
         self.assertEqual(serial_port.writes, [b"q", b"q"])
+
+    def test_stage_retries_one_transient_timeout(self):
+        readings = (
+            TimeoutError("transient UART loss"),
+            MODULE.GraySample((3000,) * 8, 100, 0),
+            MODULE.GraySample((3001,) * 8, 101, 0),
+        )
+        with mock.patch.object(MODULE, "SAMPLES_PER_STAGE", 2), mock.patch.object(
+            MODULE, "_read_sample", side_effect=readings
+        ) as read_sample, redirect_stdout(StringIO()):
+            stats = MODULE.capture_stage(object(), "WHITE", 0.1, prompt=False)
+
+        self.assertEqual(stats.count, 2)
+        self.assertEqual(stats.mean, (3001,) * 8)
+        self.assertEqual(read_sample.call_count, 3)
+
+    def test_stage_rejects_three_consecutive_timeouts(self):
+        with mock.patch.object(MODULE, "SAMPLES_PER_STAGE", 1), mock.patch.object(
+            MODULE,
+            "_read_sample",
+            side_effect=[TimeoutError("lost 1"), TimeoutError("lost 2"),
+                         TimeoutError("lost 3")],
+        ) as read_sample, redirect_stdout(StringIO()):
+            with self.assertRaises(TimeoutError):
+                MODULE.capture_stage(object(), "WHITE", 0.1, prompt=False)
+
+        self.assertEqual(read_sample.call_count, 3)
 
 
 if __name__ == "__main__":

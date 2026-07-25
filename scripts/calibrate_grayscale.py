@@ -17,6 +17,7 @@ SAMPLES_PER_STAGE = 64
 ADC_MAX = 4095
 MIN_SPAN_ADC = 512
 MIN_SPAN_TO_NOISE_RATIO = 8
+MAX_CONSECUTIVE_TIMEOUTS = 2
 
 GRAY_PATTERN = re.compile(
     r"GRAY adc=\[([^]]+)\] scans=(\d+) errors=(\d+)"
@@ -161,8 +162,24 @@ def capture_stage(
         )
     samples: list[GraySample] = []
     last_scan = None
+    consecutive_timeouts = 0
     while len(samples) < SAMPLES_PER_STAGE:
-        sample = _read_sample(serial_port, timeout_s)
+        try:
+            sample = _read_sample(serial_port, timeout_s)
+        except TimeoutError as exc:
+            consecutive_timeouts += 1
+            if consecutive_timeouts > MAX_CONSECUTIVE_TIMEOUTS:
+                raise TimeoutError(
+                    f"{label} report timed out "
+                    f"{consecutive_timeouts} consecutive times"
+                ) from exc
+            print(
+                f"\n{label}: transient timeout; retrying "
+                f"({consecutive_timeouts}/{MAX_CONSECUTIVE_TIMEOUTS})",
+                flush=True,
+            )
+            continue
+        consecutive_timeouts = 0
         if sample.scan_count == last_scan:
             continue
         last_scan = sample.scan_count
