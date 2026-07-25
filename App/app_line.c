@@ -1,6 +1,7 @@
 #include "app_line.h"
 
 #include "control_config.h"
+#include "line_trace.h"
 #include "safety.h"
 #include "system_state.h"
 #include "system_time.h"
@@ -12,6 +13,14 @@
 
 static AppLineSnapshot_t app_line;
 
+static int16_t AppLine_ScaleSigned(float value, float scale)
+{
+    float scaled = value * scale;
+    if (scaled > 32767.0f) return 32767;
+    if (scaled < -32768.0f) return -32768;
+    return (int16_t)(scaled + ((scaled >= 0.0f) ? 0.5f : -0.5f));
+}
+
 static void AppLine_ReturnIdle(void)
 {
     app_line.state = APP_LINE_IDLE;
@@ -22,6 +31,7 @@ void AppLine_Init(void)
 {
     memset(&app_line, 0, sizeof(app_line));
     LineFollow_Init();
+    LineTrace_Init();
 }
 
 bool AppLine_Arm(uint32_t now_ms)
@@ -59,6 +69,7 @@ bool AppLine_ConfirmStart(uint32_t now_ms)
     app_line.state = APP_LINE_RUNNING;
     app_line.started_ms = now_ms;
     app_line.deadline_ms = now_ms + LINE_FOLLOW_ACTION_TIMEOUT_MS;
+    LineTrace_Start();
     return true;
 }
 
@@ -76,15 +87,36 @@ bool AppLine_Stop(uint32_t now_ms)
         (void)SystemState_RequestIdle();
     }
     LineFollow_Stop();
+    LineTrace_Freeze();
     AppLine_ReturnIdle();
     return was_active;
 }
 
 void AppLine_ProcessGrayscale(const GrayscaleSnapshot_t *gray)
 {
+    LineFollowSnapshot_t control;
+    LineTraceFrame_t frame;
+    uint32_t i;
     if ((gray == NULL) || !gray->last_scan_ok) return;
     LineFollow_ProcessSample(gray->adc, gray->scan_count,
                              gray->last_update_ms);
+    if ((app_line.state != APP_LINE_RUNNING) ||
+        ((gray->scan_count & 1U) != 0U)) return;
+    LineFollow_GetSnapshot(&control);
+    memset(&frame, 0, sizeof(frame));
+    frame.time_ms = gray->last_update_ms;
+    for (i = 0U; i < LINE_TRACE_CHANNEL_COUNT; i++)
+        frame.adc[i] = gray->adc[i];
+    frame.position_x1000 = AppLine_ScaleSigned(control.position, 1000.0f);
+    frame.correction_mm_s = AppLine_ScaleSigned(
+        control.correction_mm_s, 1.0f);
+    frame.active_mask = control.active_mask;
+    frame.active_count = control.active_count;
+    frame.cluster_count = control.cluster_count;
+    frame.state = (uint8_t)control.state;
+    frame.search_direction = control.search_direction;
+    frame.flags = control.branch_direction_latched ? 1U : 0U;
+    LineTrace_Capture(&frame, control.state == LINE_FOLLOW_SEARCHING);
 }
 
 void AppLine_Task20ms(uint32_t now_ms)
@@ -98,6 +130,7 @@ void AppLine_Task20ms(uint32_t now_ms)
     if (app_line.state != APP_LINE_RUNNING) return;
     if (Safety_HasFault()) {
         WheelSpeed_Disable();
+        LineTrace_Freeze();
         LineFollow_Stop();
         AppLine_ReturnIdle();
         return;
@@ -106,6 +139,7 @@ void AppLine_Task20ms(uint32_t now_ms)
     LineFollow_GetSnapshot(&control);
     if (control.state == LINE_FOLLOW_LOST_TIMEOUT) {
         WheelSpeed_Disable();
+        LineTrace_Freeze();
         Safety_RaiseFault(SAFETY_FAULT_LINE_LOST, now_ms);
         AppLine_ReturnIdle();
         return;

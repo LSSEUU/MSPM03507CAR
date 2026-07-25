@@ -289,6 +289,27 @@ class TelemetryAndScoringTests(unittest.TestCase):
         self.assertEqual(metrics["rise_time_ms"], 0)
         self.assertEqual(metrics["steady_error_pct"], 0)
 
+    def test_requested_motion_that_never_starts_is_a_hard_failure(self):
+        idle = [
+            sample(
+                time_ms,
+                request_l=0,
+                request_r=0,
+                ramp_l=0,
+                ramp_r=0,
+                filter_l=0,
+                filter_r=0,
+                pwm_l=0,
+                pwm_r=0,
+            )
+            for time_ms in range(0, 2020, 20)
+        ]
+
+        metrics = m6.score_samples(idle, requested_speed=100, mode="line")
+
+        self.assertFalse(metrics["action_started"])
+        self.assertIn("action_not_started", metrics["hard_failures"])
+
     def test_fault_drop_line_loss_and_sustained_saturation_are_hard_failures(self):
         cases = {
             "fault": [sample(0), sample(20, fault_bits=4)],

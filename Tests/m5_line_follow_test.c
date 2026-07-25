@@ -81,6 +81,52 @@ static void test_calibration_hysteresis_and_position(void)
     assert(snapshot.level[7] == 0U);
 }
 
+static void test_analog_strength_interpolates_without_topology_change(void)
+{
+    uint16_t adc[LINE_SENSOR_CHANNEL_COUNT];
+    LineFollowSnapshot_t snapshot;
+    float left_position;
+
+    LineFollow_Init();
+    make_black_line(adc, 3U, 4U);
+    LineFollow_ProcessSample(adc, 1U, 20U);
+    LineFollow_ProcessSample(adc, 2U, 40U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.line_valid);
+    assert(snapshot.active_mask == 0x18U);
+    assert(fabsf(snapshot.raw_position) < 0.001f);
+
+    /* A distant sub-threshold reflection is not part of the active line
+     * cluster and must not pull the steering centroid toward track exterior. */
+    adc[7] = (uint16_t)((TEST_WHITE_ADC + TEST_BLACK_ADC) / 2U);
+    LineFollow_ProcessSample(adc, 3U, 60U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.active_mask == 0x18U);
+    assert(fabsf(snapshot.raw_position) < 0.001f);
+    adc[7] = TEST_WHITE_ADC;
+
+    /* Keep both hysteretic bits active while changing only reflected
+     * intensity. A binary centroid would remain exactly zero here. */
+    adc[4] = (uint16_t)((TEST_WHITE_ADC + TEST_BLACK_ADC) / 2U);
+    LineFollow_ProcessSample(adc, 4U, 80U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.active_mask == 0x18U);
+    assert(snapshot.active_count == 2U);
+    assert(snapshot.cluster_count == 1U);
+    assert(snapshot.raw_position < -0.04f);
+    left_position = snapshot.raw_position;
+
+    adc[3] = (uint16_t)((TEST_WHITE_ADC + TEST_BLACK_ADC) / 2U);
+    adc[4] = TEST_BLACK_ADC;
+    LineFollow_ProcessSample(adc, 5U, 100U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.active_mask == 0x18U);
+    assert(snapshot.active_count == 2U);
+    assert(snapshot.cluster_count == 1U);
+    assert(snapshot.raw_position > 0.04f);
+    assert((snapshot.raw_position - left_position) > 0.08f);
+}
+
 static void test_tracking_search_recovery_and_timeout(void)
 {
     uint16_t adc[LINE_SENSOR_CHANNEL_COUNT];
@@ -395,6 +441,7 @@ static void test_confirmed_branch_stays_latched_until_centered_reacquisition(voi
 int main(void)
 {
     test_calibration_hysteresis_and_position();
+    test_analog_strength_interpolates_without_topology_change();
     test_tracking_search_recovery_and_timeout();
     test_rejects_missing_line_and_duplicate_scan();
     test_topology_marks_full_black_and_multiple_clusters_ambiguous();

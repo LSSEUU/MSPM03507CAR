@@ -10,6 +10,7 @@
 #include "heading.h"
 #include "ir_receiver.h"
 #include "led.h"
+#include "line_trace.h"
 #include "m6_telemetry.h"
 #include "motor.h"
 #include "oled.h"
@@ -101,6 +102,10 @@ static bool heading_diag_completed;
 static float heading_diag_hold_speed_mm_s;
 static uint32_t heading_diag_hold_duration_ms;
 static AppLineState_t line_previous_state;
+static bool line_trace_report_pending;
+static bool line_trace_report_header_pending;
+static uint8_t line_trace_report_index;
+static LineTraceInfo_t line_trace_report_info;
 
 #ifdef M2_FAULT_INJECTION_TEST
 static bool fault_injection_stop_watchdog;
@@ -1023,7 +1028,7 @@ void Diagnostics_PrintHelp(void)
     debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
     debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
     debug_println("          g=heading z=calibrate u=+90 i=-90 w=straight; A=arm");
-    debug_println("          r=line 1=calibration 3=arm line A=start 0=stop");
+    debug_println("          r=line 1=calibration 3=arm line A=start 0=stop T=line trace");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
     debug_println("M6 transaction: :id,get/set/apply/revert/load/defaults/save/log,...");
 #ifdef M2_FAULT_INJECTION_TEST
@@ -1108,6 +1113,59 @@ static void Diagnostics_ServiceLineEvents(void)
         Diagnostics_QueueSafetyReport();
     }
     line_previous_state = app.state;
+}
+
+static void Diagnostics_QueueLineTraceReport(void)
+{
+    AppLineSnapshot_t app;
+    AppLine_GetSnapshot(&app);
+    if (app.state != APP_LINE_IDLE) {
+        debug_println("Line trace rejected: stop the line action first.");
+        return;
+    }
+    if (line_trace_report_pending) {
+        debug_println("Line trace report already queued.");
+        return;
+    }
+    LineTrace_GetInfo(&line_trace_report_info);
+    if (line_trace_report_info.count == 0U) {
+        debug_println("Line trace empty: run line following first.");
+        return;
+    }
+    line_trace_report_index = 0U;
+    line_trace_report_header_pending = true;
+    line_trace_report_pending = true;
+}
+
+static void Diagnostics_ServiceLineTraceReport(void)
+{
+    LineTraceFrame_t frame;
+    if (!line_trace_report_pending) return;
+    if (line_trace_report_header_pending) {
+        debug_println("G6,index,time_ms,adc0,adc1,adc2,adc3,adc4,adc5,adc6,adc7,mask,count,clusters,state,direction,latch,pos_x1000,correction");
+        line_trace_report_header_pending = false;
+        return;
+    }
+    if (line_trace_report_index < line_trace_report_info.count) {
+        if (LineTrace_GetFrame(line_trace_report_index, &frame)) {
+            debug_printf("G6,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%u,%d,%d\r\n",
+                line_trace_report_index,
+                (unsigned long)frame.time_ms,
+                frame.adc[0], frame.adc[1], frame.adc[2], frame.adc[3],
+                frame.adc[4], frame.adc[5], frame.adc[6], frame.adc[7],
+                frame.active_mask, frame.active_count, frame.cluster_count,
+                frame.state, frame.search_direction,
+                (frame.flags & 1U) != 0U,
+                frame.position_x1000, frame.correction_mm_s);
+        }
+        line_trace_report_index++;
+        return;
+    }
+    debug_printf("G6,done,count=%u,triggered=%u,frozen=%u\r\n",
+        line_trace_report_info.count,
+        line_trace_report_info.triggered,
+        line_trace_report_info.frozen);
+    line_trace_report_pending = false;
 }
 
 bool Diagnostics_ActionIsIdle(void)
@@ -1379,6 +1437,11 @@ void Diagnostics_Poll(void)
                 Diagnostics_StartMotorTest(now_ms);
             }
             break;
+#ifndef M2_FAULT_INJECTION_TEST
+        case 'T':
+            Diagnostics_QueueLineTraceReport();
+            break;
+#endif
 #ifdef M2_FAULT_INJECTION_TEST
         case 'T':
             Diagnostics_StartZeroPwmFaultTest(now_ms, 200U, 0U,
@@ -1427,6 +1490,8 @@ void Diagnostics_Task100ms(void)
     }
     if (infrared_report_pending)
         Diagnostics_ServiceInfraredReport();
+    else if (line_trace_report_pending)
+        Diagnostics_ServiceLineTraceReport();
     else if (report_pending)
         Diagnostics_ServiceReport();
     else if (line_calibration_report_pending)

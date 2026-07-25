@@ -58,6 +58,9 @@
 #define LINE_BRANCH_RELEASE_MIN_ACTIVE              2U
 #define LINE_BRANCH_RELEASE_POSITION              0.20f
 #define LINE_EXPECTED_ACTIVE_SUM                 1.50f
+/* Ignore weak calibrated reflectance drift in the continuous centroid.
+ * Hysteretic bits remain the sole source of line/topology validity. */
+#define LINE_ANALOG_STRENGTH_FLOOR                0.08f
 
 #define LINE_FOLLOW_BASE_SPEED_MM_S             160.0f
 #define LINE_FOLLOW_KP_MM_S                     150.0f

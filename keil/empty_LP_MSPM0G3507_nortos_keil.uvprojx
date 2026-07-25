@@ -539,6 +539,11 @@
               <FileType>1</FileType>
               <FilePath>../System/m6_telemetry.c</FilePath>
             </File>
+            <File>
+              <FileName>line_trace.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/line_trace.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

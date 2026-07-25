@@ -50,6 +50,7 @@ typedef struct {
     bool line_valid;
     bool ambiguous;
     bool branch_direction_latched;
+    int8_t search_direction;
     uint8_t active_mask;
     uint8_t active_count;
     uint8_t cluster_count;

@@ -669,6 +669,7 @@ def score_samples(
         return {
             "score": 1.0e9,
             "hard_failures": ["telemetry_missing"],
+            "action_started": False,
             "sample_count": 0,
         }
     ordered = sorted(samples, key=lambda item: int(item["time_ms"]))
@@ -706,6 +707,7 @@ def score_samples(
         for sample in ordered
         if int(sample["request_l"]) != 0 or int(sample["request_r"]) != 0
     ]
+    action_started = bool(active_rows)
     active_end_ms = int(active_rows[-1]["time_ms"]) if active_rows else end_ms
     steady = [
         sample
@@ -782,6 +784,8 @@ def score_samples(
     saturation_ms = _saturation_duration_ms(ordered)
 
     hard_failures: list[str] = []
+    if abs(float(requested_speed)) > 0.0 and not action_started:
+        hard_failures.append("action_not_started")
     if fault_bits:
         hard_failures.append(f"firmware_fault_0x{fault_bits:X}")
     if mode == "line" and line_loss_max_ms >= LINE_LOSS_ABORT_MS:
@@ -816,6 +820,7 @@ def score_samples(
     return {
         "score": score,
         "hard_failures": hard_failures,
+        "action_started": action_started,
         "sample_count": len(ordered),
         "duration_ms": duration_ms,
         "rise_time_ms": rise_time_ms,
