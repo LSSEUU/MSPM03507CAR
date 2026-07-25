@@ -297,7 +297,8 @@ void M6Telemetry_Capture20ms(uint32_t now_ms)
     sample->rate_source = (uint32_t)heading.rate_source;
     sample->gray_mask = line.control.active_mask;
     sample->line_info = ((uint32_t)line.control.active_count << 4U) |
-                        (uint32_t)(line.control.cluster_count & 0x0FU);
+                        (uint32_t)(line.control.cluster_count & 0x0FU) |
+                        (line.control.branch_direction_latched ? 0x100U : 0U);
     sample->position_raw_x1000 = rounded(line.control.raw_position, 1000.0f);
     sample->position_filtered_x1000 = rounded(line.control.position, 1000.0f);
     sample->derivative_x1000 = rounded(line.control.filtered_derivative, 1000.0f);

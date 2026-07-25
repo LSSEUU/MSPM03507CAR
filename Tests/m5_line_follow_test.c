@@ -240,6 +240,158 @@ static void test_short_ambiguity_slows_then_enters_search(void)
     assert(snapshot.state == LINE_FOLLOW_SEARCHING);
 }
 
+static void test_centered_corner_branch_hint_selects_search_direction(void)
+{
+    uint16_t adc[LINE_SENSOR_CHANNEL_COUNT];
+    LineFollowSnapshot_t snapshot;
+
+    LineFollow_Init();
+    make_black_line(adc, 3U, 4U);
+    LineFollow_ProcessSample(adc, 1U, 20U);
+    LineFollow_ProcessSample(adc, 2U, 40U);
+    assert(LineFollow_Start(40U));
+    LineFollow_Update(60U);
+
+    adc[0] = TEST_BLACK_ADC;
+    LineFollow_ProcessSample(adc, 3U, 80U);
+    LineFollow_Update(80U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.line_valid);
+    assert(snapshot.ambiguous);
+    assert(snapshot.state == LINE_FOLLOW_TRACKING);
+
+    LineFollow_ProcessSample(adc, 4U, 100U);
+    LineFollow_Update(100U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(!snapshot.line_valid);
+    assert(snapshot.state == LINE_FOLLOW_SEARCHING);
+    assert(snapshot.left_target_mm_s < snapshot.right_target_mm_s);
+
+    make_black_mask(adc, 0x10U);
+    LineFollow_ProcessSample(adc, 5U, 120U);
+    LineFollow_Update(120U);
+    fill_background(adc);
+    LineFollow_ProcessSample(adc, 6U, 140U);
+    LineFollow_Update(140U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.state == LINE_FOLLOW_SEARCHING);
+    assert(snapshot.left_target_mm_s < snapshot.right_target_mm_s);
+
+    LineFollow_Init();
+    make_black_line(adc, 3U, 4U);
+    LineFollow_ProcessSample(adc, 1U, 20U);
+    LineFollow_ProcessSample(adc, 2U, 40U);
+    assert(LineFollow_Start(40U));
+    LineFollow_Update(60U);
+
+    adc[7] = TEST_BLACK_ADC;
+    LineFollow_ProcessSample(adc, 3U, 80U);
+    LineFollow_Update(80U);
+    LineFollow_ProcessSample(adc, 4U, 100U);
+    LineFollow_Update(100U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(!snapshot.line_valid);
+    assert(snapshot.state == LINE_FOLLOW_SEARCHING);
+    assert(snapshot.left_target_mm_s > snapshot.right_target_mm_s);
+}
+
+static void test_single_ambiguous_scan_does_not_latch_branch_hint(void)
+{
+    uint16_t adc[LINE_SENSOR_CHANNEL_COUNT];
+    LineFollowSnapshot_t snapshot;
+
+    LineFollow_Init();
+    make_black_line(adc, 3U, 4U);
+    LineFollow_ProcessSample(adc, 1U, 20U);
+    LineFollow_ProcessSample(adc, 2U, 40U);
+    assert(LineFollow_Start(40U));
+    LineFollow_Update(60U);
+
+    adc[0] = TEST_BLACK_ADC;
+    LineFollow_ProcessSample(adc, 3U, 80U);
+    LineFollow_Update(80U);
+    fill_background(adc);
+    LineFollow_ProcessSample(adc, 4U, 100U);
+    LineFollow_Update(100U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(!snapshot.line_valid);
+    assert(snapshot.state == LINE_FOLLOW_SEARCHING);
+    assert(snapshot.left_target_mm_s > snapshot.right_target_mm_s);
+}
+
+static void test_confirmed_branch_stays_latched_until_centered_reacquisition(void)
+{
+    uint16_t adc[LINE_SENSOR_CHANNEL_COUNT];
+    LineFollowSnapshot_t snapshot;
+    uint32_t i;
+
+    LineFollow_Init();
+    make_black_line(adc, 3U, 4U);
+    LineFollow_ProcessSample(adc, 1U, 20U);
+    LineFollow_ProcessSample(adc, 2U, 40U);
+    assert(LineFollow_Start(40U));
+    LineFollow_Update(60U);
+
+    /* Replay the measured left-corner opening: 0x19 -> 0x1b. */
+    adc[0] = TEST_BLACK_ADC;
+    LineFollow_ProcessSample(adc, 3U, 80U);
+    LineFollow_Update(80U);
+    adc[1] = TEST_BLACK_ADC;
+    LineFollow_ProcessSample(adc, 4U, 100U);
+    LineFollow_Update(100U);
+
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.branch_direction_latched);
+
+    /* Replay the r6 false-release sequence: 0x1c, 0x1c, 0x3c looked close
+     * to center for only 60 ms, followed by two X5-only frames and loss. */
+    make_black_mask(adc, 0x1CU);
+    LineFollow_ProcessSample(adc, 5U, 120U);
+    LineFollow_Update(120U);
+    LineFollow_ProcessSample(adc, 6U, 140U);
+    LineFollow_Update(140U);
+    make_black_mask(adc, 0x3CU);
+    LineFollow_ProcessSample(adc, 7U, 160U);
+    LineFollow_Update(160U);
+    make_black_mask(adc, 0x10U);
+    LineFollow_ProcessSample(adc, 8U, 180U);
+    LineFollow_Update(180U);
+    LineFollow_ProcessSample(adc, 9U, 200U);
+    LineFollow_Update(200U);
+    fill_background(adc);
+    LineFollow_ProcessSample(adc, 10U, 220U);
+    LineFollow_ProcessSample(adc, 11U, 240U);
+    LineFollow_Update(240U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.state == LINE_FOLLOW_SEARCHING);
+    assert(snapshot.left_target_mm_s < snapshot.right_target_mm_s);
+    assert(snapshot.branch_direction_latched);
+
+    /* Ten stable 20 ms centered samples release the branch latch. */
+    for (i = 0U; i < LINE_BRANCH_RELEASE_SAMPLES; i++) {
+        uint32_t scan_id = 12U + i;
+        uint32_t now_ms = 260U + (i * 20U);
+        make_black_line(adc, 3U, 4U);
+        LineFollow_ProcessSample(adc, scan_id, now_ms);
+        LineFollow_Update(now_ms);
+    }
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.state == LINE_FOLLOW_TRACKING);
+    assert(!snapshot.branch_direction_latched);
+
+    /* Once released, ordinary right-side evidence can select right search. */
+    make_black_line(adc, 6U, 7U);
+    LineFollow_ProcessSample(adc, 22U, 460U);
+    LineFollow_ProcessSample(adc, 23U, 480U);
+    fill_background(adc);
+    LineFollow_ProcessSample(adc, 24U, 500U);
+    LineFollow_ProcessSample(adc, 25U, 520U);
+    LineFollow_Update(520U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.state == LINE_FOLLOW_SEARCHING);
+    assert(snapshot.left_target_mm_s > snapshot.right_target_mm_s);
+}
+
 int main(void)
 {
     test_calibration_hysteresis_and_position();
@@ -248,5 +400,8 @@ int main(void)
     test_topology_marks_full_black_and_multiple_clusters_ambiguous();
     test_filtered_scheduled_control_slew_and_reacquire_reset();
     test_short_ambiguity_slows_then_enters_search();
+    test_centered_corner_branch_hint_selects_search_direction();
+    test_single_ambiguous_scan_does_not_latch_branch_hint();
+    test_confirmed_branch_stays_latched_until_centered_reacquisition();
     return 0;
 }

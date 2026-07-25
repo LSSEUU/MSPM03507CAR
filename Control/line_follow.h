@@ -49,6 +49,7 @@ typedef struct {
     uint8_t level[LINE_SENSOR_CHANNEL_COUNT];
     bool line_valid;
     bool ambiguous;
+    bool branch_direction_latched;
     uint8_t active_mask;
     uint8_t active_count;
     uint8_t cluster_count;

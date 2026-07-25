@@ -53,6 +53,10 @@
 #define LINE_VALID_CONFIDENCE                   0.20f
 #define LINE_VALID_ACQUIRE_SAMPLES                 2U
 #define LINE_VALID_RELEASE_SAMPLES                 2U
+#define LINE_BRANCH_HINT_SAMPLES                   2U
+#define LINE_BRANCH_RELEASE_SAMPLES               10U
+#define LINE_BRANCH_RELEASE_MIN_ACTIVE              2U
+#define LINE_BRANCH_RELEASE_POSITION              0.20f
 #define LINE_EXPECTED_ACTIVE_SUM                 1.50f
 
 #define LINE_FOLLOW_BASE_SPEED_MM_S             160.0f

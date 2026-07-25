@@ -27,6 +27,7 @@ BAUD_RATE = 115200
 PARAMETER_SCHEMA = 1
 DEFAULT_FIRMWARE_PREFIX = "M6"
 MAX_FRAME_BYTES = 60
+LINE_LOSS_ABORT_MS = 1600
 TELEMETRY_PREFIX = "M6"
 TELEMETRY_FIELDS = (
     "time_ms",
@@ -542,6 +543,27 @@ def _saturation_duration_ms(samples: Sequence[Mapping[str, int]]) -> int:
     return max(longest, reported)
 
 
+def _line_sample_usable(sample: Mapping[str, int]) -> bool:
+    info = int(sample["line_info"])
+    active_count = (info >> 4) & 0x0F
+    cluster_count = info & 0x0F
+    return 1 <= active_count <= 4 and cluster_count == 1
+
+
+def _line_loss_duration_ms(samples: Sequence[Mapping[str, int]]) -> int:
+    longest = 0
+    lost_since: int | None = None
+    for sample in samples:
+        now = int(sample["time_ms"])
+        if not _line_sample_usable(sample):
+            if lost_since is None:
+                lost_since = now
+            longest = max(longest, now - lost_since)
+        else:
+            lost_since = None
+    return longest
+
+
 def telemetry_abort_reason(
     samples: Sequence[Mapping[str, int]],
     *,
@@ -562,7 +584,7 @@ def telemetry_abort_reason(
         return "uart_tx_drop"
     if int(current["telemetry_dropped"]) > int(first["telemetry_dropped"]):
         return "telemetry_drop"
-    if mode == "line" and (int(current["line_info"]) >> 4) == 0:
+    if mode == "line" and _line_loss_duration_ms(samples) >= LINE_LOSS_ABORT_MS:
         return "line_loss"
     if len(samples) >= 2:
         gap = int(samples[-1]["time_ms"]) - int(samples[-2]["time_ms"])
@@ -739,10 +761,11 @@ def score_samples(
     line_loss_events = 0
     was_valid = True
     for sample in ordered:
-        valid = (int(sample["line_info"]) >> 4) != 0
+        valid = _line_sample_usable(sample)
         if was_valid and not valid:
             line_loss_events += 1
         was_valid = valid
+    line_loss_max_ms = _line_loss_duration_ms(ordered)
 
     missed_tasks = _delta(ordered, "missed_tasks")
     uart_drops = _delta(ordered, "rx_dropped") + _delta(ordered, "tx_dropped")
@@ -761,7 +784,7 @@ def score_samples(
     hard_failures: list[str] = []
     if fault_bits:
         hard_failures.append(f"firmware_fault_0x{fault_bits:X}")
-    if mode == "line" and line_loss_events:
+    if mode == "line" and line_loss_max_ms >= LINE_LOSS_ABORT_MS:
         hard_failures.append("line_loss")
     if saturation_ms >= 300:
         hard_failures.append("sustained_pwm_saturation")
@@ -806,6 +829,7 @@ def score_samples(
         "line_position_rms": position_rms,
         "correction_jerk_rms": correction_jerk_rms,
         "line_loss_events": line_loss_events,
+        "line_loss_max_ms": line_loss_max_ms,
         "missed_task_delta": missed_tasks,
         "uart_drop_delta": uart_drops,
         "telemetry_drop_delta": telemetry_drops,

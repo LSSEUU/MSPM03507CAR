@@ -27,6 +27,12 @@ static bool position_initialized;
 static bool derivative_initialized;
 static bool derivative_reset_pending;
 static bool previous_raw_valid;
+static int8_t search_direction;
+static uint8_t branch_release_samples;
+static int8_t ambiguity_direction_candidate;
+static uint8_t ambiguity_direction_samples;
+static int8_t position_direction_candidate;
+static uint8_t position_direction_samples;
 
 static float LineFollow_Abs(float value)
 {
@@ -152,6 +158,13 @@ void LineFollow_Init(void)
     derivative_initialized = false;
     derivative_reset_pending = true;
     previous_raw_valid = false;
+    search_direction = 0;
+    line.branch_direction_latched = false;
+    branch_release_samples = 0U;
+    ambiguity_direction_candidate = 0;
+    ambiguity_direction_samples = 0U;
+    position_direction_candidate = 0;
+    position_direction_samples = 0U;
 }
 
 static uint8_t LineFollow_CountClusters(uint8_t active_mask)
@@ -165,6 +178,25 @@ static uint8_t LineFollow_CountClusters(uint8_t active_mask)
         previous = active;
     }
     return clusters;
+}
+
+static int8_t LineFollow_AmbiguousDirection(uint8_t active_mask)
+{
+    float left_extent = 0.0f;
+    float right_extent = 0.0f;
+    uint8_t i;
+    for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
+        float position;
+        if (((active_mask >> i) & 1U) == 0U) continue;
+        position = line_channel_position[i];
+        if ((position < 0.0f) && (-position > left_extent))
+            left_extent = -position;
+        else if ((position > 0.0f) && (position > right_extent))
+            right_extent = position;
+    }
+    if (left_extent > right_extent) return -1;
+    if (right_extent > left_extent) return 1;
+    return 0;
 }
 
 void LineFollow_ProcessSample(const uint16_t adc[LINE_SENSOR_CHANNEL_COUNT],
@@ -215,13 +247,35 @@ void LineFollow_ProcessSample(const uint16_t adc[LINE_SENSOR_CHANNEL_COUNT],
     line.ambiguous = (line.active_count == LINE_SENSOR_CHANNEL_COUNT) ||
                      (line.active_count > 4U) ||
                      (line.cluster_count > 1U);
-    if (line.ambiguous) line.ambiguity_count++;
+    if (line.ambiguous && !line.branch_direction_latched) {
+        int8_t direction = LineFollow_AmbiguousDirection(active_mask);
+        line.ambiguity_count++;
+        if (direction == 0) {
+            ambiguity_direction_candidate = 0;
+            ambiguity_direction_samples = 0U;
+        } else if (direction == ambiguity_direction_candidate) {
+            if (ambiguity_direction_samples < LINE_BRANCH_HINT_SAMPLES)
+                ambiguity_direction_samples++;
+        } else {
+            ambiguity_direction_candidate = direction;
+            ambiguity_direction_samples = 1U;
+        }
+        if (ambiguity_direction_samples >= LINE_BRANCH_HINT_SAMPLES) {
+            search_direction = direction;
+            line.branch_direction_latched = true;
+            branch_release_samples = 0U;
+        }
+    } else {
+        ambiguity_direction_candidate = 0;
+        ambiguity_direction_samples = 0U;
+    }
     raw_confidence = LineFollow_Clamp(
         active_sum / LINE_EXPECTED_ACTIVE_SUM, 0.0f, 1.0f);
     raw_valid = (raw_confidence >= LINE_VALID_CONFIDENCE) &&
                 !line.ambiguous && (line.active_count != 0U);
     if (raw_valid) {
         float raw_position = weighted_sum / active_sum;
+        int8_t direction = 0;
         if (!previous_raw_valid || !position_initialized) {
             line.position = raw_position;
             position_initialized = true;
@@ -231,6 +285,38 @@ void LineFollow_ProcessSample(const uint16_t adc[LINE_SENSOR_CHANNEL_COUNT],
                 (raw_position - line.position);
         }
         line.raw_position = raw_position;
+        if (raw_position < -0.05f) direction = -1;
+        else if (raw_position > 0.05f) direction = 1;
+        if (line.branch_direction_latched) {
+            position_direction_candidate = 0;
+            position_direction_samples = 0U;
+            if ((line.active_count >= LINE_BRANCH_RELEASE_MIN_ACTIVE) &&
+                (LineFollow_Abs(raw_position) <=
+                 LINE_BRANCH_RELEASE_POSITION)) {
+                if (branch_release_samples < LINE_BRANCH_RELEASE_SAMPLES)
+                    branch_release_samples++;
+                if (branch_release_samples >= LINE_BRANCH_RELEASE_SAMPLES) {
+                    line.branch_direction_latched = false;
+                    branch_release_samples = 0U;
+                    search_direction = 0;
+                }
+            } else {
+                branch_release_samples = 0U;
+            }
+        } else {
+            if (direction == 0) {
+                position_direction_candidate = 0;
+                position_direction_samples = 0U;
+            } else if (direction == position_direction_candidate) {
+                if (position_direction_samples < LINE_BRANCH_HINT_SAMPLES)
+                    position_direction_samples++;
+            } else {
+                position_direction_candidate = direction;
+                position_direction_samples = 1U;
+            }
+            if (position_direction_samples >= LINE_BRANCH_HINT_SAMPLES)
+                search_direction = direction;
+        }
         if (valid_samples < LINE_VALID_ACQUIRE_SAMPLES) valid_samples++;
         invalid_samples = 0U;
         line.confidence = raw_confidence;
@@ -240,6 +326,9 @@ void LineFollow_ProcessSample(const uint16_t adc[LINE_SENSOR_CHANNEL_COUNT],
             last_valid_position = line.position;
         }
     } else {
+        branch_release_samples = 0U;
+        position_direction_candidate = 0;
+        position_direction_samples = 0U;
         if (invalid_samples < LINE_VALID_RELEASE_SAMPLES) invalid_samples++;
         valid_samples = 0U;
         line.confidence = raw_confidence;
@@ -267,6 +356,8 @@ bool LineFollow_Start(uint32_t now_ms)
     last_valid_position = line.position;
     derivative_initialized = false;
     derivative_reset_pending = true;
+    line.branch_direction_latched = false;
+    branch_release_samples = 0U;
     return true;
 }
 
@@ -384,9 +475,14 @@ void LineFollow_Update(uint32_t now_ms)
         line.right_target_mm_s = 0.0f;
         return;
     }
-    correction = (last_valid_position < 0.0f) ?
-        -active_config.lost_search_speed_mm_s :
-         active_config.lost_search_speed_mm_s;
+    if (search_direction < 0)
+        correction = -active_config.lost_search_speed_mm_s;
+    else if (search_direction > 0)
+        correction = active_config.lost_search_speed_mm_s;
+    else
+        correction = (last_valid_position < 0.0f) ?
+            -active_config.lost_search_speed_mm_s :
+             active_config.lost_search_speed_mm_s;
     line.dynamic_base_mm_s = LineFollow_Clamp(
         active_config.lost_search_speed_mm_s * (3.0f / 7.0f),
         0.0f, active_config.speed_min_mm_s);
@@ -408,6 +504,13 @@ void LineFollow_Stop(void)
     line.right_target_mm_s = 0.0f;
     derivative_initialized = false;
     derivative_reset_pending = true;
+    search_direction = 0;
+    line.branch_direction_latched = false;
+    branch_release_samples = 0U;
+    ambiguity_direction_candidate = 0;
+    ambiguity_direction_samples = 0U;
+    position_direction_candidate = 0;
+    position_direction_samples = 0U;
 }
 
 void LineFollow_GetSnapshot(LineFollowSnapshot_t *snapshot)

@@ -268,6 +268,7 @@ class TelemetryAndScoringTests(unittest.TestCase):
             "line_position_rms",
             "correction_jerk_rms",
             "line_loss_events",
+            "line_loss_max_ms",
             "missed_task_delta",
             "uart_drop_delta",
             "telemetry_drop_delta",
@@ -292,7 +293,7 @@ class TelemetryAndScoringTests(unittest.TestCase):
         cases = {
             "fault": [sample(0), sample(20, fault_bits=4)],
             "drop": [sample(0), sample(20, tx_dropped=1)],
-            "line": [sample(0), sample(20, line_info=0)],
+            "line": [sample(t, line_info=0) for t in range(0, 1640, 20)],
             "saturation": [sample(t, saturation_bits=1) for t in range(0, 340, 20)],
         }
         for name, samples in cases.items():
@@ -304,6 +305,37 @@ class TelemetryAndScoringTests(unittest.TestCase):
         ground = [sample(0, line_info=0), sample(20, line_info=0)]
         metrics = m6.score_samples(ground, requested_speed=100, mode="ground")
         self.assertNotIn("line_loss", metrics["hard_failures"])
+
+    def test_transient_line_search_is_recorded_without_premature_abort(self):
+        transient = [sample(0), sample(20, line_info=0), sample(40)]
+        self.assertIsNone(
+            m6.telemetry_abort_reason(transient, mode="line", period_ms=20)
+        )
+        metrics = m6.score_samples(transient, requested_speed=100, mode="line")
+        self.assertEqual(metrics["line_loss_events"], 1)
+        self.assertEqual(metrics["line_loss_max_ms"], 0)
+        self.assertNotIn("line_loss", metrics["hard_failures"])
+
+        sustained = [sample(t, line_info=0) for t in range(0, 1640, 20)]
+        self.assertEqual(
+            m6.telemetry_abort_reason(sustained, mode="line", period_ms=20),
+            "line_loss",
+        )
+
+        full_black = [sample(t, line_info=0x81) for t in range(0, 1640, 20)]
+        self.assertEqual(
+            m6.telemetry_abort_reason(full_black, mode="line", period_ms=20),
+            "line_loss",
+        )
+        metrics = m6.score_samples(full_black, requested_speed=100, mode="line")
+        self.assertEqual(metrics["line_loss_events"], 1)
+        self.assertEqual(metrics["line_loss_max_ms"], 1620)
+
+        multi_cluster = [sample(t, line_info=0x22) for t in range(0, 1640, 20)]
+        self.assertEqual(
+            m6.telemetry_abort_reason(multi_cluster, mode="line", period_ms=20),
+            "line_loss",
+        )
 
     def test_acceptance_is_five_percent_and_feedforward_is_ten_percent(self):
         baseline = {
