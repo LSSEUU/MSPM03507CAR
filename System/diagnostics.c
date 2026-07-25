@@ -63,6 +63,9 @@ static bool motor_diag_driving;
 static EncoderSnapshot_t motor_diag_before;
 static bool gray_print_pending;
 static uint32_t gray_requested_scan_count;
+static bool gray_report_pending;
+static uint8_t gray_report_phase;
+static GrayscaleSnapshot_t gray_report_snapshot;
 static bool report_pending;
 static uint8_t report_line;
 static bool infrared_report_pending;
@@ -284,18 +287,41 @@ static void Diagnostics_PrintHeading(void)
         (unsigned long)(SystemTime_Now() - s.last_update_ms));
 }
 
-static void Diagnostics_PrintGraySnapshot(void)
+static void Diagnostics_QueueGrayReport(void)
 {
-    GrayscaleSnapshot_t s;
-    Grayscale_GetSnapshot(&s);
-    debug_printf("GRAY adc=[%u,%u,%u,%u,%u,%u,%u,%u] scans=%lu errors=%lu pending=%u power=%u enabled=%u started=%u status=0x%08lX flags=0x%08lX\r\n",
-        s.adc[0], s.adc[1], s.adc[2], s.adc[3],
-        s.adc[4], s.adc[5], s.adc[6], s.adc[7],
-        (unsigned long)s.scan_count, (unsigned long)s.error_count,
-        Grayscale_IsScanPending(), s.adc_powered, s.adc_enabled,
-        s.adc_started, (unsigned long)s.last_adc_status,
-        (unsigned long)s.last_adc_flags);
+    if (gray_report_pending) {
+        debug_println("Gray report already queued.");
+        return;
+    }
+    Grayscale_GetSnapshot(&gray_report_snapshot);
+    gray_report_phase = 0U;
+    gray_report_pending = true;
     Diagnostics_RefreshReports();
+}
+
+static void Diagnostics_ServiceGrayReport(void)
+{
+    GrayscaleSnapshot_t *s = &gray_report_snapshot;
+    if (!gray_report_pending) return;
+
+    if (gray_report_phase == 0U) {
+        /* Preserve the parser-compatible ADC line while splitting its
+         * formatting cost across two 100 ms service slots. */
+        debug_printf("GRAY adc=[%u,%u,%u,%u,",
+            s->adc[0], s->adc[1], s->adc[2], s->adc[3]);
+    } else if (gray_report_phase == 1U) {
+        debug_printf("%u,%u,%u,%u] scans=%lu errors=%lu\r\n",
+            s->adc[4], s->adc[5], s->adc[6], s->adc[7],
+            (unsigned long)s->scan_count, (unsigned long)s->error_count);
+    } else {
+        debug_printf("GRAY ADC pending=%u power=%u enabled=%u started=%u status=0x%08lX flags=0x%08lX\r\n",
+            Grayscale_IsScanPending(), s->adc_powered, s->adc_enabled,
+            s->adc_started, (unsigned long)s->last_adc_status,
+            (unsigned long)s->last_adc_flags);
+        gray_report_pending = false;
+        return;
+    }
+    gray_report_phase++;
 }
 
 static void Diagnostics_QueueLineCalibrationReport(void)
@@ -927,6 +953,8 @@ void Diagnostics_Init(void)
     boot_started_ms = SystemTime_Now();
     motor_diag_state = MOTOR_DIAG_IDLE;
     gray_print_pending = false;
+    gray_report_pending = false;
+    gray_report_phase = 0U;
     report_pending = false;
     report_line = 0U;
     infrared_report_pending = false;
@@ -1135,7 +1163,7 @@ void Diagnostics_Poll(void)
         Grayscale_GetSnapshot(&gray);
         if (gray.scan_count != gray_requested_scan_count) {
             gray_print_pending = false;
-            Diagnostics_PrintGraySnapshot();
+            Diagnostics_QueueGrayReport();
         }
     }
 
@@ -1148,7 +1176,7 @@ void Diagnostics_Poll(void)
             break;
         case 'd': case 'D':
             Diagnostics_PrintEncoder(); Diagnostics_PrintGyro();
-            Diagnostics_PrintGraySnapshot(); Diagnostics_PrintCommunication();
+            Diagnostics_QueueGrayReport(); Diagnostics_PrintCommunication();
             Diagnostics_PrintWheelSpeed(); Diagnostics_QueueInfraredReport();
             Diagnostics_QueueSafetyReport(); break;
         case 'e': case 'E': Diagnostics_PrintEncoder(); break;
@@ -1334,6 +1362,8 @@ void Diagnostics_Task100ms(void)
         Diagnostics_ServiceReport();
     else if (line_calibration_report_pending)
         Diagnostics_ServiceLineCalibrationReport();
+    else if (gray_report_pending)
+        Diagnostics_ServiceGrayReport();
     else
         Diagnostics_ServiceSafetyReport();
     if ((speed_diag_state == SPEED_DIAG_RUNNING) ||

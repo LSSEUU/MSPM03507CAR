@@ -85,6 +85,9 @@ class M5LineFollowTests(unittest.TestCase):
         self.assertIn("Diagnostics_QueueLineCalibrationReport", diagnostics)
         self.assertIn("Diagnostics_ServiceLineCalibrationReport", diagnostics)
         self.assertNotIn("Diagnostics_PrintLineCalibration", diagnostics)
+        self.assertIn("Diagnostics_QueueGrayReport", diagnostics)
+        self.assertIn("Diagnostics_ServiceGrayReport", diagnostics)
+        self.assertNotIn("Diagnostics_PrintGraySnapshot", diagnostics)
         self.assertIn("CSV: M5,time_ms", diagnostics)
 
     def test_runtime_status_queries_are_bounded_during_line_action(self):
