@@ -1,0 +1,654 @@
+{
+  "firmware": "M6-runtime-20260725-r3",
+  "schema": 1,
+  "revision": 32,
+  "source": "runtime",
+  "generation": 0,
+  "test_mode": "wheel",
+  "requested_speed": 220.0,
+  "period_ms": 20,
+  "start_time": "2026-07-25T06:33:49.077+00:00",
+  "end_time": "2026-07-25T06:34:03.106+00:00",
+  "parameters": {
+    "wheel.left.kp": 0.7,
+    "wheel.left.ki": 2.5,
+    "wheel.right.kp": 0.7,
+    "wheel.right.ki": 2.5,
+    "wheel.filter_alpha": 0.25,
+    "wheel.accel": 600,
+    "wheel.decel": 900,
+    "wheel.jerk": 20000,
+    "wheel.left.ks": 0,
+    "wheel.left.kv": 0,
+    "wheel.right.ks": 0,
+    "wheel.right.kv": 0,
+    "wheel.diag_target": 300,
+    "heading.straight.kp": 3,
+    "heading.straight.kd": 0.8,
+    "heading.turn.kp": 2,
+    "heading.turn.kd": 0.55,
+    "heading.rate_alpha": 0.35,
+    "heading.correction_limit": 120,
+    "heading.turn_speed": 150,
+    "heading.smooth_zone": 2,
+    "line.speed_min": 160,
+    "line.speed_max": 160,
+    "line.position_alpha": 1,
+    "line.derivative_alpha": 1,
+    "line.kp": 150,
+    "line.kd": 1,
+    "line.correction_limit": 150,
+    "line.correction_slew": 2000,
+    "line.curve_gain": 0,
+    "line.lost_search_speed": 105,
+    "remote.speed_low": 100,
+    "remote.speed_medium": 160,
+    "remote.speed_high": 220,
+    "remote.heading_hold": 0
+  },
+  "events": [
+    {
+      "elapsed_ms": 33,
+      "firmware_time_ms": null,
+      "line": "M6,time_ms,revision,request_l,request_r,ramp_l,ramp_r,raw_l,raw_r,filter_l,filter_r,error_l,error_r,p_l,p_r,i_l,i_r,ff_l,ff_r,pwm_l,pwm_r,dt_us,delta_l,delta_r,sat_ms_l,sat_ms_r,yaw_x100,rate_x100,rate_source,gray_mask,line_info,pos_raw_x1000,pos_filter_x1000,derivative_x1000,dynamic_base,correction,saturation_bits,fault_bits,missed_tasks,rx_dropped,tx_dropped,telemetry_dropped"
+    },
+    {
+      "elapsed_ms": 87,
+      "firmware_time_ms": 1441680,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 186,
+      "firmware_time_ms": 1441780,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 285,
+      "firmware_time_ms": 1441880,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 384,
+      "firmware_time_ms": 1441980,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 483,
+      "firmware_time_ms": 1442080,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 582,
+      "firmware_time_ms": 1442180,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 681,
+      "firmware_time_ms": 1442280,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 779,
+      "firmware_time_ms": 1442380,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 880,
+      "firmware_time_ms": 1442480,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 979,
+      "firmware_time_ms": 1442580,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443024 pwm=13,13"
+    },
+    {
+      "elapsed_ms": 1078,
+      "firmware_time_ms": 1442680,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443076 pwm=58,60"
+    },
+    {
+      "elapsed_ms": 1178,
+      "firmware_time_ms": 1442780,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443185 pwm=63,70"
+    },
+    {
+      "elapsed_ms": 1275,
+      "firmware_time_ms": 1442880,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443295 pwm=98,110"
+    },
+    {
+      "elapsed_ms": 1374,
+      "firmware_time_ms": 1442980,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443404 pwm=105,108"
+    },
+    {
+      "elapsed_ms": 1472,
+      "firmware_time_ms": 1443080,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443513 pwm=105,120"
+    },
+    {
+      "elapsed_ms": 1572,
+      "firmware_time_ms": 1443180,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443622 pwm=114,120"
+    },
+    {
+      "elapsed_ms": 1671,
+      "firmware_time_ms": 1443280,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443731 pwm=112,126"
+    },
+    {
+      "elapsed_ms": 1771,
+      "firmware_time_ms": 1443380,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443841 pwm=108,125"
+    },
+    {
+      "elapsed_ms": 1869,
+      "firmware_time_ms": 1443480,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443950 pwm=119,129"
+    },
+    {
+      "elapsed_ms": 1968,
+      "firmware_time_ms": 1443580,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1443950 pwm=116,129"
+    },
+    {
+      "elapsed_ms": 2067,
+      "firmware_time_ms": 1443680,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444168 pwm=123,134"
+    },
+    {
+      "elapsed_ms": 2165,
+      "firmware_time_ms": 1443780,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444168 pwm=122,133"
+    },
+    {
+      "elapsed_ms": 2264,
+      "firmware_time_ms": 1443880,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444278 pwm=125,129"
+    },
+    {
+      "elapsed_ms": 2363,
+      "firmware_time_ms": 1443980,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444387 pwm=124,134"
+    },
+    {
+      "elapsed_ms": 2462,
+      "firmware_time_ms": 1444080,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444496 pwm=123,126"
+    },
+    {
+      "elapsed_ms": 2561,
+      "firmware_time_ms": 1444180,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444605 pwm=124,133"
+    },
+    {
+      "elapsed_ms": 2660,
+      "firmware_time_ms": 1444280,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444715 pwm=117,133"
+    },
+    {
+      "elapsed_ms": 2758,
+      "firmware_time_ms": 1444380,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444824 pwm=126,134"
+    },
+    {
+      "elapsed_ms": 2858,
+      "firmware_time_ms": 1444480,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1444933 pwm=126,134"
+    },
+    {
+      "elapsed_ms": 2958,
+      "firmware_time_ms": 1444580,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445042 pwm=127,135"
+    },
+    {
+      "elapsed_ms": 3055,
+      "firmware_time_ms": 1444680,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445151 pwm=134,135"
+    },
+    {
+      "elapsed_ms": 3154,
+      "firmware_time_ms": 1444780,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445151 pwm=125,135"
+    },
+    {
+      "elapsed_ms": 3253,
+      "firmware_time_ms": 1444880,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445370 pwm=127,126"
+    },
+    {
+      "elapsed_ms": 3351,
+      "firmware_time_ms": 1444980,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445370 pwm=124,140"
+    },
+    {
+      "elapsed_ms": 3450,
+      "firmware_time_ms": 1445080,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445479 pwm=128,137"
+    },
+    {
+      "elapsed_ms": 3549,
+      "firmware_time_ms": 1445180,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445588 pwm=127,135"
+    },
+    {
+      "elapsed_ms": 3648,
+      "firmware_time_ms": 1445280,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445697 pwm=128,136"
+    },
+    {
+      "elapsed_ms": 3747,
+      "firmware_time_ms": 1445380,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445807 pwm=128,136"
+    },
+    {
+      "elapsed_ms": 3846,
+      "firmware_time_ms": 1445480,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1445916 pwm=128,133"
+    },
+    {
+      "elapsed_ms": 3945,
+      "firmware_time_ms": 1445580,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446025 pwm=130,136"
+    },
+    {
+      "elapsed_ms": 4044,
+      "firmware_time_ms": 1445680,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446134 pwm=125,136"
+    },
+    {
+      "elapsed_ms": 4142,
+      "firmware_time_ms": 1445780,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446244 pwm=128,137"
+    },
+    {
+      "elapsed_ms": 4241,
+      "firmware_time_ms": 1445880,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446353 pwm=119,131"
+    },
+    {
+      "elapsed_ms": 4340,
+      "firmware_time_ms": 1445980,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446353 pwm=127,136"
+    },
+    {
+      "elapsed_ms": 4440,
+      "firmware_time_ms": 1446080,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446462 pwm=123,134"
+    },
+    {
+      "elapsed_ms": 4538,
+      "firmware_time_ms": 1446180,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446680 pwm=127,133"
+    },
+    {
+      "elapsed_ms": 4637,
+      "firmware_time_ms": 1446280,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446680 pwm=128,134"
+    },
+    {
+      "elapsed_ms": 4736,
+      "firmware_time_ms": 1446380,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446790 pwm=127,136"
+    },
+    {
+      "elapsed_ms": 4835,
+      "firmware_time_ms": 1446480,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1446899 pwm=121,134"
+    },
+    {
+      "elapsed_ms": 4933,
+      "firmware_time_ms": 1446580,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447008 pwm=128,136"
+    },
+    {
+      "elapsed_ms": 5032,
+      "firmware_time_ms": 1446680,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447117 pwm=128,142"
+    },
+    {
+      "elapsed_ms": 5131,
+      "firmware_time_ms": 1446780,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447227 pwm=137,135"
+    },
+    {
+      "elapsed_ms": 5230,
+      "firmware_time_ms": 1446880,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447336 pwm=128,134"
+    },
+    {
+      "elapsed_ms": 5329,
+      "firmware_time_ms": 1446980,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447445 pwm=130,126"
+    },
+    {
+      "elapsed_ms": 5428,
+      "firmware_time_ms": 1447080,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447554 pwm=129,135"
+    },
+    {
+      "elapsed_ms": 5527,
+      "firmware_time_ms": 1447180,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447663 pwm=125,135"
+    },
+    {
+      "elapsed_ms": 5626,
+      "firmware_time_ms": 1447280,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447663 pwm=128,131"
+    },
+    {
+      "elapsed_ms": 5725,
+      "firmware_time_ms": 1447380,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447882 pwm=127,135"
+    },
+    {
+      "elapsed_ms": 5824,
+      "firmware_time_ms": 1447480,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447882 pwm=128,136"
+    },
+    {
+      "elapsed_ms": 5922,
+      "firmware_time_ms": 1447580,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1447991 pwm=128,135"
+    },
+    {
+      "elapsed_ms": 6021,
+      "firmware_time_ms": 1447680,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448100 pwm=128,142"
+    },
+    {
+      "elapsed_ms": 6119,
+      "firmware_time_ms": 1447780,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448209 pwm=121,126"
+    },
+    {
+      "elapsed_ms": 6220,
+      "firmware_time_ms": 1447880,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448318 pwm=127,134"
+    },
+    {
+      "elapsed_ms": 6318,
+      "firmware_time_ms": 1447980,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448428 pwm=128,136"
+    },
+    {
+      "elapsed_ms": 6418,
+      "firmware_time_ms": 1448080,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448537 pwm=127,131"
+    },
+    {
+      "elapsed_ms": 6515,
+      "firmware_time_ms": 1448180,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448646 pwm=127,127"
+    },
+    {
+      "elapsed_ms": 6614,
+      "firmware_time_ms": 1448280,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448755 pwm=128,129"
+    },
+    {
+      "elapsed_ms": 6713,
+      "firmware_time_ms": 1448380,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448864 pwm=128,135"
+    },
+    {
+      "elapsed_ms": 6812,
+      "firmware_time_ms": 1448480,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448864 pwm=126,136"
+    },
+    {
+      "elapsed_ms": 6911,
+      "firmware_time_ms": 1448561,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1448974 pwm=130,135"
+    },
+    {
+      "elapsed_ms": 7010,
+      "firmware_time_ms": 1448680,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1449192 pwm=119,134"
+    },
+    {
+      "elapsed_ms": 7112,
+      "firmware_time_ms": 1448780,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1449192 pwm=128,133"
+    },
+    {
+      "elapsed_ms": 7207,
+      "firmware_time_ms": 1448880,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1449301 pwm=119,132"
+    },
+    {
+      "elapsed_ms": 7306,
+      "firmware_time_ms": 1448980,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1449410 pwm=128,132"
+    },
+    {
+      "elapsed_ms": 7405,
+      "firmware_time_ms": 1449080,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1449520 pwm=128,136"
+    },
+    {
+      "elapsed_ms": 7504,
+      "firmware_time_ms": 1449180,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1449629 pwm=128,129"
+    },
+    {
+      "elapsed_ms": 7603,
+      "firmware_time_ms": 1449280,
+      "line": "SAFETY state=RUN faults=0x00000000 first=0 last=0 action=1 deadline=1449629 pwm=128,135"
+    },
+    {
+      "elapsed_ms": 7674,
+      "firmware_time_ms": 1449360,
+      "line": "IR manual heartbeat expired; normal brake to IDLE."
+    },
+    {
+      "elapsed_ms": 7700,
+      "firmware_time_ms": 1449380,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 7799,
+      "firmware_time_ms": 1449480,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 7898,
+      "firmware_time_ms": 1449580,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 7996,
+      "firmware_time_ms": 1449680,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8095,
+      "firmware_time_ms": 1449780,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8194,
+      "firmware_time_ms": 1449880,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8293,
+      "firmware_time_ms": 1449980,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8391,
+      "firmware_time_ms": 1450080,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8490,
+      "firmware_time_ms": 1450180,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8590,
+      "firmware_time_ms": 1450280,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8688,
+      "firmware_time_ms": 1450380,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8787,
+      "firmware_time_ms": 1450480,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8886,
+      "firmware_time_ms": 1450580,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 8985,
+      "firmware_time_ms": 1450661,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9084,
+      "firmware_time_ms": 1450780,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9184,
+      "firmware_time_ms": 1450880,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9282,
+      "firmware_time_ms": 1450980,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9380,
+      "firmware_time_ms": 1451080,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9479,
+      "firmware_time_ms": 1451180,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9578,
+      "firmware_time_ms": 1451280,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9677,
+      "firmware_time_ms": 1451380,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9776,
+      "firmware_time_ms": 1451480,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9874,
+      "firmware_time_ms": 1451580,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 9973,
+      "firmware_time_ms": 1451680,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10072,
+      "firmware_time_ms": 1451780,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10171,
+      "firmware_time_ms": 1451880,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10269,
+      "firmware_time_ms": 1451980,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10369,
+      "firmware_time_ms": 1452080,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10468,
+      "firmware_time_ms": 1452180,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10566,
+      "firmware_time_ms": 1452280,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10665,
+      "firmware_time_ms": 1452380,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10764,
+      "firmware_time_ms": 1452480,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10863,
+      "firmware_time_ms": 1452580,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 10962,
+      "firmware_time_ms": 1452680,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 11061,
+      "firmware_time_ms": 1452780,
+      "line": "SAFETY state=IDLE faults=0x00000000 first=0 last=0 action=0 deadline=0 pwm=0,0"
+    },
+    {
+      "elapsed_ms": 11155,
+      "firmware_time_ms": 1452880,
+      "line": "CONTEXT target=0,0 speed=0,0 requested_pwm=128,135"
+    },
+    {
+      "elapsed_ms": 11261,
+      "firmware_time_ms": 1452980,
+      "line": "SCHED release=290543/145271/72635/14527 miss=0/0/0/0 pending=0x00"
+    }
+  ],
+  "abort_reason": null,
+  "metrics": {
+    "score": 7.781635560716394,
+    "hard_failures": [],
+    "sample_count": 704,
+    "duration_ms": 14160,
+    "rise_time_ms": 3960.0,
+    "overshoot_pct": 6.363636363636363,
+    "steady_error_pct": 1.2476808905380334,
+    "error_zero_crossings": 47,
+    "saturation_ratio": 0.0,
+    "sustained_saturation_ms": 0,
+    "yaw_rms_deg": 0.002292527386571771,
+    "yaw_peak_deg": 0.009999999999999787,
+    "line_position_rms": 0.571,
+    "correction_jerk_rms": 0.0,
+    "line_loss_events": 0,
+    "missed_task_delta": 0,
+    "uart_drop_delta": 0,
+    "telemetry_drop_delta": 0,
+    "telemetry_gap_count": 0,
+    "fault_bits": 0
+  }
+}
