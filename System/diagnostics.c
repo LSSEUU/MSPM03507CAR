@@ -3,6 +3,7 @@
 #include "app_line.h"
 #include "app_remote.h"
 #include "control_config.h"
+#include "control_protocol.h"
 #include "encoder.h"
 #include "grayscale.h"
 #include "gyro.h"
@@ -11,6 +12,7 @@
 #include "led.h"
 #include "motor.h"
 #include "oled.h"
+#include "parameter_store.h"
 #include "safety.h"
 #include "scheduler.h"
 #include "system_state.h"
@@ -265,9 +267,13 @@ static void Diagnostics_PrintHeading(void)
 {
     HeadingSnapshot_t s;
     Heading_GetSnapshot(&s);
-    debug_printf("HEADING valid=%u calibrated=%u calibrating=%u count=%lu mode=%s zero_x100=%ld yaw_x100=%ld rate_x100=%ld reference_x100=%ld target_x100=%ld error_x100=%ld complete=%u age=%lu\r\n",
+    debug_printf("HEADING valid=%u calibrated=%u calibrating=%u stationary=%u count=%lu rejects=%lu span_x100=%ld std_x100=%ld mode=%s zero_x100=%ld yaw_x100=%ld rate_x100=%ld reference_x100=%ld target_x100=%ld error_x100=%ld complete=%u age=%lu\r\n",
         s.valid, s.calibrated, s.calibrating,
+        s.calibration_stationary,
         (unsigned long)s.calibration_count,
+        (unsigned long)s.calibration_rejects,
+        (long)Diagnostics_Round(s.calibration_span_deg * 100.0f),
+        (long)Diagnostics_Round(s.calibration_stddev_deg * 100.0f),
         Diagnostics_HeadingModeName(s.mode),
         (long)Diagnostics_Round(s.zero_offset_deg * 100.0f),
         (long)Diagnostics_Round(s.yaw_deg * 100.0f),
@@ -660,42 +666,32 @@ static void Diagnostics_ServiceSpeedTest(uint32_t now_ms)
     }
 }
 
-static void Diagnostics_RestartSpeedMeasurement(uint32_t now_ms)
-{
-    Diagnostics_ResetSpeedMetrics();
-    speed_diag_started_ms = now_ms;
-    speed_diag_deadline_ms = now_ms + SPEED_DIAGNOSTIC_HOLD_MS;
-    Safety_BeginAction(now_ms, SPEED_DIAGNOSTIC_ACTION_TIMEOUT_MS, 0U);
-}
-
 static void Diagnostics_AdjustSpeedTarget(float delta, uint32_t now_ms)
 {
-    float left_target;
-    float right_target;
+    float target = ControlParams_Staged()->wheel.diag_target_mm_s + delta;
+    (void)now_ms;
     if (speed_diag_state == SPEED_DIAG_RAMP_DOWN) {
         debug_println("M3 tuning rejected while stopping.");
         return;
     }
-    speed_diag_target_mm_s += delta;
-    if (speed_diag_target_mm_s < 50.0f) speed_diag_target_mm_s = 50.0f;
-    if (speed_diag_target_mm_s > WHEEL_SPEED_MAX_TARGET_MM_S)
-        speed_diag_target_mm_s = WHEEL_SPEED_MAX_TARGET_MM_S;
-    if (speed_diag_state == SPEED_DIAG_RUNNING) {
-        left_target = ((speed_diag_wheel_mask & SPEED_DIAG_LEFT_MASK) != 0U) ?
-            speed_diag_target_mm_s : 0.0f;
-        right_target = ((speed_diag_wheel_mask & SPEED_DIAG_RIGHT_MASK) != 0U) ?
-            speed_diag_target_mm_s : 0.0f;
-        WheelSpeed_SetTarget(left_target, right_target);
-        Diagnostics_RestartSpeedMeasurement(now_ms);
+    if (target < 50.0f) target = 50.0f;
+    if (target > 400.0f) target = 400.0f;
+    if ((ControlParams_Set("wheel.diag_target", target) != CONTROL_PARAMS_OK) ||
+        !ControlProtocol_ApplyLegacyStaged()) {
+        (void)ControlParams_Revert();
+        debug_println("M3 tuning rejected by parameter state gate.");
+        return;
     }
     debug_printf("M3 test target=%ld mm/s\r\n",
-        (long)Diagnostics_Round(speed_diag_target_mm_s));
+        (long)Diagnostics_Round(target));
 }
 
 static void Diagnostics_AdjustSpeedGain(bool proportional, float delta,
                                         uint32_t now_ms)
 {
     uint32_t i;
+    bool changed = false;
+    (void)now_ms;
     if (speed_diag_state == SPEED_DIAG_RAMP_DOWN) {
         debug_println("M3 tuning rejected while stopping.");
         return;
@@ -704,15 +700,35 @@ static void Diagnostics_AdjustSpeedGain(bool proportional, float delta,
         float kp;
         float ki;
         if ((speed_diag_wheel_mask & (1U << i)) == 0U) continue;
-        WheelSpeed_GetGains((WheelSpeedWheel_t)i, &kp, &ki);
+        const ControlParams_t *staged = ControlParams_Staged();
+        const char *key;
+        if (i == (uint32_t)WHEEL_SPEED_LEFT) {
+            kp = staged->wheel.left_kp;
+            ki = staged->wheel.left_ki;
+        } else {
+            kp = staged->wheel.right_kp;
+            ki = staged->wheel.right_ki;
+        }
         if (proportional) kp += delta;
         else ki += delta;
         if (kp < 0.0f) kp = 0.0f;
+        if (kp > 3.0f) kp = 3.0f;
         if (ki < 0.0f) ki = 0.0f;
-        WheelSpeed_SetGains((WheelSpeedWheel_t)i, kp, ki);
+        if (ki > 10.0f) ki = 10.0f;
+        if (proportional)
+            key = (i == (uint32_t)WHEEL_SPEED_LEFT) ?
+                "wheel.left.kp" : "wheel.right.kp";
+        else
+            key = (i == (uint32_t)WHEEL_SPEED_LEFT) ?
+                "wheel.left.ki" : "wheel.right.ki";
+        if (ControlParams_Set(key, proportional ? kp : ki) ==
+            CONTROL_PARAMS_OK) changed = true;
     }
-    if (speed_diag_state == SPEED_DIAG_RUNNING)
-        Diagnostics_RestartSpeedMeasurement(now_ms);
+    if (!changed || !ControlProtocol_ApplyLegacyStaged()) {
+        (void)ControlParams_Revert();
+        debug_println("M3 tuning rejected by parameter state gate.");
+        return;
+    }
     Diagnostics_PrintWheelSpeed();
 }
 
@@ -889,7 +905,16 @@ void Diagnostics_Init(void)
 
 void Diagnostics_RunBootSelfTest(void)
 {
-    debug_println("\r\n=== MSPM0 CAR M5 LINE FOLLOWING ===");
+    ParameterStoreInfo_t store;
+
+    ParameterStore_GetInfo(&store);
+    debug_println("\r\n=== MSPM0 CAR M6 RUNTIME TUNING ===");
+    debug_printf("M6 READY fw=%s schema=%u revision=%lu source=%s "
+                 "storage=%s generation=%lu\r\n",
+        CONTROL_PROTOCOL_FIRMWARE_ID, CONTROL_PARAMS_SCHEMA_VERSION,
+        (unsigned long)ControlParams_Revision(), ParameterStore_SourceName(),
+        (store.health == PARAMETER_STORE_HEALTH_OK) ? "OK" : "DEGRADED",
+        (unsigned long)store.generation);
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("*** FAULT INJECTION BUILD - ZERO PWM TESTS ONLY ***");
 #endif
@@ -906,6 +931,7 @@ void Diagnostics_PrintHelp(void)
     debug_println("          g=heading z=calibrate u=+90 i=-90 w=straight; A=arm");
     debug_println("          r=line 2=active-level 3=arm line A=start 0=stop");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
+    debug_println("M6 transaction: :id,get/set/apply/revert/load/defaults/save/log,...");
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("TEST ONLY: T=action timeout G=gyro disconnect W=stop watchdog");
 #endif
@@ -1000,6 +1026,42 @@ bool Diagnostics_ActionIsIdle(void)
         (app.state == APP_LINE_IDLE);
 }
 
+bool Diagnostics_WheelSpeedDiagnosticActive(void)
+{
+    return speed_diag_state != SPEED_DIAG_IDLE;
+}
+
+void Diagnostics_OnControlParamsCommitted(const ControlParamsCommit_t *commit)
+{
+    const ControlParams_t *params = ControlParams_Active();
+    float left_target;
+    float right_target;
+
+    if (commit == NULL) {
+        speed_diag_target_mm_s = params->wheel.diag_target_mm_s;
+        return;
+    }
+    if ((commit->change_mask &
+         (CONTROL_PARAMS_CHANGE_WHEEL_LEFT_GAINS |
+          CONTROL_PARAMS_CHANGE_WHEEL_RIGHT_GAINS |
+          CONTROL_PARAMS_CHANGE_WHEEL_DIAG_TARGET)) == 0U) return;
+
+    speed_diag_target_mm_s = params->wheel.diag_target_mm_s;
+    Diagnostics_ResetSpeedMetrics();
+    if (speed_diag_state == SPEED_DIAG_RUNNING) {
+        left_target = ((speed_diag_wheel_mask & SPEED_DIAG_LEFT_MASK) != 0U) ?
+            speed_diag_target_mm_s : 0.0f;
+        right_target = ((speed_diag_wheel_mask & SPEED_DIAG_RIGHT_MASK) != 0U) ?
+            speed_diag_target_mm_s : 0.0f;
+        WheelSpeed_SetTarget(left_target, right_target);
+        speed_diag_started_ms = SystemTime_Now();
+        speed_diag_deadline_ms = speed_diag_started_ms +
+            SPEED_DIAGNOSTIC_HOLD_MS;
+        Safety_BeginAction(speed_diag_started_ms,
+            SPEED_DIAGNOSTIC_ACTION_TIMEOUT_MS, 0U);
+    }
+}
+
 bool Diagnostics_ActionArm(DiagnosticsAction_t action,
                            float straight_speed_mm_s,
                            uint32_t straight_duration_ms,
@@ -1065,6 +1127,7 @@ void Diagnostics_Poll(void)
     Diagnostics_ServiceSpeedTest(now_ms);
     Diagnostics_ServiceHeadingTest(now_ms);
     Diagnostics_ServiceLineEvents();
+    ControlProtocol_Service();
 
     if (gray_print_pending) {
         Grayscale_GetSnapshot(&gray);
@@ -1075,7 +1138,10 @@ void Diagnostics_Poll(void)
     }
 
     if (!debug_kbhit()) return;
-    switch (debug_getc()) {
+    {
+    char command = debug_getc();
+    if (ControlProtocol_ProcessByte(command, now_ms)) return;
+    switch (command) {
         case 'h': case 'H': Diagnostics_PrintHelp(); break;
         case 's':
             Diagnostics_QueueInfraredReport();
@@ -1246,6 +1312,7 @@ void Diagnostics_Poll(void)
             break;
         case '\r': case '\n': break;
         default: debug_println("Unknown command; h=help."); break;
+    }
     }
 }
 

@@ -18,11 +18,22 @@ void PI_Init(PIController_t *controller, float kp, float ki,
     controller->integral = 0.0f;
     controller->output_min = output_min;
     controller->output_max = output_max;
+    controller->last_proportional = 0.0f;
+    controller->last_feedforward = 0.0f;
+    controller->last_unsaturated = 0.0f;
+    controller->last_output = 0.0f;
+    controller->last_saturated = false;
 }
 
 void PI_Reset(PIController_t *controller)
 {
-    if (controller != NULL) controller->integral = 0.0f;
+    if (controller == NULL) return;
+    controller->integral = 0.0f;
+    controller->last_proportional = 0.0f;
+    controller->last_feedforward = 0.0f;
+    controller->last_unsaturated = 0.0f;
+    controller->last_output = 0.0f;
+    controller->last_saturated = false;
 }
 
 void PI_SetGains(PIController_t *controller, float kp, float ki)
@@ -34,6 +45,12 @@ void PI_SetGains(PIController_t *controller, float kp, float ki)
 
 float PI_Update(PIController_t *controller, float error, float dt_s)
 {
+    return PI_UpdateWithFeedforward(controller, error, 0.0f, dt_s);
+}
+
+float PI_UpdateWithFeedforward(PIController_t *controller, float error,
+                               float feedforward, float dt_s)
+{
     float proportional;
     float candidate_integral;
     float candidate_output;
@@ -43,7 +60,7 @@ float PI_Update(PIController_t *controller, float error, float dt_s)
     proportional = controller->kp * error;
     candidate_integral = controller->integral +
                          (controller->ki * error * dt_s);
-    candidate_output = proportional + candidate_integral;
+    candidate_output = proportional + candidate_integral + feedforward;
     output = PI_Clamp(candidate_output, controller->output_min,
                       controller->output_max);
 
@@ -53,5 +70,10 @@ float PI_Update(PIController_t *controller, float error, float dt_s)
         ((output <= controller->output_min) && (error > 0.0f))) {
         controller->integral = candidate_integral;
     }
+    controller->last_proportional = proportional;
+    controller->last_feedforward = feedforward;
+    controller->last_unsaturated = candidate_output;
+    controller->last_output = output;
+    controller->last_saturated = (output != candidate_output);
     return output;
 }

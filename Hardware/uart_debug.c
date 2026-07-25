@@ -16,6 +16,7 @@ static volatile uint16_t tx_write;
 static volatile uint8_t rx_buffer[DEBUG_RX_BUFFER_SIZE];
 static volatile uint8_t rx_read;
 static volatile uint8_t rx_write;
+static volatile uint32_t emergency_epoch;
 static DebugEmergencyCallback_t emergency_callback;
 
 static uint16_t Debug_TxNext(uint16_t index)
@@ -47,6 +48,7 @@ static void Debug_DrainRxFIFO(void)
         uint8_t next;
         debug_stats.rx_bytes++;
         if ((byte == (uint8_t)'S') || (byte == (uint8_t)' ')) {
+            emergency_epoch++;
             if (emergency_callback != NULL) emergency_callback();
             continue;
         }
@@ -65,6 +67,7 @@ void debug_init(void)
     memset(&debug_stats, 0, sizeof(debug_stats));
     tx_read = tx_write = 0U;
     rx_read = rx_write = 0U;
+    emergency_epoch = 0U;
     emergency_callback = NULL;
     DL_UART_enableInterrupt(UART_0_INST,
         DL_UART_INTERRUPT_RX |
@@ -73,6 +76,34 @@ void debug_init(void)
         DL_UART_INTERRUPT_PARITY_ERROR |
         DL_UART_INTERRUPT_NOISE_ERROR);
     NVIC_EnableIRQ(UART_0_INST_INT_IRQN);
+}
+
+int debug_try_write(const char *data, size_t length)
+{
+    uint32_t primask;
+    uint16_t used;
+    uint16_t free_bytes;
+
+    if ((data == NULL) || (length == 0U) ||
+        (length >= DEBUG_TX_BUFFER_SIZE)) return 0;
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    used = (tx_write >= tx_read) ? (uint16_t)(tx_write - tx_read) :
+        (uint16_t)(DEBUG_TX_BUFFER_SIZE - tx_read + tx_write);
+    free_bytes = (uint16_t)(DEBUG_TX_BUFFER_SIZE - 1U - used);
+    if (length > (size_t)free_bytes) {
+        if (primask == 0U) __enable_irq();
+        return 0;
+    }
+    for (size_t i = 0U; i < length; i++) {
+        tx_buffer[tx_write] = (uint8_t)data[i];
+        tx_write = Debug_TxNext(tx_write);
+    }
+    Debug_FillTxFIFO();
+    DL_UART_enableInterrupt(UART_0_INST, DL_UART_INTERRUPT_TX);
+    if (primask == 0U) __enable_irq();
+    return 1;
 }
 
 void debug_set_emergency_callback(DebugEmergencyCallback_t callback)
@@ -155,6 +186,16 @@ int debug_tx_idle(void)
     return (tx_read == tx_write) && !DL_UART_isBusy(UART_0_INST);
 }
 
+uint32_t debug_get_emergency_epoch(void)
+{
+    uint32_t primask = __get_PRIMASK();
+    uint32_t result;
+    __disable_irq();
+    result = emergency_epoch;
+    if (primask == 0U) __enable_irq();
+    return result;
+}
+
 void debug_get_stats(DebugStats_t *stats)
 {
     if (stats != NULL) *stats = debug_stats;
@@ -178,6 +219,10 @@ void UART0_IRQHandler(void)
             case DL_UART_IIDX_RX_TIMEOUT_ERROR:
             case DL_UART_IIDX_NOISE_ERROR:
                 debug_stats.format_errors++;
+                /* Any RX hardware error can invalidate an in-flight M6 frame.
+                 * Count it as receive loss so the parser resets and tuning
+                 * acceptance fails conservatively instead of using bad data. */
+                debug_stats.rx_dropped++;
                 Debug_DrainRxFIFO();
                 break;
             default:

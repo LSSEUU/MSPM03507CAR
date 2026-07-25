@@ -50,6 +50,14 @@ class M4HeadingTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("../Control/heading.c", project)
 
+    def test_jy61p_rate_frame_decode_is_available(self):
+        gyro_h = (ROOT / "Hardware" / "gyro.h").read_text(encoding="utf-8")
+        gyro_c = (ROOT / "Hardware" / "gyro.c").read_text(encoding="utf-8")
+        self.assertIn("yaw_rate_deg_s", gyro_h)
+        self.assertIn("rate_frames", gyro_h)
+        self.assertIn("rx_buf[1] == 0x52U", gyro_c)
+        self.assertIn("2000.0f / 32768.0f", gyro_c)
+
     def test_diagnostics_exposes_guarded_heading_actions(self):
         diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
             encoding="utf-8"

@@ -11,6 +11,8 @@ static uint8_t  rx_idx;
 static volatile uint32_t rx_bytes;
 static volatile uint32_t valid_frames;
 static volatile uint32_t last_update_ms;
+static volatile uint32_t rate_frames;
+static volatile uint32_t last_rate_update_ms;
 static volatile uint32_t checksum_errors;
 static volatile uint32_t frame_errors;
 static uint8_t recent_bytes[32];
@@ -37,6 +39,21 @@ static void Gyro_DrainRx(void)
             for (uint8_t i = 0U; i < 10U; i++) sum += rx_buf[i];
             if (sum != rx_buf[10]) {
                 checksum_errors++;
+            } else if (rx_buf[1] == 0x52U) {
+                int16_t roll_rate = (int16_t)(
+                    (uint16_t)rx_buf[3] << 8 | rx_buf[2]);
+                int16_t pitch_rate = (int16_t)(
+                    (uint16_t)rx_buf[5] << 8 | rx_buf[4]);
+                int16_t yaw_rate = (int16_t)(
+                    (uint16_t)rx_buf[7] << 8 | rx_buf[6]);
+                gyro_sample.roll_rate_deg_s =
+                    (float)roll_rate * 2000.0f / 32768.0f;
+                gyro_sample.pitch_rate_deg_s =
+                    (float)pitch_rate * 2000.0f / 32768.0f;
+                gyro_sample.yaw_rate_deg_s =
+                    (float)yaw_rate * 2000.0f / 32768.0f;
+                rate_frames++;
+                last_rate_update_ms = SystemTime_Now();
             } else if (rx_buf[1] == 0x53U) {
                 int16_t roll  = (int16_t)((uint16_t)rx_buf[3] << 8 | rx_buf[2]);
                 int16_t pitch = (int16_t)((uint16_t)rx_buf[5] << 8 | rx_buf[4]);
@@ -58,8 +75,10 @@ void Gyro_Init(void)
     rx_idx = 0;
     recent_write = 0U;
     memset(recent_bytes, 0, sizeof(recent_bytes));
-    rx_bytes = valid_frames = checksum_errors = frame_errors = 0U;
+    rx_bytes = valid_frames = rate_frames = 0U;
+    checksum_errors = frame_errors = 0U;
     last_update_ms = 0U;
+    last_rate_update_ms = 0U;
 
     /* UART2 pinmux/baud/power are owned by the frozen board configuration. */
     DL_UART_enableInterrupt(UART_2_INST, DL_UART_INTERRUPT_RX);
@@ -90,6 +109,8 @@ void Gyro_GetSnapshot(GyroSnapshot_t *snapshot)
     snapshot->rx_bytes = rx_bytes;
     snapshot->valid_frames = valid_frames;
     snapshot->last_update_ms = last_update_ms;
+    snapshot->rate_frames = rate_frames;
+    snapshot->last_rate_update_ms = last_rate_update_ms;
     snapshot->checksum_errors = checksum_errors;
     snapshot->frame_errors = frame_errors;
     snapshot->recent_count = (rx_bytes < sizeof(recent_bytes)) ?

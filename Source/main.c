@@ -2,6 +2,9 @@
 
 #include "app_line.h"
 #include "app_remote.h"
+#include "control_params.h"
+#include "control_protocol.h"
+#include "control_runtime.h"
 #include "diagnostics.h"
 #include "encoder.h"
 #include "grayscale.h"
@@ -9,7 +12,9 @@
 #include "heading.h"
 #include "led.h"
 #include "motor.h"
+#include "m6_telemetry.h"
 #include "oled.h"
+#include "parameter_store.h"
 #include "safety.h"
 #include "scheduler.h"
 #include "system_state.h"
@@ -21,7 +26,14 @@
 
 static void Main_EmergencyStopCallback(void)
 {
+    M6Telemetry_StopFromISR();
     Safety_EmergencyStop(SystemTime_Now());
+}
+
+static void Main_ControlParamsCommitted(const ControlParamsCommit_t *commit)
+{
+    if (!ControlRuntime_ApplyActive(commit))
+        Safety_EmergencyStop(SystemTime_Now());
 }
 
 static void Main_CompleteTask(SchedulerTask_t task, uint32_t started_ms,
@@ -47,6 +59,8 @@ int main(void)
     SystemState_Init();
     Safety_Init(0U);
     (void)SystemState_BeginSelfTest();
+    ControlParams_Init();
+    ParameterStore_Init();
 
     debug_init();
     debug_set_emergency_callback(Main_EmergencyStopCallback);
@@ -70,6 +84,10 @@ int main(void)
 
     Diagnostics_Init();
     AppRemote_Init();
+    if (!ControlRuntime_ApplyActive(NULL))
+        Safety_EmergencyStop(SystemTime_Now());
+    M6Telemetry_Init();
+    ControlProtocol_Init(Main_ControlParamsCommitted);
     Diagnostics_RunBootSelfTest();
 
     while (1) {
@@ -81,12 +99,14 @@ int main(void)
 
         AppRemote_Poll();
         Diagnostics_Poll();
+        M6Telemetry_Service();
 
         if (Scheduler_Take(SCHEDULER_TASK_5MS)) {
             uint32_t started = SystemTime_Now();
             EncoderSnapshot_t encoder;
             WheelSpeedSnapshot_t wheel;
 
+            ControlProtocol_WheelBoundary();
             Encoder_GetSnapshot(&encoder);
             WheelSpeed_Update(encoder.count_a, encoder.count_b, started);
             WheelSpeed_GetSnapshot(&wheel);
@@ -151,13 +171,17 @@ int main(void)
 
             AppRemote_Task20ms(started);
             Gyro_GetSnapshot(&gyro);
-            Heading_Update(gyro.sample.yaw, gyro.valid_frames, started);
+            Heading_UpdateWithRate(
+                gyro.sample.yaw, gyro.valid_frames,
+                gyro.sample.yaw_rate_deg_s, gyro.rate_frames,
+                gyro.last_rate_update_ms, started);
             Heading_GetSnapshot(&heading);
             if (heading.mode != HEADING_MODE_IDLE) {
                 WheelSpeed_SetTarget(heading.left_target_mm_s,
                                      heading.right_target_mm_s);
             }
             AppLine_Task20ms(started);
+            M6Telemetry_Capture20ms(started);
             Main_CompleteTask(SCHEDULER_TASK_20MS, started,
                               TASK_20MS_PERIOD_MS);
             if (Scheduler_ConsumeHealthyWindow()) {

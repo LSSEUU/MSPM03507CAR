@@ -25,6 +25,13 @@ class KeilProjectPortabilityTests(unittest.TestCase):
         scatter = SCATTER_FILE.read_text(encoding="utf-8")
 
         self.assertNotIn("ER_IROM1_PAD", scatter)
+        self.assertIn("LR_IROM1 0x00000000 0x0001F800", scatter)
+        self.assertIn("ER_IROM1 0x00000000 ALIGNALL 8 0x0001F800", scatter)
+
+    def test_project_reserves_the_two_parameter_sectors(self):
+        root = ET.fromstring(PROJECT_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(root.findtext(".//OnChipMemories/IROM/Size"), "0x1F800")
+        self.assertEqual(root.findtext(".//OnChipMemories/OCR_RVCT4/Size"), "0x1F800")
 
     def test_project_has_no_machine_specific_tool_path(self):
         project = PROJECT_FILE.read_text(encoding="utf-8")

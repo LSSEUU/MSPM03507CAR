@@ -58,6 +58,84 @@ static void test_speed_conversion_direction_and_ramp(void)
                     -WHEEL_SPEED_MAX_TARGET_MM_S, 0.01f));
     assert(close_to(snapshot.ramped_mm_s[WHEEL_SPEED_LEFT], 3.0f, 0.01f));
     assert(close_to(snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT], -3.0f, 0.01f));
+    assert(close_to(snapshot.ramp_accel_mm_s2[WHEEL_SPEED_LEFT],
+                    600.0f, 0.01f));
+    assert(close_to(snapshot.ramp_accel_mm_s2[WHEEL_SPEED_RIGHT],
+                    -600.0f, 0.01f));
+    assert(snapshot.actual_dt_us == 5000U);
+}
+
+static void test_runtime_jerk_limit(void)
+{
+    WheelSpeedConfig_t config;
+    WheelSpeedSnapshot_t snapshot;
+    WheelSpeed_Init();
+    WheelSpeed_GetDefaultConfig(&config);
+    config.jerk_mm_s3 = 1000.0f;
+    assert(WheelSpeed_ApplyConfig(&config, true));
+    WheelSpeed_Update(0, 0, 0U);
+    WheelSpeed_Enable();
+    WheelSpeed_SetTarget(100.0f, 0.0f);
+    WheelSpeed_Update(0, 0, 5U);
+    WheelSpeed_GetSnapshot(&snapshot);
+    assert(close_to(snapshot.ramp_accel_mm_s2[WHEEL_SPEED_LEFT],
+                    5.0f, 0.01f));
+    assert(close_to(snapshot.ramped_mm_s[WHEEL_SPEED_LEFT], 0.025f, 0.001f));
+}
+
+static void test_runtime_config_feedforward_and_atomic_reject(void)
+{
+    WheelSpeedConfig_t config;
+    WheelSpeedConfig_t active;
+    WheelSpeedSnapshot_t snapshot;
+    WheelSpeed_Init();
+    WheelSpeed_GetDefaultConfig(&config);
+    config.kp[WHEEL_SPEED_LEFT] = 0.0f;
+    config.ki[WHEEL_SPEED_LEFT] = 0.0f;
+    config.static_feedforward_pwm[WHEEL_SPEED_LEFT] = 10.0f;
+    config.velocity_feedforward_pwm_per_mm_s[WHEEL_SPEED_LEFT] = 0.1f;
+    assert(WheelSpeed_ApplyConfig(&config, true));
+    WheelSpeed_Update(0, 0, 0U);
+    WheelSpeed_Enable();
+    WheelSpeed_SetTarget(100.0f, 0.0f);
+    WheelSpeed_Update(0, 0, 5U);
+    WheelSpeed_GetSnapshot(&snapshot);
+    assert(close_to(snapshot.feedforward_pwm[WHEEL_SPEED_LEFT],
+                    10.3f, 0.01f));
+    assert(close_to(snapshot.proportional_pwm[WHEEL_SPEED_LEFT],
+                    0.0f, 0.01f));
+    assert(snapshot.pwm[WHEEL_SPEED_LEFT] == 10);
+
+    config.filter_alpha = 0.0f;
+    assert(!WheelSpeed_ApplyConfig(&config, true));
+    WheelSpeed_GetConfig(&active);
+    assert(close_to(active.filter_alpha, WHEEL_SPEED_FILTER_ALPHA, 0.01f));
+}
+
+static void test_reverse_target_passes_through_zero(void)
+{
+    WheelSpeedSnapshot_t snapshot;
+    uint32_t now;
+    bool saw_zero = false;
+    WheelSpeed_Init();
+    WheelSpeed_Update(0, 0, 0U);
+    WheelSpeed_Enable();
+    WheelSpeed_SetTarget(100.0f, 100.0f);
+    for (now = 5U; now <= 500U; now += 5U)
+        WheelSpeed_Update(0, 0, now);
+    WheelSpeed_SetTarget(-100.0f, -100.0f);
+    for (; now <= 1500U; now += 5U) {
+        WheelSpeed_Update(0, 0, now);
+        WheelSpeed_GetSnapshot(&snapshot);
+        if (close_to(snapshot.ramped_mm_s[WHEEL_SPEED_LEFT], 0.0f, 0.001f))
+            saw_zero = true;
+        if (snapshot.ramped_mm_s[WHEEL_SPEED_LEFT] < 0.0f) {
+            assert(saw_zero);
+            break;
+        }
+    }
+    assert(saw_zero);
+    assert(snapshot.ramped_mm_s[WHEEL_SPEED_LEFT] < 0.0f);
 }
 
 static void test_encoder_invalid_fault(void)
@@ -110,6 +188,9 @@ int main(void)
     test_low_pass_filter();
     test_pi_limits_and_anti_windup();
     test_speed_conversion_direction_and_ramp();
+    test_runtime_config_feedforward_and_atomic_reject();
+    test_runtime_jerk_limit();
+    test_reverse_target_passes_through_zero();
     test_encoder_invalid_fault();
     test_encoder_count_wrap();
     test_stall_fault();

@@ -2,6 +2,7 @@
 #define DIAGNOSTICS_H
 
 #include "diagnostics_health.h"
+#include "control_params.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,6 +28,8 @@ bool Diagnostics_ActionArm(DiagnosticsAction_t action,
 bool Diagnostics_ActionConfirm(uint32_t now_ms);
 bool Diagnostics_ActionCancel(uint32_t now_ms);
 bool Diagnostics_ActionIsIdle(void);
+bool Diagnostics_WheelSpeedDiagnosticActive(void);
+void Diagnostics_OnControlParamsCommitted(const ControlParamsCommit_t *commit);
 
 #ifdef M2_FAULT_INJECTION_TEST
 bool Diagnostics_FaultInjectionStopWatchdog(void);

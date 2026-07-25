@@ -21,6 +21,13 @@ typedef enum {
 } AppRemoteDirection_t;
 
 typedef struct {
+    float speed_low_mm_s;
+    float speed_medium_mm_s;
+    float speed_high_mm_s;
+    bool heading_hold;
+} AppRemoteConfig_t;
+
+typedef struct {
     AppRemoteState_t state;
     AppRemoteDirection_t direction;
     uint16_t speed_mm_s;
@@ -33,9 +40,14 @@ typedef struct {
     uint32_t heartbeat_stops;
     uint32_t captured_keys;
     bool actions_enabled;
+    bool heading_hold_enabled;
+    bool heading_hold_active;
 } AppRemoteSnapshot_t;
 
 void AppRemote_Init(void);
+void AppRemote_GetDefaultConfig(AppRemoteConfig_t *config);
+void AppRemote_GetConfig(AppRemoteConfig_t *config);
+bool AppRemote_ApplyConfig(const AppRemoteConfig_t *config);
 void AppRemote_Poll(void);
 void AppRemote_Task20ms(uint32_t now_ms);
 bool AppRemote_StartCapture(uint32_t now_ms);

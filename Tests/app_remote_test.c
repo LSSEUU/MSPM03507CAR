@@ -1,5 +1,6 @@
 #include "app_remote.h"
 #include "diagnostics.h"
+#include "heading.h"
 #include "ir_receiver.h"
 #include "remote_config.h"
 #include "safety.h"
@@ -27,10 +28,14 @@ static bool test_wheel_enabled;
 static float test_left_target;
 static float test_right_target;
 static uint32_t test_safety_timeout;
+static uint32_t test_required_sensor_mask;
 static uint32_t test_arm_calls;
 static uint32_t test_confirm_calls;
 static uint32_t test_cancel_calls;
 static DiagnosticsAction_t test_last_action;
+static HeadingSnapshot_t test_heading;
+static uint32_t test_heading_start_calls;
+static uint32_t test_heading_stop_calls;
 
 static void inject(IrNecEventType_t type, uint8_t address, uint8_t command,
                    uint32_t timestamp_ms)
@@ -52,9 +57,13 @@ static void reset_fixture(void)
     test_left_target = 0.0f;
     test_right_target = 0.0f;
     test_safety_timeout = 0U;
+    test_required_sensor_mask = 0U;
     test_arm_calls = 0U;
     test_confirm_calls = 0U;
     test_cancel_calls = 0U;
+    memset(&test_heading, 0, sizeof(test_heading));
+    test_heading_start_calls = 0U;
+    test_heading_stop_calls = 0U;
     AppRemote_Init();
 }
 
@@ -92,9 +101,15 @@ bool Safety_HasFault(void) { return test_fault; }
 void Safety_BeginAction(uint32_t now_ms, uint32_t timeout_ms,
                         uint32_t required_sensor_mask)
 {
-    (void)now_ms; (void)required_sensor_mask; test_safety_timeout = timeout_ms;
+    (void)now_ms;
+    test_safety_timeout = timeout_ms;
+    test_required_sensor_mask = required_sensor_mask;
 }
-void Safety_EndAction(void) { test_safety_timeout = 0U; }
+void Safety_EndAction(void)
+{
+    test_safety_timeout = 0U;
+    test_required_sensor_mask = 0U;
+}
 
 void WheelSpeed_Enable(void) { test_wheel_enabled = true; }
 void WheelSpeed_Disable(void)
@@ -104,6 +119,31 @@ void WheelSpeed_Disable(void)
 void WheelSpeed_SetTarget(float left_mm_s, float right_mm_s)
 {
     test_left_target = left_mm_s; test_right_target = right_mm_s;
+}
+
+bool Heading_StartHold(float base_speed_mm_s)
+{
+    test_heading_start_calls++;
+    test_heading.mode = HEADING_MODE_HOLD;
+    test_heading.left_target_mm_s = base_speed_mm_s + 10.0f;
+    test_heading.right_target_mm_s = base_speed_mm_s - 10.0f;
+    return true;
+}
+bool Heading_SetHoldSpeed(float base_speed_mm_s)
+{
+    if (test_heading.mode != HEADING_MODE_HOLD) return false;
+    test_heading.left_target_mm_s = base_speed_mm_s + 10.0f;
+    test_heading.right_target_mm_s = base_speed_mm_s - 10.0f;
+    return true;
+}
+void Heading_Stop(void)
+{
+    test_heading_stop_calls++;
+    test_heading.mode = HEADING_MODE_IDLE;
+}
+void Heading_GetSnapshot(HeadingSnapshot_t *snapshot)
+{
+    *snapshot = test_heading;
 }
 
 bool Diagnostics_ActionIsIdle(void) { return test_diag_idle; }
@@ -238,6 +278,34 @@ static void test_conflicts_capture_fault_and_address_filter(void)
     assert(snapshot.state == APP_REMOTE_IDLE);
 }
 
+static void test_optional_heading_hold_only_for_straight_keys(void)
+{
+    AppRemoteConfig_t config;
+    AppRemoteSnapshot_t snapshot;
+    reset_fixture();
+    AppRemote_GetDefaultConfig(&config);
+    config.heading_hold = true;
+    assert(AppRemote_ApplyConfig(&config));
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_UP, 10U);
+    AppRemote_Poll();
+    AppRemote_GetSnapshot(&snapshot);
+    assert(snapshot.heading_hold_active);
+    assert(test_heading_start_calls == 1U);
+    assert(test_left_target == 170.0f);
+    assert(test_right_target == 150.0f);
+    assert(test_required_sensor_mask ==
+           SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO));
+
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_RIGHT, 20U);
+    AppRemote_Poll();
+    AppRemote_GetSnapshot(&snapshot);
+    assert(!snapshot.heading_hold_active);
+    assert(test_heading_stop_calls == 1U);
+    assert(test_left_target == 160.0f);
+    assert(test_right_target == -160.0f);
+    assert(test_required_sensor_mask == 0U);
+}
+
 static void test_production_keymap_gate(void)
 {
     AppRemoteSnapshot_t snapshot;
@@ -261,6 +329,7 @@ int main(void)
         test_four_directions_and_heartbeat();
         test_speed_demo_confirmation_and_cancel();
         test_conflicts_capture_fault_and_address_filter();
+        test_optional_heading_hold_only_for_straight_keys();
     } else {
         test_production_keymap_gate();
     }

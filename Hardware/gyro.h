@@ -7,6 +7,9 @@ typedef struct {
     float yaw;
     float pitch;
     float roll;
+    float yaw_rate_deg_s;
+    float pitch_rate_deg_s;
+    float roll_rate_deg_s;
 } Gyro_t;
 
 typedef struct {
@@ -14,6 +17,8 @@ typedef struct {
     uint32_t rx_bytes;
     uint32_t valid_frames;
     uint32_t last_update_ms;
+    uint32_t rate_frames;
+    uint32_t last_rate_update_ms;
     uint32_t checksum_errors;
     uint32_t frame_errors;
     uint8_t recent_count;

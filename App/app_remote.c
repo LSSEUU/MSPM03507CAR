@@ -1,6 +1,7 @@
 #include "app_remote.h"
 
 #include "diagnostics.h"
+#include "heading.h"
 #include "ir_receiver.h"
 #include "remote_config.h"
 #include "safety.h"
@@ -12,6 +13,45 @@
 #include <string.h>
 
 static AppRemoteSnapshot_t remote;
+static AppRemoteConfig_t active_config;
+
+static bool AppRemote_IsFinite(float value)
+{
+    return (value == value) &&
+           (value <= 3.402823466e+38F) &&
+           (value >= -3.402823466e+38F);
+}
+
+void AppRemote_GetDefaultConfig(AppRemoteConfig_t *config)
+{
+    if (config == NULL) return;
+    config->speed_low_mm_s = (float)IR_REMOTE_SPEED_LOW_MM_S;
+    config->speed_medium_mm_s = (float)IR_REMOTE_SPEED_DEFAULT_MM_S;
+    config->speed_high_mm_s = (float)IR_REMOTE_SPEED_HIGH_MM_S;
+    config->heading_hold = false;
+}
+
+void AppRemote_GetConfig(AppRemoteConfig_t *config)
+{
+    if (config != NULL) *config = active_config;
+}
+
+bool AppRemote_ApplyConfig(const AppRemoteConfig_t *config)
+{
+    if ((config == NULL) || (remote.state != APP_REMOTE_IDLE) ||
+        !AppRemote_IsFinite(config->speed_low_mm_s) ||
+        !AppRemote_IsFinite(config->speed_medium_mm_s) ||
+        !AppRemote_IsFinite(config->speed_high_mm_s) ||
+        (config->speed_low_mm_s < 50.0f) ||
+        (config->speed_high_mm_s > 400.0f) ||
+        (config->speed_low_mm_s > config->speed_medium_mm_s) ||
+        (config->speed_medium_mm_s > config->speed_high_mm_s)) return false;
+    active_config = *config;
+    remote.speed_mm_s = (uint16_t)(active_config.speed_medium_mm_s + 0.5f);
+    remote.heading_hold_enabled = active_config.heading_hold;
+    remote.heading_hold_active = false;
+    return true;
+}
 
 static bool AppRemote_IsDirection(uint8_t command,
                                   AppRemoteDirection_t *direction)
@@ -43,11 +83,13 @@ static void AppRemote_Targets(AppRemoteDirection_t direction,
 
 static void AppRemote_StopManual(void)
 {
+    if (remote.heading_hold_active) Heading_Stop();
     WheelSpeed_Disable();
     Safety_EndAction();
     (void)SystemState_RequestIdle();
     remote.state = APP_REMOTE_IDLE;
     remote.direction = APP_REMOTE_DIRECTION_NONE;
+    remote.heading_hold_active = false;
 }
 
 static bool AppRemote_Drive(AppRemoteDirection_t direction, uint32_t now_ms)
@@ -74,8 +116,35 @@ static bool AppRemote_Drive(AppRemoteDirection_t direction, uint32_t now_ms)
     }
 
     AppRemote_Targets(direction, &left, &right);
+    if (remote.heading_hold_enabled &&
+        ((direction == APP_REMOTE_DIRECTION_FORWARD) ||
+         (direction == APP_REMOTE_DIRECTION_REVERSE))) {
+        float hold_speed = (direction == APP_REMOTE_DIRECTION_FORWARD) ?
+            (float)remote.speed_mm_s : -(float)remote.speed_mm_s;
+        bool same_straight_direction = remote.heading_hold_active &&
+            (remote.direction == direction);
+        if (remote.heading_hold_active && !same_straight_direction) {
+            Heading_Stop();
+            remote.heading_hold_active = false;
+        }
+        if (same_straight_direction)
+            remote.heading_hold_active = Heading_SetHoldSpeed(hold_speed);
+        else
+            remote.heading_hold_active = Heading_StartHold(hold_speed);
+        if (remote.heading_hold_active) {
+            HeadingSnapshot_t heading;
+            Heading_GetSnapshot(&heading);
+            left = heading.left_target_mm_s;
+            right = heading.right_target_mm_s;
+        }
+    } else if (remote.heading_hold_active) {
+        Heading_Stop();
+        remote.heading_hold_active = false;
+    }
     WheelSpeed_SetTarget(left, right);
-    Safety_BeginAction(now_ms, IR_REMOTE_SAFETY_DEADLINE_MS, 0U);
+    Safety_BeginAction(now_ms, IR_REMOTE_SAFETY_DEADLINE_MS,
+        remote.heading_hold_active ?
+            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO) : 0U);
     remote.direction = direction;
     remote.last_drive_event_ms = now_ms;
     return true;
@@ -90,13 +159,17 @@ static void AppRemote_AdjustSpeed(bool increase)
         return;
     }
     if (increase) {
-        if (remote.speed_mm_s < IR_REMOTE_SPEED_DEFAULT_MM_S)
-            remote.speed_mm_s = IR_REMOTE_SPEED_DEFAULT_MM_S;
-        else remote.speed_mm_s = IR_REMOTE_SPEED_HIGH_MM_S;
+        if ((float)remote.speed_mm_s < active_config.speed_medium_mm_s)
+            remote.speed_mm_s = (uint16_t)(
+                active_config.speed_medium_mm_s + 0.5f);
+        else remote.speed_mm_s = (uint16_t)(
+            active_config.speed_high_mm_s + 0.5f);
     } else {
-        if (remote.speed_mm_s > IR_REMOTE_SPEED_DEFAULT_MM_S)
-            remote.speed_mm_s = IR_REMOTE_SPEED_DEFAULT_MM_S;
-        else remote.speed_mm_s = IR_REMOTE_SPEED_LOW_MM_S;
+        if ((float)remote.speed_mm_s > active_config.speed_medium_mm_s)
+            remote.speed_mm_s = (uint16_t)(
+                active_config.speed_medium_mm_s + 0.5f);
+        else remote.speed_mm_s = (uint16_t)(
+            active_config.speed_low_mm_s + 0.5f);
     }
     debug_printf("IR speed=%u mm/s\r\n", remote.speed_mm_s);
 }
@@ -189,8 +262,10 @@ static void AppRemote_HandleFull(const IrNecEvent_t *event)
 void AppRemote_Init(void)
 {
     memset(&remote, 0, sizeof(remote));
-    remote.speed_mm_s = IR_REMOTE_SPEED_DEFAULT_MM_S;
+    AppRemote_GetDefaultConfig(&active_config);
+    remote.speed_mm_s = (uint16_t)(active_config.speed_medium_mm_s + 0.5f);
     remote.actions_enabled = (IR_REMOTE_KEYMAP_VERIFIED != 0);
+    remote.heading_hold_enabled = active_config.heading_hold;
     IrReceiver_Init();
 }
 
@@ -246,8 +321,10 @@ void AppRemote_Task20ms(uint32_t now_ms)
         debug_println("IR key capture ended after 30 s.");
     }
     if (Safety_HasFault() && (remote.state != APP_REMOTE_CAPTURE)) {
+        if (remote.heading_hold_active) Heading_Stop();
         remote.state = APP_REMOTE_IDLE;
         remote.direction = APP_REMOTE_DIRECTION_NONE;
+        remote.heading_hold_active = false;
     }
 }
 

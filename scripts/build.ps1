@@ -14,6 +14,7 @@ $buildLog = Join-Path $repositoryRoot 'keil\build.log'
 $objects = Join-Path $repositoryRoot 'keil\Objects'
 $axf = Join-Path $objects 'empty_LP_MSPM0G3507_nortos_keil.axf'
 $hex = Join-Path $objects 'empty_LP_MSPM0G3507_nortos_keil.hex'
+$map = Join-Path $repositoryRoot 'keil\empty_LP_MSPM0G3507_nortos_keil.map'
 $operation = if ($Mode -eq 'Rebuild') { '-r' } else { '-b' }
 
 Write-Output "Keil: $uv4"
@@ -39,6 +40,13 @@ if (($null -ne $uvExitCode -and $uvExitCode -ne 0) -or
 }
 if (-not (Test-Path -LiteralPath $axf -PathType Leaf)) { throw "Missing AXF: $axf" }
 if (-not (Test-Path -LiteralPath $hex -PathType Leaf)) { throw "Missing HEX: $hex" }
+
+$verifyArguments = @((Join-Path $repositoryRoot 'scripts\verify_m6_image.py'), '--hex', $hex)
+if (Test-Path -LiteralPath $map -PathType Leaf) {
+    $verifyArguments += @('--map', $map)
+}
+& python @verifyArguments
+if ($LASTEXITCODE -ne 0) { throw 'M6 image boundary verification failed.' }
 
 Get-Content -LiteralPath $buildLog | Select-Object -Last 12
 Write-Output "AXF bytes: $((Get-Item -LiteralPath $axf).Length)"
