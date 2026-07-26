@@ -48,13 +48,6 @@ Keep `STATE.md` concise and current. Move long command transcripts, chronologica
 
 - If a command-line firmware download fails, retry the same command once without changing the method or configuration. If the second command-line attempt also fails, stop and ask the user to download manually; do not switch to GUI automation or continue trying variants.
 
-## Workflow defaults
-
-- The user authorizes creation of isolated Git worktrees by default for planned implementation work. Do not ask for worktree consent again unless the target path or operation introduces a new material risk.
-- Codex may use Git autonomously to manage in-scope repository changes. Create an intentional commit whenever a coherent implementation or verification milestone is complete.
-- After a design and implementation plan are approved, proceed directly with implementation when no genuine blocker or material user decision remains. Do not ask the user to choose an execution style merely as a formality.
-- Stop and ask only when required information cannot be discovered safely, a verification repeatedly fails, or proceeding would materially expand scope or risk.
-
 ## Problem investigation limits
 
 - When a problem occurs, locate and document its probable cause before changing the implementation. Attempt a fix only when the evidence indicates a high probability that it addresses that cause.
