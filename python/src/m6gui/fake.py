@@ -360,6 +360,10 @@ class FakeSession:
         self.status = {**self.status, "action_state": "IDLE"}
         return {"state": "IDLE", "reason": "HOST_CANCEL"}
 
+    def calibrate_heading(self) -> Mapping[str, Any]:
+        self.calls.append(("calibrate_heading",))
+        return {"state": "COMPLETE", "yaw_cdeg": 0, "duration_ms": 1200}
+
     def emergency_stop(self) -> Mapping[str, Any]:
         self.calls.append(("emergency_stop",))
         self._armed = None

@@ -944,6 +944,20 @@ class Session:
         )
         return values
 
+    def calibrate_heading(self) -> Mapping[str, int]:
+        """Start stationary heading calibration without arming motor motion."""
+
+        self.require_capability(Capability.HEADING_CALIBRATION)
+        identity = self._require_identity()
+        values = decode_layout(
+            "rpc_heading_calibrate_success_body_v1",
+            self._rpc(RpcOpcode.HEADING_CALIBRATE, struct.pack("<I", identity.boot_id)),
+        )
+        return {
+            "started_ms": int(values["started_ms"]),
+            "calibration_count_before": int(values["calibration_count_before"]),
+        }
+
     def subscribe(self, entries: Mapping[TelemetryStream | int, int] | Iterable[Subscription | tuple[int, int]]) -> tuple[tuple[Subscription, ...], int]:
         if isinstance(entries, Mapping):
             pairs = [(int(stream), int(period)) for stream, period in entries.items()]

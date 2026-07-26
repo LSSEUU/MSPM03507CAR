@@ -368,6 +368,28 @@ class M6View:
 
         self._build_lease_panel(self.action_tab, row=1, columnspan=2)
 
+        self.calibration_frame = ttk.LabelFrame(
+            self.action_tab, text="航向校准（独立 RPC，不启动电机）"
+        )
+        self.calibration_frame.grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0)
+        )
+        self.calibration_frame.columnconfigure(0, weight=1)
+        self.calibration_status_var = tk.StringVar(
+            value="校准前保持车辆完全静止；此操作不使用 Arm/Confirm。"
+        )
+        ttk.Label(
+            self.calibration_frame,
+            textvariable=self.calibration_status_var,
+            style="Muted.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        self.calibration_button = ttk.Button(
+            self.calibration_frame,
+            text="保持静止并开始航向校准",
+            command=self._calibrate_heading,
+        )
+        self.calibration_button.grid(row=0, column=1, padx=(12, 0))
+
     def _build_lease_panel(self, parent: ttk.Frame, *, row: int, columnspan: int) -> None:
         lease = ttk.LabelFrame(parent, text="两阶段动作闸门")
         lease.grid(row=row, column=0, columnspan=columnspan, sticky="ew", pady=(6, 0))
@@ -517,6 +539,14 @@ class M6View:
         except GuiInputError as exc:
             self._show_error(exc)
 
+    def _calibrate_heading(self) -> None:
+        try:
+            if not self.controller.calibrate_heading():
+                raise GuiInputError("当前未连接，无法进行航向校准")
+            self.calibration_status_var.set("正在校准，请继续保持车辆静止…")
+        except GuiInputError as exc:
+            self._show_error(exc)
+
     def _wizard_items(self) -> tuple[ActionDraft, ...]:
         drafts = wizard_drafts(
             self.wizard_speed_var.get(), self.wizard_duration_var.get(), self.wizard_ratio_var.get()
@@ -650,6 +680,11 @@ class M6View:
         )
         for key, variable in self.diag_vars.items():
             variable.set(model_text(state.diagnostics.get(key)))
+        calibration = state.diagnostics.get("heading_calibration")
+        if calibration is not None:
+            self.calibration_status_var.set(
+                "校准结果：" + model_text(calibration, max_fields=8)
+            )
         self._sync_capability_visibility()
         self._sync_parameters()
         self._update_lease()
@@ -674,6 +709,10 @@ class M6View:
         self.notebook.tab(self.parameter_tab, state="normal" if visible["parameter_tab"] else "hidden")
         self.notebook.tab(self.action_tab, state="normal" if visible["action_tab"] else "hidden")
         self.notebook.tab(self.wizard_tab, state="normal" if visible["wizard_tab"] else "hidden")
+        if visible["wheel_actions"]:
+            self.speed_frame.grid()
+        else:
+            self.speed_frame.grid_remove()
         if visible["heading"]:
             self.heading_frame.grid()
         else:
@@ -682,6 +721,10 @@ class M6View:
             self.turn_frame.grid()
         else:
             self.turn_frame.grid_remove()
+        if visible["heading_calibration"]:
+            self.calibration_frame.grid()
+        else:
+            self.calibration_frame.grid_remove()
         if visible["parameter_stage"]:
             self.stage_button.grid()
         else:

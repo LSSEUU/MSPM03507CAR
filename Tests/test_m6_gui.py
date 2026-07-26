@@ -115,6 +115,23 @@ class ControllerTest(unittest.TestCase):
         self.assertIsNone(self.controller.state.armed)
         self.assertEqual(session.status["system_state"], "FAULT")
 
+    def test_heading_calibration_is_independent_and_capability_gated(self) -> None:
+        session = self.connect()
+        self.assertTrue(self.controller.calibrate_heading())
+        pump(self.controller, lambda: ("calibrate_heading",) in session.calls)
+        names = [call[0] for call in session.calls]
+        self.assertNotIn("arm_action", names)
+        self.assertNotIn("confirm_action", names)
+        self.assertIn("heading_calibration", self.controller.state.diagnostics)
+
+        self.controller.state.capabilities = frozenset(
+            name
+            for name in self.controller.state.capabilities
+            if name != "HEADING_CALIBRATION"
+        )
+        with self.assertRaises(GuiInputError):
+            self.controller.calibrate_heading()
+
     def test_parameter_transaction_refreshes_three_values(self) -> None:
         session = self.connect()
         before = self.controller.state.parameters["wheel.left.kp"]
@@ -194,7 +211,16 @@ class PureModelTest(unittest.TestCase):
         self.assertFalse(visible["parameter_persist"])
         self.assertFalse(visible["heading"])
         self.assertFalse(visible["configurable_turn"])
+        self.assertFalse(visible["heading_calibration"])
         self.assertFalse(visible["recording"])
+
+        calibration_only = feature_visibility(
+            {"WIRE_R1", "HEADING_CALIBRATION"}, connected=True, protocol=2
+        )
+        self.assertTrue(calibration_only["action_tab"])
+        self.assertTrue(calibration_only["heading_calibration"])
+        self.assertFalse(calibration_only["wheel_actions"])
+        self.assertFalse(calibration_only["wizard_tab"])
 
     def test_m6link_nested_telemetry_model_is_supported(self) -> None:
         try:

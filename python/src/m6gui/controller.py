@@ -231,11 +231,13 @@ def feature_visibility(
         "parameter_stage": v2 and "PARAM_STAGE" in caps,
         "parameter_apply": v2 and "PARAM_BOUNDARY_APPLY" in caps,
         "parameter_persist": v2 and "PARAM_PERSIST" in caps,
-        "action_tab": wheel,
+        "wheel_actions": wheel,
+        "action_tab": wheel or (v2 and "HEADING_CALIBRATION" in caps),
         "wizard_tab": wheel,
         "heading": wheel and "HEADING_ACTION" in caps,
         "configurable_turn": wheel
         and {"HEADING_ACTION", "CONFIGURABLE_TURN"}.issubset(caps),
+        "heading_calibration": v2 and "HEADING_CALIBRATION" in caps,
         "recording": v2 and "TELEMETRY_SUBSCRIBE" in caps,
     }
 
@@ -583,6 +585,9 @@ class Controller:
             self.state.action_status = result
             self.state.armed = None
             self.state.status_text = "已请求正常停止（Cancel）"
+        elif operation == "heading_calibrate":
+            self.state.diagnostics["heading_calibration"] = result
+            self.state.status_text = "航向校准完成；请核对设备状态后再 Arm 动作"
         elif operation == "estop":
             self.state.armed = None
             self.state.action_status = result
@@ -876,6 +881,24 @@ class Controller:
         session = self._session
         return self._submit(
             "cancel", lambda: self._call(session, ("cancel_action",), 0)
+        )
+
+    def calibrate_heading(self) -> bool:
+        """Run the independent, non-motor heading calibration RPC."""
+
+        if self._session is None:
+            return False
+        if not self.has_capability("HEADING_CALIBRATION"):
+            raise GuiInputError("设备未发布能力：HEADING_CALIBRATION")
+        if self.state.armed is not None and self.clock() < self.state.armed.expires_at:
+            raise GuiInputError("存在待 Confirm 的 Arm；请先 Cancel 或等待过期再校准")
+        session = self._session
+        return self._submit(
+            "heading_calibrate",
+            lambda: self._call(
+                session,
+                ("calibrate_heading", "heading_calibrate", "heading_calibration"),
+            ),
         )
 
     def emergency_stop(self) -> bool:

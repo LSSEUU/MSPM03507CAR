@@ -127,6 +127,8 @@ class V2FakeSerial:
             success = struct.pack("<II", 0xAABBCCDD, 10000) + request_body
         elif opcode == int(RpcOpcode.ACTION_CONFIRM):
             success = struct.pack("<IIIBBH", 9, 100, 1600, 2, 1, 0)
+        elif opcode == int(RpcOpcode.HEADING_CALIBRATE):
+            success = struct.pack("<II", 321, 20)
         elif opcode == int(RpcOpcode.SUBSCRIPTION_SET):
             count = request_body[1]
             entries = request_body[4 : 4 + count * 4]
@@ -214,6 +216,17 @@ class M6LinkSessionTests(unittest.TestCase):
         self.assertNotIn(caller, fake.io_threads)
         self.assertEqual(len(fake.io_threads), 1)
         self.assertIn(b"S", fake.writes)
+
+    def test_heading_calibration_is_an_explicit_non_action_rpc(self):
+        fake = V2FakeSerial()
+        session = Session(transport=fake, timeout=0.5)
+        session.connect()
+        result = session.calibrate_heading()
+        self.assertEqual(result, {"started_ms": 321, "calibration_count_before": 20})
+        self.assertEqual(fake.opcodes[-1], int(RpcOpcode.HEADING_CALIBRATE))
+        self.assertNotIn(int(RpcOpcode.ACTION_ARM), fake.opcodes)
+        self.assertNotIn(int(RpcOpcode.ACTION_CONFIRM), fake.opcodes)
+        session.close()
 
     def test_manual_recording_can_stop_without_consuming_controller_events(self):
         fake = V2FakeSerial()
