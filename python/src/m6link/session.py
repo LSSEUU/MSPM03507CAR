@@ -87,6 +87,17 @@ PARAMETER_SCHEMA = 1
 DEFAULT_FIRMWARE_PREFIX = "M6"
 
 
+def _async_gap_details(
+    last_sequence: int, sequence: int, flags: int
+) -> tuple[bool, bool, int]:
+    """Keep device GAP_BEFORE separate from a host-observed sequence gap."""
+
+    wire_gap = bool(flags & int(FrameFlag.GAP_BEFORE))
+    expected_sequence = last_sequence + 1 if last_sequence else 0
+    sequence_gap = bool(last_sequence and sequence != expected_sequence)
+    return wire_gap, sequence_gap, expected_sequence if sequence_gap else 0
+
+
 class _Write:
     __slots__ = ("data", "started", "done", "error")
 
@@ -392,9 +403,10 @@ class Session:
             return
         if frame.type not in (int(FrameType.EVENT), int(FrameType.TELEMETRY), int(FrameType.BULK)):
             return
-        gap = bool(frame.flags & int(FrameFlag.GAP_BEFORE))
-        if self._last_async_sequence and frame.sequence != self._last_async_sequence + 1:
-            gap = True
+        wire_gap, sequence_gap, expected_sequence = _async_gap_details(
+            self._last_async_sequence, frame.sequence, frame.flags
+        )
+        gap = wire_gap or sequence_gap
         self._last_async_sequence = frame.sequence
         try:
             if frame.type == int(FrameType.TELEMETRY):
@@ -406,6 +418,9 @@ class Session:
                     values=values,
                     gap_before=gap,
                     sequence=frame.sequence,
+                    wire_gap_before=wire_gap,
+                    sequence_gap_before=sequence_gap,
+                    expected_sequence=expected_sequence,
                 )
                 self._telemetry.put(sample)
                 self._publish_event(sample)
@@ -427,6 +442,9 @@ class Session:
                     values=values,
                     gap_before=gap,
                     sequence=frame.sequence,
+                    wire_gap_before=wire_gap,
+                    sequence_gap_before=sequence_gap,
+                    expected_sequence=expected_sequence,
                 )
                 self._publish_event(event)
             else:

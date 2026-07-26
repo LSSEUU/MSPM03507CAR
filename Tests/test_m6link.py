@@ -18,6 +18,7 @@ from m6link import ActionKind, ActionSpec, Session, TelemetrySample  # noqa: E40
 from m6link.protocol.framing import Frame, FrameDecoder, encode_frame  # noqa: E402
 from m6link.recording import _consume_transition_sample, _recording_subscriptions  # noqa: E402
 from m6link.registry import CAPABILITY_MASKS, FrameType, REGISTRY, RpcOpcode, TelemetryStream  # noqa: E402
+from m6link.session import _async_gap_details  # noqa: E402
 
 
 class V2FakeSerial:
@@ -188,6 +189,12 @@ class M6LinkCodecTests(unittest.TestCase):
 
 
 class M6LinkSessionTests(unittest.TestCase):
+    def test_async_gap_provenance_keeps_wire_and_sequence_sources_separate(self):
+        self.assertEqual(_async_gap_details(0, 7, 0), (False, False, 0))
+        self.assertEqual(_async_gap_details(7, 8, 2), (True, False, 0))
+        self.assertEqual(_async_gap_details(7, 9, 0), (False, True, 8))
+        self.assertEqual(_async_gap_details(7, 9, 2), (True, True, 8))
+
     def test_default_recording_profile_is_50_hz_and_within_admission_budget(self):
         subscriptions = _recording_subscriptions(20)
         self.assertEqual(
@@ -209,7 +216,7 @@ class M6LinkSessionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _recording_subscriptions(25)
 
-    def test_recording_consumes_only_the_first_transition_sample_per_stream(self):
+    def test_recording_consumes_only_the_first_boundary_sample_per_stream(self):
         unsettled = {TelemetryStream.CORE, TelemetryStream.WHEEL}
         core = TelemetrySample(TelemetryStream.CORE, 1, 10, {}, gap_before=True)
         wheel = TelemetrySample(TelemetryStream.WHEEL, 1, 10, {}, gap_before=True)

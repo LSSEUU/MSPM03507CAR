@@ -257,6 +257,9 @@ class TelemetrySample:
     values: Mapping[str, Any]
     gap_before: bool = False
     sequence: int = 0
+    wire_gap_before: bool = False
+    sequence_gap_before: bool = False
+    expected_sequence: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +271,9 @@ class LinkEvent:
     values: Mapping[str, Any]
     gap_before: bool = False
     sequence: int = 0
+    wire_gap_before: bool = False
+    sequence_gap_before: bool = False
+    expected_sequence: int = 0
 
 
 @dataclass(frozen=True, slots=True)

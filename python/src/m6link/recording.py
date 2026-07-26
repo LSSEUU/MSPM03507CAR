@@ -61,6 +61,15 @@ def _consume_transition_sample(
     return True
 
 
+def _gap_provenance(sample: TelemetrySample) -> str:
+    sources = []
+    if sample.wire_gap_before:
+        sources.append("wire")
+    if sample.sequence_gap_before:
+        sources.append("sequence")
+    return "+".join(sources) or "unknown"
+
+
 def _seed_diagnostic_counters(session: Session, state: dict[str, int]) -> None:
     """Seed cumulative counters so pre-record history is not scored as a delta."""
 
@@ -152,7 +161,11 @@ class Recorder:
         subscriptions = _recording_subscriptions(period_ms)
         previous_subscriptions = dict(self.session._subscriptions)
         subscription_changed = previous_subscriptions != subscriptions
-        unsettled_streams = set(subscriptions) if subscription_changed else set()
+        # The diagnostic RPC burst below can legitimately preempt/coalesce a
+        # queued P2 sample even when the requested subscriptions are already
+        # active.  Treat one sample per stream as the post-setup recording
+        # boundary; every subsequent GAP_BEFORE remains a hard failure.
+        unsettled_streams = set(subscriptions)
         rows: list[dict[str, int]] = []
         event_records: list[dict[str, Any]] = []
         state = _empty_legacy_row()
@@ -160,6 +173,7 @@ class Recorder:
         start_monotonic = time.monotonic()
         deadline = float("inf") if duration_s is None else start_monotonic + duration_s
         abort_reason: str | None = None
+        gap_provenance: str | None = None
         capture_error: BaseException | None = None
         try:
             with self.session.event_tap() as event_tap:
@@ -180,14 +194,32 @@ class Recorder:
                         if event is None:
                             continue
                         if isinstance(event, TelemetrySample):
-                            # Replacing subscriptions may intentionally clear an
-                            # affected queued P2 frame and mark the next sample
-                            # GAP_BEFORE.  The first sample of each changed
-                            # stream establishes the new recording boundary;
-                            # every later gap remains a hard failure.
+                            # Subscription replacement or the baseline RPCs may
+                            # mark the next queued P2 sample GAP_BEFORE.  The
+                            # first sample of each stream establishes the new
+                            # recording boundary; every later gap remains a hard
+                            # failure.
                             if _consume_transition_sample(event, unsettled_streams):
                                 continue
                             if event.gap_before:
+                                gap_provenance = _gap_provenance(event)
+                                event_records.append(
+                                    {
+                                        "elapsed_ms": round(
+                                            (time.monotonic() - start_monotonic) * 1000
+                                        ),
+                                        "firmware_time_ms": event.time_ms,
+                                        "event": "TelemetryGap",
+                                        "values": {
+                                            "stream": int(event.stream),
+                                            "sample_id": event.sample_id,
+                                            "wire_gap_before": event.wire_gap_before,
+                                            "sequence_gap_before": event.sequence_gap_before,
+                                            "expected_sequence": event.expected_sequence,
+                                            "observed_sequence": event.sequence,
+                                        },
+                                    }
+                                )
                                 abort_reason = "telemetry_gap"
                                 raise SafetyTrip(0x010A, 0, name="TELEMETRY_GAP")
                             if _merge_v2_sample(state, event):
@@ -202,6 +234,7 @@ class Recorder:
                                 }
                             )
                             if isinstance(event, GapEvent):
+                                gap_provenance = "device_event"
                                 abort_reason = "telemetry_gap"
                                 raise SafetyTrip(0x010A, 0, name="TELEMETRY_GAP")
                 finally:
@@ -228,7 +261,8 @@ class Recorder:
             "requested_speed": requested_speed, "period_ms": period_ms,
             "start_time": started, "end_time": utc_now(),
             "parameters": dict(parameters or {}), "events": event_records,
-            "abort_reason": abort_reason, "metrics": metrics,
+            "abort_reason": abort_reason, "gap_provenance": gap_provenance,
+            "metrics": metrics,
         }
         with csv_path.open("w", newline="", encoding="utf-8") as stream:
             writer = csv.writer(stream, lineterminator="\n")
