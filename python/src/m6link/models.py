@@ -1,4 +1,4 @@
-"""Public immutable data models shared by CLI and GUI consumers."""
+"""Public immutable data models shared by host-side consumers."""
 
 from __future__ import annotations
 

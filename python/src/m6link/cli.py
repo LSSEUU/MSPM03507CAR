@@ -114,8 +114,9 @@ def _v2_main(session: Session, identity: Any, args: argparse.Namespace) -> int:
         print(result.json_path)
     elif args.command == "tune-wheel":
         raise M6Error(
-            "V2 tune-wheel requires per-action human Arm/Confirm; use the GUI/test wizard, "
-            "or pass --legacy for the retained interactive V1 workflow"
+            "V2 tune-wheel requires an explicit human-controlled Arm/Confirm client; "
+            "this CLI will not execute it automatically. Pass --legacy only for the "
+            "retained interactive V1 workflow"
         )
     return 0
 

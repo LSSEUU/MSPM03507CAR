@@ -9,8 +9,8 @@
 - 项目：立创·天猛星 MSPM0G3507-64P 两轮差速小车固件，系统时钟 32 MHz，Keil ARM Compiler 6.22。
 - 当前入口：`Source/main.c`；`Source/ti_msp_dl_config.c/.h` 是受回归测试保护的唯一冻结板级配置，修订号 `20260725`，不得用旧 `.syscfg` 覆盖。
 - 里程碑：M0–M5 已完成；PB11 红外遥控阶段一完成，阶段二已完成全部架空路径和 100 mm/s 落地前进/制动，用户自行测试按键功能无异常，正式落地后退/左右转延后到算法定型后；M6 软件基础设施、架空轮速矩阵和 100 mm/s 落地直行/制动/航向筛选已取证，巡线分级、220 mm/s×5 圈和掉电保持验收尚未完成；M7 尚未开始。
-- 当前运行镜像：用户已从唯一主目录手动下载 `M6-runtime-20260726-r14`；COM10 已确认 firmware/schema/registry/active revision 为 r14/1/1/1、source `defaults`、generation 0，V2 capability/enabled mask 均为 `0x000000000053EFFF`。日志关闭、10、25、50 Hz 各约 60 s 的同会话压力矩阵、V1/V2 裸字节急停及完整架空轮速矩阵已通过。用户在一次性验收窗口逐项人工 Arm/Confirm 完成落地 160 mm/s 前进、左弧和右弧；从仍在运行的进程恢复 ready/三步后四个诊断快照，boot 始终为 1，均为 IDLE/action idle、fault/target/PWM 0，任务/UART、P0/P1/P3/control 和全部 link error 为 0，P2 drop 固定为 4、动作期间无增量。三步功能执行和安全自动停止成立，但 Recorder 在动作前 220 ms 已因 WHEEL stream 的 wire gap 中止，只留下 5 个静止样本，故没有速度跟踪曲线，160 mm/s 性能验收仍未正式通过。通用 GUI 和一次性窗口的录制路径均停止继续试改；在明确新的记录边界设计前不升到 180 mm/s。落地 160–250 mm/s 性能、航向、改参/save 和 30 分钟 GUI 长期运行仍未完成。
-- 当前验证基线：r14 已合并 r13 热路径清理与冻结 V2 revision 1，完成 C codec/session/window=1 重放、P0–P3 单帧仲裁/背压、V1 resync、参数事务、四路 telemetry/snapshot、fault clear、两阶段轮速/航向动作、航向校准和 ±360° 可配置相对转向；未发布 line action、trace/bulk、灰度批采、motor self-test 或 heading-rate。共享 `m6link`、薄 `m6_tune.py` 和 capability-aware Tk GUI 已完成；一次性验收窗口不做周期刷新，不直接访问 pyserial，不自动 Confirm，并在每步后核对 boot、零输出、任务/UART、P0–P3/control drop。全量 145 项主机测试、C golden harness 和冻结 registry checker 通过；Keil ARMCLANG 6.22 Rebuild 0 error、0 warning，`Code=60836, RO-data=9720, RW-data=12, ZI-data=28972`，最高普通镜像字节 `0x000113AF`，低于参数区 `0x0001F800`；专用 256 B `RW_NOINIT` 仍位于 `0x20207F00`。生产 AXF 只含正式 r14 身份，无 `r14-fi`/`TEST ONLY`/`FAULT INJECTION`。动作、高速、保存/断电和 30 分钟 GUI 长期运行仍待验证，完整 reset 分类/保持矩阵仍属于 r12/r12-fi。
+- 当前运行镜像：用户已从唯一主目录手动下载 `M6-runtime-20260726-r14`；COM10 已确认 firmware/schema/registry/active revision 为 r14/1/1/1、source `defaults`、generation 0，V2 capability/enabled mask 均为 `0x000000000053EFFF`。日志关闭、10、25、50 Hz 各约 60 s 的同会话压力矩阵、V1/V2 裸字节急停及完整架空轮速矩阵已通过。历史一次性窗口中，用户逐项人工 Arm/Confirm 完成落地 160 mm/s 前进、左弧和右弧；四个恢复快照证明 boot 不变、动作后 IDLE/零输出且诊断无增量，但 Recorder 在动作前已退出，故 160 mm/s 性能仍未正式通过。因 GUI/验收窗口难用且录制不可靠，用户已明确要求删除 `m6gui`、`scripts/m6_gui.py`、`scripts/m6_accept.py` 及对应测试；失败录制移入回收站。当前不再提供 GUI 动作入口，在明确可靠的非 GUI 记录边界前不升到 180 mm/s。落地 160–250 mm/s 性能、航向和改参/save 仍未完成，原 30 分钟 GUI 项取消并等待替代的长期链路验证方案。
+- 当前验证基线：r14 已合并 r13 热路径清理与冻结 V2 revision 1，完成 C codec/session/window=1 重放、P0–P3 单帧仲裁/背压、V1 resync、参数事务、四路 telemetry/snapshot、fault clear、两阶段轮速/航向动作、航向校准和 ±360° 可配置相对转向；未发布 line action、trace/bulk、灰度批采、motor self-test 或 heading-rate。主机保留共享 `m6link`、薄 `m6_tune.py`、冻结 registry/golden vectors 和录制/回放/评分库，不再包含 Tk GUI 或一次性验收窗口。GUI 删除后聚焦 32 项、全量 125 项主机测试、C golden harness 和冻结 registry checker 通过；Keil ARMCLANG 6.22 Rebuild 0 error、0 warning，`Code=60836, RO-data=9720, RW-data=12, ZI-data=28972`，最高普通镜像字节 `0x000113AF`，低于参数区 `0x0001F800`；专用 256 B `RW_NOINIT` 仍位于 `0x20207F00`。生产 AXF 只含正式 r14 身份，无 `r14-fi`/`TEST ONLY`/`FAULT INJECTION`。本次删除未改固件、Keil、Safety、ISR 或 WWDT，也未重新下载；完整 reset 分类/保持矩阵仍属于 r12/r12-fi。
 - PB11 阶段二进行中：架空的三档、100/220 mm/s 四方向、251 ms 失联制动、`OK`/`0`、直行/±90°/巡线门控均通过；落地以 100 mm/s 完成遥控前进、航向保持和松键制动，用户确认车辆前进且停车正常，并自行确认其余按键功能无异常。正式落地后退/左右转仍保留为 PB11 最终验收项，但按用户决定不再阻塞使用串口急停与物理中止保护的 M6 算法调试。
 - 开始任何工作前先执行 `git status --short`，保留所有不属于当前任务的改动。需要细节时按第 9 节只读取对应文档，不要一次加载全部验证记录或 PDF。
 
@@ -21,10 +21,10 @@
 当前优先目标依次为高速直线、平滑左右弧线、高速陀螺仪角度/角速度控制和系统长期无复位。后续顺序固定为：
 
 1. `r12` 的 power、短/长 NRST 与 `r12-fi` 的受控 SYSRST/WWDT 矩阵均已取证；正式 r12 已恢复，并以精确身份及帮助中无 `TEST ONLY` 双重核对测试入口移除。不得延长、禁用或旁路 WWDT，也不得把合成 scratch 写成真实 HardFault 异常入口通过。
-2. r13 UART 热路径清理已并入当前正式 r14；冻结 V2 的 C codec、HELLO/session、window=1 序号/去重/重放、超时/resync、静态 P0–P3 队列、单帧物理完成仲裁、背压和诊断均已实现。V2 内部必须转义 `S`/空格；RX ISR 在任意 parser 状态先消费裸字节并立即触发 Safety 急停，主循环随后清 pending apply 与 P2/P3，保留 fault/session。真实 V1 半帧与 V2 背压急停及完整架空轮速矩阵已验证；下一入口是一次性验收窗口的 160 mm/s 落地直线和左右弧。
-3. Python `m6link` 已抽包：只有 `Session` 负责 pyserial 创建和串口读写，后台线程统一仲裁 V1/V2、RPC 与最高优先级裸 `S`；默认探测 V2，V1 必须显式 legacy。连接会先等待冻结的 100 ms resync 静默窗并以 transaction 1 精确查询 `meta.capabilities`，再读 identity，因此能从设备 V2 teardown 的 `V1_RESYNC` 恢复；显式 legacy 对不支持该 key 的旧 M6 安全回退。公共模型、查询、参数事务、telemetry、事件、录制/回放/评分、独立航向校准及两阶段动作接口已实现，RPC 不做盲重试，已发送但无确定结果时阻断后续事务。`arm_action()` 只返回 token/10 s 有效期，任何库/CLI/GUI 路径都不会自动 Confirm；航向校准使用独立 RPC，不复用动作 Arm/Confirm。冻结 JSON/schema 随 wheel 打包并在安装态重新校验 SHA；旧 `m6_tune.py` 已成为薄壳，旧参数、CSV/JSON 与评分兼容，旧灰度校准采集器也已改由显式 V1 `Session` 访问 UART，不再直接导入 pyserial。真实 r14 首次关闭订阅暴露 `count=0` 可变数组未生成键的主机缺陷，已修为通用空 tuple 并加回归；全量现为 145 项通过，真实空订阅返回 `((), 0)`。
-4. 最小桌面 GUI 已实现：默认要求 V2、V1 仅能显式选择；提供 identity/reset/任务/UART/link 诊断、轮速/航向/八路灰度与质心曲线、参数事务、独立 Arm/Confirm/Cancel、能力门控的航向校准、常驻急停、录制/回放/评分和逐步重新 Arm 的测试向导。校准在存在待确认动作租约时拒绝执行；未发布 capability 对应的页签、按钮和动作组会隐藏。真实 r14 使用 CORE/WHEEL/LINE/HEALTH `20/40/60/1000 ms`、估算 6105 B/s；录制器避免重复 replace，以当前累计诊断值起算，分别保留 wire GAP 与 async sequence gap，并将设置完成后的每流首样本作为录制边界。GUI 现等待 Recorder 完成基线 RPC 后才报告启动，且录制期间暂停周期诊断；这使新连接的首份真实动作记录通过，但同一 Session 第二次开始录制仍会卡住普通操作队列，Disconnect/Connect 也排在其后。按问题处理上限停止继续修补；当前临时边界是每次复位/连接只开始一份录制，把多个动作放入同一文件，完成后关闭 GUI 并在必要时复位。30 分钟 GUI 尚未通过。
-5. r14 上板身份/V1 fallback/V2 HELLO/Safety/reset、日志关闭/10/25/50 Hz 各约 60 s、V1/V2 裸字节急停以及架空轮速矩阵均已完成。用户已确认车辆落地和场地安全；一次性窗口的 160 mm/s 直线、左弧、右弧均逐项人工 Arm/Confirm 并通过动作后自动诊断，证明功能执行和安全停止，但录制在动作前已因 wire gap 中止，缺少速度曲线。按同一录制问题的处理上限停止继续产出变体；在决定不与活动 Recorder 交错诊断 RPC 的新记录边界前，不把 160 mm/s 性能列为通过，也不升到 180 mm/s。
+2. r13 UART 热路径清理已并入当前正式 r14；冻结 V2 的 C codec、HELLO/session、window=1 序号/去重/重放、超时/resync、静态 P0–P3 队列、单帧物理完成仲裁、背压和诊断均已实现。V2 内部必须转义 `S`/空格；RX ISR 在任意 parser 状态先消费裸字节并立即触发 Safety 急停，主循环随后清 pending apply 与 P2/P3，保留 fault/session。真实 V1 半帧与 V2 背压急停及完整架空轮速矩阵已验证；车端无需因 GUI 删除而修改或重刷。
+3. Python `m6link` 已抽包：只有 `Session` 负责 pyserial 创建和串口读写，后台线程统一仲裁 V1/V2、RPC 与最高优先级裸 `S`；默认探测 V2，V1 必须显式 legacy。连接会先等待冻结的 100 ms resync 静默窗并以 transaction 1 精确查询 `meta.capabilities`，再读 identity，因此能从设备 V2 teardown 的 `V1_RESYNC` 恢复；显式 legacy 对不支持该 key 的旧 M6 安全回退。公共模型、查询、参数事务、telemetry、事件、录制/回放/评分、独立航向校准及两阶段动作接口已实现，RPC 不做盲重试，已发送但无确定结果时阻断后续事务。`arm_action()` 只返回 token/10 s 有效期，保留的库/CLI 不会自动 Confirm；薄 `m6_tune.py` 保留旧参数、CSV/JSON 与评分兼容，V2 动作明确拒绝自动执行。GUI 删除后全量现为 125 项通过，真实空订阅仍返回 `((), 0)`。
+4. capability-aware Tk GUI 与一次性验收窗口已按用户要求删除：移除 `python/src/m6gui`、`scripts/m6_gui.py`、`scripts/m6_accept.py` 和对应测试，不再提供桌面按钮动作、曲线或 GUI 录制入口。相关历史故障和动作证据保留在日期记录中；两份根目录失败录制已移入回收站。若以后需要可用界面，必须作为新的、范围明确的实现重新设计，不能恢复本次难用版本。
+5. r14 上板身份/V1 fallback/V2 HELLO/Safety/reset、日志关闭/10/25/50 Hz 各约 60 s、V1/V2 裸字节急停以及架空轮速矩阵均已完成。历史一次性窗口的 160 mm/s 直线、左弧、右弧证明功能执行和安全停止，但没有有效动作曲线。当前没有获准执行 V2 动作的主机 UI；在设计可靠且保持人工独立 Confirm 的非 GUI 流程前，不把 160 mm/s 性能列为通过，也不升到 180 mm/s。
 6. 完成架空轮速复核后，落地按 `160→180→200→220→250 mm/s` 依次验证直线与左右弧线；任一级出现故障、复位、持续饱和、漏期或明显振荡立即回退。
 7. 随后验证航向保持和 ±45°、±90°、可配置角度动作；`HEADING_RATE_ACTION` 未在 r14 发布，先取得真实角速度响应后再单独设计 r15，赛题/赛道公布前不继续试未知直角弯的纯巡线搜索参数。
 8. 最后才做参数保存、复位/断电保持和 PB11 整体回归。
@@ -48,7 +48,7 @@
 
 ### 后续里程碑
 
-- M6：正式 r14、共享 `m6link`、薄 CLI 和统一 GUI 已完成主机/目标构建，r14 已手动下载并通过身份/V1/V2、0–50 Hz 日志压力、V1/V2 裸字节急停及双轮 100 mm/s/1.5 s 架空动作；wire/sequence gap provenance 已分离。当前 GUI 每次复位/连接的首份动作录制可用，但同一 Session 第二次开始录制会卡住普通操作队列，已停止继续试改。下一入口是在一次新录制中依次完成双轮 300 mm/s、左右单轮各 160 mm/s，再进入 160–250 mm/s 落地、航向、30 分钟 GUI、保存/复位/断电与 PB11 回归。
+- M6：正式 r14、共享 `m6link` 和薄 CLI 已完成主机/目标构建，r14 已手动下载并通过身份/V1/V2、0–50 Hz 日志压力、V1/V2 裸字节急停及完整架空轮速矩阵；wire/sequence gap provenance 已分离。难用且不可靠的统一 GUI/一次性窗口已按用户要求移除。下一入口不是继续补 GUI，而是先决定保持人工 Confirm、且不在活动 Recorder 中交错诊断 RPC 的非 GUI 验收边界，再继续 160–250 mm/s 落地、航向、替代长期链路验证、保存/复位/断电与 PB11 回归。
 - M7：至少 30 分钟连续运行、低电压、急停物理响应、编码器断开、人为堵转、传感器/通信中断和任务超期验收，并形成可复查记录。
 
 ## 3. 已实现主流程与安全边界
@@ -102,9 +102,9 @@ PA23/VREF+ 与 PA21/VREF− 通过 C44（1 µF）耦合，因此两者必须保�
 | `Control/` | 无硬件依赖的 PI、滤波、轮速、航向与巡线数值控制 |
 | `App/` | 巡线生命周期和红外人工驾驶/演示动作，不直接控制 PWM |
 | `System/` | 时间、调度、状态机、安全仲裁、reset diagnostics、参数/持久化、V1/V2 codec/session/RPC/优先队列/遥测、巡线飞行记录和诊断 |
-| `python/src/m6link` / `python/src/m6gui` | 单串口 Session、公共模型/记录/评分和 capability-aware Tk GUI；GUI/CLI 不直接访问 pyserial |
-| `Tests/` | 板级不变量、可移植性、HEX/MAP、M2–M6、V2 C/Python 合同、GUI、NEC、遥控和主机工具回归 |
-| `scripts/` | 主机回归/Keil 构建、统一 GUI/薄 CLI、CMSIS-DAP 下载、冻结 registry 和镜像边界检查 |
+| `python/src/m6link` | 单串口 Session、公共模型、V1/V2 协议、记录/回放/评分；GUI 已移除，其他主机消费者不得直接访问 pyserial |
+| `Tests/` | 板级不变量、可移植性、HEX/MAP、M2–M6、V2 C/Python 合同、NEC、遥控和保留主机工具回归 |
+| `scripts/` | 主机回归/Keil 构建、薄 CLI、CMSIS-DAP 下载、冻结 registry 和镜像边界检查；无 GUI 入口 |
 
 | 能力 | 当前参数/行为 |
 |---|---|
@@ -147,8 +147,8 @@ PA23/VREF+ 与 PA21/VREF− 通过 C44（1 µF）耦合，因此两者必须保�
 | M5 巡线 | 新感为模拟模块已完成 PB1 接线、64 帧白/黑标定、解锁构建/下载、全黑/全白和八探头静态复核；方向、架空动作、1500 ms 失线与落地圈数仍需在 M6 组合镜像上复验 | `docs/2026-07-25-感为模拟灰度模块恢复记录.md` |
 | PB11 红外阶段一 | 完成；17 个 NEC 键实测唯一且反码正确，键表冻结；连续长按和运行期 `s` 复位缺陷已关闭 | `docs/2026-07-24-PB11红外遥控接入验证记录.md` |
 | PB11 红外阶段二 | 进行中；架空的 100/220 mm/s 四方向、三档/长按、`OK`/`0`、251 ms 失联停车和演示门控通过；落地 100 mm/s 遥控前进/航向保持/松键制动通过，仍缺落地后退/左右转 | 同上 |
-| M6 软件基础设施 | r14 已合并 r13 热路径、冻结 V2 codec/session/优先队列/RPC/遥测/两阶段动作、共享 `m6link`、薄 CLI 和统一 GUI；r12 reset diagnostics 的 256 B `.noinit` 格式、Safety 唯一电机所有权与 WWDT 门控未改。未发布 line/trace/bulk/灰度批采/self-test/heading-rate。r14 正常链路压力、V1/V2 裸字节急停、真实 Recorder 静止短测及完整架空轮速矩阵已验证；wire/sequence gap provenance 已分离。通用 GUI 动作录制队列不可靠，新增无周期刷新且每步后验的人工 Confirm 验收窗口；30 分钟 GUI、真实 HardFault、落地高速和航向仍未验证 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md`、`docs/2026-07-26-M6-V2通信与复位可观测性验证记录.md` |
-| 当前组合构建/上板证据 | r14 源树全量 145 项回归、C golden harness、registry checker 与既有 Keil Rebuild 均通过；正式构建为 `Code=60836, RO-data=9720, RW-data=12, ZI-data=28972`，0 error、0 warning，最高普通字节 `0x113AF`，`RW_NOINIT=0x20207F00`/256 B。当前 MCU 为正式 r14；V1/V2 身份、Safety/reset/任务/UART/link 空闲基线、0/10/25/50 Hz 各约 60 s、V1/V2 裸字节急停、Recorder 静止复测及完整架空轮速矩阵通过。boot 11 落地前 control drop 等只读闸门全零；随后通用 GUI 前进记录为 0 行，故 160 mm/s 落地仍未正式通过。尚未做航向、160–250 mm/s 落地、保存/断电或 30 分钟 GUI 验证 | 同上 |
+| M6 软件基础设施 | r14 已合并 r13 热路径、冻结 V2 codec/session/优先队列/RPC/遥测/两阶段动作、共享 `m6link` 和薄 CLI；r12 reset diagnostics 的 256 B `.noinit` 格式、Safety 唯一电机所有权与 WWDT 门控未改。未发布 line/trace/bulk/灰度批采/self-test/heading-rate。r14 正常链路压力、V1/V2 裸字节急停、真实 Recorder 静止短测及完整架空轮速矩阵已验证；wire/sequence gap provenance 已分离。GUI/一次性窗口因难用和录制不可靠已按用户要求移除，历史证据保留；落地高速、航向和替代长期链路验证仍未完成 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md`、`docs/2026-07-26-M6-V2通信与复位可观测性验证记录.md` |
+| 当前组合构建/上板证据 | GUI 删除后的源树全量 125 项回归、C golden harness、registry checker 与既有 r14 Keil Rebuild 均通过；正式固件构建仍为 `Code=60836, RO-data=9720, RW-data=12, ZI-data=28972`，0 error、0 warning，最高普通字节 `0x113AF`，`RW_NOINIT=0x20207F00`/256 B。当前 MCU 仍为正式 r14；V1/V2 身份、Safety/reset/任务/UART/link 空闲基线、0/10/25/50 Hz 各约 60 s、V1/V2 裸字节急停、Recorder 静止复测及完整架空轮速矩阵通过。160 mm/s 三种落地动作功能/安全停止成立但无有效性能记录；尚未做航向、160–250 mm/s 性能、保存/断电或替代长期链路验证 | 同上 |
 
 这些是已有证据的摘要。只有实际重新运行主机测试、Keil 构建或硬件测试后，才能更新相应证据；源代码检查不能写成目标编译或上板验证。
 
@@ -272,3 +272,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 2026-07-26：用户确认车辆落地和场地安全；boot 11 落地前只读闸门确认正式 r14、raw `0x0C`、IDLE、零 target/PWM、四级 miss、UART drop/format、P0–P3/control drop 和全部 link error 为零。通用 GUI 中用户观察 160 mm/s 前进完成并自动停止，但左弧 Arm 无反馈；退出后文件为 0 行、起止同毫秒，证明录制未在动作窗口运行，左弧没有 token/Confirm。该前进不计正式证据。按通用 GUI 问题上限停止试改，新增 `scripts/m6_accept.py` 一次性验收窗口：录制和安全基线就绪后才开放 Arm，每步只允许人工 Confirm，动作后自动查询 boot/零输出/任务/UART/P0–P3/control/link 并据此门控下一步，急停独立；31 项聚焦、全量 145 项及冻结 checker 通过。本切片只改主机脚本/测试/文档，未改固件或 Keil，下一步复位后重做 160 级。
 2026-07-26：用户再次手动打开通用 GUI 并完成一次录制操作；根目录 `m6-recording.csv/.json` 为 32 个静止样本、620 ms，`action_started=false`，在 expected sequence 320/observed 321 处以主机 sequence gap 自动中止，任务/UART/P2 drop 增量和 fault 均为 0。该文件不含任何动作证据，进一步确认不再用通用 GUI 执行本轮落地矩阵；文件保持未跟踪，不进入提交。下一入口仍为关闭通用 GUI、短按复位后运行一次性验收窗口。
 2026-07-26：一次性窗口中用户逐项人工 Arm/Confirm 完成 160/160、112/160、160/112 mm/s 各 1.5 s，并看到三步正常自动停止；完成保存时才弹出 `TELEMETRY_GAP`。Recorder 实际在动作前 220 ms 即因 WHEEL stream sample 4 的 wire gap 退出，只写入 5 个静止样本/119 ms；窗口未持续检查录制线程，故延迟到 stop 时报告。利用仍存活进程只读恢复 ready、step_1、step_2、step_3 四个诊断快照：boot 1/raw 1/class power 全程不变，四次均为 IDLE/action idle、fault/target/PWM 0，四级 miss、UART、P0/P1/P3/control 和 CRC/frame/timeout/session/sequence error 全零，P2 固定为 4。三步功能和安全停止成立，但无动作曲线，160 性能不计正式通过。通用 GUI 与一次性窗口已是同一录制问题的两条失败路径，按处理上限不再试变体；新边界必须避免活动 Recorder 与诊断 RPC 交错，决定前不升到 180。
+2026-07-26：用户明确要求删除难用的 GUI 部分。已移除 `python/src/m6gui`、`scripts/m6_gui.py`、`scripts/m6_accept.py`、`Tests/test_m6_gui.py` 和 `Tests/test_m6_accept.py`，并清除 `m6link`/CLI 中三个失效 GUI 文案；根目录两份失败 `m6-recording.csv/.json` 已移入 Windows 回收站，可恢复，相关 `.pyc` 缓存移到仓库外 `Archive/2026-07-26-gui-removal-cache`。保留正式 `m6link`、薄 `m6_tune.py`、registry/golden vectors、录制/回放/评分库及全部日期审计记录。聚焦 32 项、全量 125 项和冻结 checker 通过；本次未改固件/Keil/Safety/ISR/WWDT，未构建或下载，当前车上仍为正式 r14。

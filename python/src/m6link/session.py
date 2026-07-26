@@ -1106,7 +1106,7 @@ class Session:
 
     @contextmanager
     def event_tap(self):
-        """Create an independent event stream without consuming GUI events."""
+        """Create an independent event stream without consuming the primary queue."""
         tap: queue.Queue[object] = queue.Queue()
         with self._state_lock:
             self._event_taps.add(tap)
