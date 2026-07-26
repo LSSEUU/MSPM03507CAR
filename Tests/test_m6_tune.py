@@ -196,11 +196,12 @@ class ProtocolTests(unittest.TestCase):
             firmware = "legacy" if port == "COM1" else "M6-ready"
             transport = FakeTransport(
                 [
-                    f"ok,1,meta.firmware,{firmware}\r\n".encode(),
-                    b"ok,2,meta.schema,1\r\n",
-                    b"ok,3,meta.revision,1\r\n",
-                    b"ok,4,meta.source,defaults\r\n",
-                    b"ok,5,meta.generation,0\r\n",
+                    b"err,1,key\r\n",
+                    f"ok,2,meta.firmware,{firmware}\r\n".encode(),
+                    b"ok,3,meta.schema,1\r\n",
+                    b"ok,4,meta.revision,1\r\n",
+                    b"ok,5,meta.source,defaults\r\n",
+                    b"ok,6,meta.generation,0\r\n",
                 ],
                 port=port,
             )

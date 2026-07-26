@@ -187,6 +187,9 @@ class M6LinkSessionTests(unittest.TestCase):
         session = Session(transport=fake, timeout=0.5)
         identity = session.connect()
         self.assertEqual(identity.firmware_id, "M6-runtime-test")
+        legacy_writes = [item for item in fake.writes if item.startswith(b":")]
+        self.assertTrue(legacy_writes)
+        self.assertEqual(legacy_writes[0], b":1,get,meta.capabilities\r\n")
         armed = session.arm_action(
             ActionSpec(
                 kind=ActionKind.WHEEL_SPEED_TEST,

@@ -212,12 +212,22 @@ class Session:
         for candidate in candidates:
             try:
                 self._open_candidate(str(candidate))
+                # A device leaving V2 accepts exactly this capability probe
+                # after the frozen quiet window.  Sending identity first would
+                # keep it trapped in V1_RESYNC; the same probe is harmless on
+                # an ordinary V1 M6 runtime.
+                time.sleep((int(REGISTRY["semantics"]["resync"]["quiet_ms"]) + 10) / 1000.0)
+                try:
+                    capabilities = self._probe_v1_capabilities()
+                except IncompatibleFirmware:
+                    if not self.legacy_requested:
+                        raise
+                    capabilities = 0
                 legacy_identity = self._probe_v1_identity()
                 if self.legacy_requested:
                     self.identity = legacy_identity
                     self.mode = "legacy"
                     return legacy_identity
-                capabilities = self._probe_v1_capabilities()
                 required = int(CAPABILITY_MASKS["HANDSHAKE_REQUIRED"])
                 if capabilities & required != required:
                     raise IncompatibleFirmware(
