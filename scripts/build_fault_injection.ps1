@@ -1,17 +1,31 @@
 param(
-    [switch]$Flash
+    [string]$ProbeSerial = '4041840e'
 )
 
 $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $scriptRoot '..')).Path
+$m6FaultInjectionProbeSerial = $ProbeSerial
 . (Join-Path $scriptRoot 'resolve_keil.ps1')
+$m6PreviousFlashLibraryOnly = $env:M6_FLASH_LIBRARY_ONLY
+try {
+    $env:M6_FLASH_LIBRARY_ONLY = '1'
+    . (Join-Path $scriptRoot 'flash.ps1')
+}
+finally {
+    if ($null -eq $m6PreviousFlashLibraryOnly) {
+        Remove-Item Env:M6_FLASH_LIBRARY_ONLY -ErrorAction SilentlyContinue
+    } else {
+        $env:M6_FLASH_LIBRARY_ONLY = $m6PreviousFlashLibraryOnly
+    }
+}
 
 $uv4 = Resolve-KeilUV4
 $projectPath = Join-Path $repositoryRoot 'keil\empty_LP_MSPM0G3507_nortos_keil.uvprojx'
+$optionsPath = [System.IO.Path]::ChangeExtension($projectPath, '.uvoptx')
 $generatedProject = Join-Path $repositoryRoot 'keil\fault_injection.generated.uvprojx'
+$generatedOptions = Join-Path $repositoryRoot 'keil\fault_injection.generated.uvoptx'
 $buildLog = Join-Path $repositoryRoot 'keil\fault_injection_build.log'
-$flashLog = Join-Path $repositoryRoot 'keil\fault_injection_flash.log'
 $objects = Join-Path $repositoryRoot 'keil\ObjectsFaultInjection'
 $axf = Join-Path $objects 'm2_fault_injection.axf'
 $hex = Join-Path $objects 'm2_fault_injection.hex'
@@ -37,6 +51,25 @@ if (($projectText -notmatch 'M2_FAULT_INJECTION_TEST') -or
 [System.IO.File]::WriteAllText($generatedProject, $projectText,
     [System.Text.UTF8Encoding]::new($false))
 
+if (Test-Path -LiteralPath $generatedOptions -PathType Leaf) {
+    Remove-Item -LiteralPath $generatedOptions -Force
+}
+if (Test-Path -LiteralPath $optionsPath -PathType Leaf) {
+    $optionsText = Get-Content -LiteralPath $optionsPath -Raw
+    $optionsText = $optionsText.Replace(
+        '<TargetName>empty_LP_MSPM0G3507_nortos_keil</TargetName>',
+        '<TargetName>m2_fault_injection</TargetName>')
+    if ($optionsText -notmatch
+            '<TargetName>m2_fault_injection</TargetName>') {
+        throw 'Failed to retarget the fault-injection debug options.'
+    }
+    [System.IO.File]::WriteAllText($generatedOptions, $optionsText,
+        [System.Text.UTF8Encoding]::new($false))
+    $null = Assert-KeilDebugConfiguration -ProjectPath $generatedProject `
+        -TargetName 'm2_fault_injection' `
+        -SerialNumber $m6FaultInjectionProbeSerial
+}
+
 if (Test-Path -LiteralPath $buildLog -PathType Leaf) {
     Remove-Item -LiteralPath $buildLog -Force
 }
@@ -58,20 +91,7 @@ if (-not (Test-Path -LiteralPath $hex -PathType Leaf)) { throw "Missing HEX: $he
 Get-Content -LiteralPath $buildLog | Select-Object -Last 12
 Write-Output "Fault-injection AXF bytes: $((Get-Item -LiteralPath $axf).Length)"
 Write-Output "Fault-injection HEX bytes: $((Get-Item -LiteralPath $hex).Length)"
-
-if ($Flash) {
-    if (Test-Path -LiteralPath $flashLog -PathType Leaf) {
-        Remove-Item -LiteralPath $flashLog -Force
-    }
-    $flashProcess = Start-Process -FilePath $uv4 -ArgumentList @(
-        '-f', ('"' + $generatedProject + '"'), '-o', ('"' + $flashLog + '"')
-    ) -WindowStyle Hidden -Wait -PassThru
-    if (-not (Test-Path -LiteralPath $flashLog -PathType Leaf)) {
-        throw "Keil did not create fault-injection flash log (exit $($flashProcess.ExitCode))."
-    }
-    Get-Content -LiteralPath $flashLog -Tail 30
-    if (($flashProcess.ExitCode -ne 0) -or
-        (Get-Content -LiteralPath $flashLog -Raw) -notmatch 'Verify OK') {
-        throw "Fault-injection flash failed (exit $($flashProcess.ExitCode))."
-    }
+Write-Output "Fault-injection project: $generatedProject"
+if (Test-Path -LiteralPath $generatedOptions -PathType Leaf) {
+    Write-Output "Fault-injection debug options: $generatedOptions"
 }

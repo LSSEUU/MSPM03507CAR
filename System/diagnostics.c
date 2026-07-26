@@ -27,6 +27,10 @@
 #include <stdbool.h>
 #include <string.h>
 
+#ifdef M2_FAULT_INJECTION_TEST
+#include "ti_msp_dl_config.h"
+#endif
+
 typedef enum {
     MOTOR_DIAG_IDLE = 0,
     MOTOR_DIAG_ARMED,
@@ -1078,11 +1082,23 @@ void Diagnostics_PrintHelp(void)
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
     debug_println("M6 transaction: :id,get/set/apply/revert/load/defaults/save/log,...");
 #ifdef M2_FAULT_INJECTION_TEST
-    debug_println("TEST ONLY: T=action timeout G=gyro disconnect W=stop watchdog");
+    debug_println("TEST ONLY: T=action timeout G=gyro disconnect");
+    debug_println("TEST ONLY: Z=SYSRST breadcrumb W=stop watchdog");
 #endif
 }
 
 #ifdef M2_FAULT_INJECTION_TEST
+static bool Diagnostics_FaultInjectionResetReady(void)
+{
+    if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
+        !Diagnostics_ActionIsIdle() || fault_injection_stop_watchdog) {
+        debug_println("Fault reset rejected: clear faults and return IDLE.");
+        return false;
+    }
+    Safety_StopMotor();
+    return true;
+}
+
 static void Diagnostics_StartZeroPwmFaultTest(uint32_t now_ms,
     uint32_t timeout_ms, uint32_t required_sensor_mask, const char *message)
 {
@@ -1500,9 +1516,16 @@ void Diagnostics_Poll(void)
                 "TEST gyro dependency armed: zero PWM, expect fault 0x02 after disconnect.");
             break;
         case 'W':
-            Safety_StopMotor();
+            if (!Diagnostics_FaultInjectionResetReady()) break;
             fault_injection_stop_watchdog = true;
-            debug_println("TEST watchdog service stopped: zero PWM, expect reset 0x20.");
+            debug_println("TEST watchdog stopped: zero PWM; expect raw 0x0E; post-boot fault 0x20.");
+            for (;;) {
+                Safety_StopMotor();
+                __WFI();
+            }
+        case 'Z':
+            if (!Diagnostics_FaultInjectionResetReady()) break;
+            ResetDiag_HardFaultReset();
             break;
 #endif
         case 'x': case 'X':

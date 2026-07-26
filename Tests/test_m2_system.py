@@ -93,6 +93,8 @@ class M2SystemTests(unittest.TestCase):
                 encoding="utf-8")
         diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
             encoding="utf-8")
+        protocol = (ROOT / "System" / "control_protocol.h").read_text(
+            encoding="utf-8")
         script = (ROOT / "scripts" / "build_fault_injection.ps1").read_text(
             encoding="utf-8")
 
@@ -100,6 +102,39 @@ class M2SystemTests(unittest.TestCase):
         self.assertIn("#ifdef M2_FAULT_INJECTION_TEST", diagnostics)
         self.assertIn("M2_FAULT_INJECTION_TEST", script)
         self.assertIn("ObjectsFaultInjection", script)
+        self.assertIn("fault_injection.generated.uvoptx", script)
+        self.assertIn("M6_FLASH_LIBRARY_ONLY", script)
+        self.assertIn("Assert-KeilDebugConfiguration", script)
+        self.assertNotIn("[switch]$Flash", script)
+        self.assertNotIn("fault_injection_flash.log", script)
+        self.assertNotIn("'-f'", script)
+        self.assertIn("#ifdef M2_FAULT_INJECTION_TEST", protocol)
+        self.assertIn('"M6-runtime-20260726-r12-fi"', protocol)
+
+    def test_fault_injection_reset_is_zero_pwm_and_test_only(self):
+        diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
+            encoding="utf-8")
+        gate = diagnostics.split(
+            "static bool Diagnostics_FaultInjectionResetReady", 1)[1].split(
+                "#endif", 1)[0]
+        commands = diagnostics.split("case 'W':", 1)[1].split(
+            "#endif", 1)[0]
+
+        self.assertIn("TEST ONLY:", diagnostics)
+        self.assertIn("Z=SYSRST breadcrumb", diagnostics)
+        self.assertIn("SystemState_Get() != SYSTEM_STATE_IDLE", gate)
+        self.assertIn("Safety_HasFault()", gate)
+        self.assertIn("!Diagnostics_ActionIsIdle()", gate)
+        self.assertIn("fault_injection_stop_watchdog", gate)
+        self.assertIn("Safety_StopMotor();", gate)
+        self.assertEqual(commands.count(
+            "if (!Diagnostics_FaultInjectionResetReady()) break;"), 2)
+        self.assertIn("ResetDiag_HardFaultReset();", commands)
+        self.assertIn("expect raw 0x0E; post-boot fault 0x20", commands)
+        watchdog = commands.split("case 'Z':", 1)[0]
+        self.assertIn("for (;;)", watchdog)
+        self.assertIn("Safety_StopMotor();", watchdog)
+        self.assertIn("__WFI();", watchdog)
 
 
 if __name__ == "__main__":

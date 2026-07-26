@@ -6,7 +6,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef M2_FAULT_INJECTION_TEST
+#define CONTROL_PROTOCOL_FIRMWARE_ID "M6-runtime-20260726-r12-fi"
+#else
 #define CONTROL_PROTOCOL_FIRMWARE_ID "M6-runtime-20260726-r12"
+#endif
 #define CONTROL_PROTOCOL_SCHEMA_VERSION CONTROL_PARAMS_SCHEMA_VERSION
 /* Payload only; CR/LF keeps every complete wire frame within 60 bytes. */
 #define CONTROL_PROTOCOL_MAX_FRAME 58U
