@@ -9,7 +9,7 @@
 - 项目：立创·天猛星 MSPM0G3507-64P 两轮差速小车固件，系统时钟 32 MHz，Keil ARM Compiler 6.22。
 - 当前入口：`Source/main.c`；`Source/ti_msp_dl_config.c/.h` 是受回归测试保护的唯一冻结板级配置，修订号 `20260725`，不得用旧 `.syscfg` 覆盖。
 - 里程碑：M0–M5 已完成；PB11 红外遥控阶段一完成，阶段二已完成全部架空路径和 100 mm/s 落地前进/制动，用户自行测试按键功能无异常，正式落地后退/左右转延后到算法定型后；M6 软件基础设施、架空轮速矩阵和 100 mm/s 落地直行/制动/航向筛选已取证，巡线分级、220 mm/s×5 圈和掉电保持验收尚未完成；M7 尚未开始。
-- 当前运行镜像：一次正式恢复操作误打开了仓库根目录工程，短按复位后 MCU 返回旧 M5 菜单（含 `2=active-level`，无 M6 transaction），与根目录旧 AXF 的 `M5 LINE FOLLOWING` 字符串一致；M6 工作树 AXF 单独确认含 `M6-runtime-20260726-r12`。当前旧固件快照为 Safety `IDLE`、故障/PWM/目标/任务漏期 0，但 UART `tx_drop=337`；必须重新手动下载精确 `.worktrees\m6-runtime-tuning` 正式工程并核对身份，不能记为 r12 已恢复。
+- 当前运行镜像：`M6-runtime-20260726-r12`，已在误选根目录旧 M5 工程后重新手动下载精确 `.worktrees\m6-runtime-tuning` 正式工程，并经 COM10 确认 schema/revision 1、source `defaults`、generation 0；帮助中不存在 `TEST ONLY`/`FAULT INJECTION`。短按复位报告 raw `0x0C external_boot`、boot 5、coarse 恢复有效；Safety `IDLE`，故障/PWM/目标、四级任务漏期、UART/遥测丢包和格式错误均为 0。
 - 当前验证基线：当前源树 97 项主机测试通过；正式 r12 的 Keil ARMCLANG 6.22 Rebuild 仍为 0 error、0 warning，`Code=43580, RO-data=9416, RW-data=8, ZI-data=25704`，最高普通镜像字节 `0x0000CF0F`，低于参数区 `0x0001F800`；专用 256 B `UNINIT` 区位于 `0x20207F00`。硬件已验证 power、短/长 NRST、受控 SYSRST 和 WWDT 的 raw 分类及其实际保持边界；SYSRST 恢复 detailed/合成 scratch，BOOTRST 只恢复 4 B coarse，POR 全部失效。真实 HardFault 异常入口、日志负载和长期运行仍待上板验证。
 - PB11 阶段二进行中：架空的三档、100/220 mm/s 四方向、251 ms 失联制动、`OK`/`0`、直行/±90°/巡线门控均通过；落地以 100 mm/s 完成遥控前进、航向保持和松键制动，用户确认车辆前进且停车正常，并自行确认其余按键功能无异常。正式落地后退/左右转仍保留为 PB11 最终验收项，但按用户决定不再阻塞使用串口急停与物理中止保护的 M6 算法调试。
 - 开始任何工作前先执行 `git status --short`，保留所有不属于当前任务的改动。需要细节时按第 9 节只读取对应文档，不要一次加载全部验证记录或 PDF。
@@ -20,7 +20,7 @@
 
 当前优先目标依次为高速直线、平滑左右弧线、高速陀螺仪角度/角速度控制和系统长期无复位。后续顺序固定为：
 
-1. `r12` 的 power、短/长 NRST 与 `r12-fi` 的受控 SYSRST/WWDT 矩阵均已取证；当前下一步仅为手动恢复正式 r12，并以精确身份及帮助中无 `TEST ONLY` 双重核对测试入口移除，然后验证日志负载。不得延长、禁用或旁路 WWDT，也不得把合成 scratch 写成真实 HardFault 异常入口通过。
+1. `r12` 的 power、短/长 NRST 与 `r12-fi` 的受控 SYSRST/WWDT 矩阵均已取证；正式 r12 已恢复，并以精确身份及帮助中无 `TEST ONLY` 双重核对测试入口移除。下一步验证日志关闭/开启及不同频率的无复位、漏期和异常丢包矩阵。不得延长、禁用或旁路 WWDT，也不得把合成 scratch 写成真实 HardFault 异常入口通过。
 2. 在诊断现有热路径后设计并分片实现统一 V2 二进制传输层：分帧、CRC、序号、优先队列和背压；UART RX ISR 的 `S`/空格急停必须独立保留，周期任务不得格式化字符串或阻塞发送。
 3. 抽出 Python `m6link`，供 CLI、GUI、自动调参和 AI 调车共用；再开发连接、曲线、状态、参数事务、测试向导、急停、录制回放和评分 GUI。
 4. 先验证日志关闭/开启及不同频率下均无复位、漏期和异常丢包，再复核架空轮速；落地按 `160→180→200→220→250 mm/s` 依次验证直线与左右弧线，任一级出现故障、复位、持续饱和、漏期或明显振荡立即回退。
@@ -44,7 +44,7 @@
 
 ### 后续里程碑
 
-- M6：运行期参数模型、V1 文本事务、A/B Flash 保存、50 Hz 文本遥测、主机评分/保守轮速搜索和正式下载脚本均已实现；r12 reset diagnostics 已完成 power、外部 BOOTRST/POR、受控 SYSRST/WWDT 上板矩阵。恢复正式 r12 后的下一入口是日志负载矩阵，然后实现 V2 二进制传输层、共享 `m6link` 和 GUI；尚不能记为高速或长期运行硬件完成。
+- M6：运行期参数模型、V1 文本事务、A/B Flash 保存、50 Hz 文本遥测、主机评分/保守轮速搜索和正式下载脚本均已实现；r12 reset diagnostics 已完成 power、外部 BOOTRST/POR、受控 SYSRST/WWDT 上板矩阵并恢复正式镜像。下一入口是日志负载矩阵，然后实现 V2 二进制传输层、共享 `m6link` 和 GUI；尚不能记为高速或长期运行硬件完成。
 - M7：至少 30 分钟连续运行、低电压、急停物理响应、编码器断开、人为堵转、传感器/通信中断和任务超期验收，并形成可复查记录。
 
 ## 3. 已实现主流程与安全边界
@@ -143,7 +143,7 @@ PA23/VREF+ 与 PA21/VREF− 通过 C44（1 µF）耦合，因此两者必须保�
 | PB11 红外阶段一 | 完成；17 个 NEC 键实测唯一且反码正确，键表冻结；连续长按和运行期 `s` 复位缺陷已关闭 | `docs/2026-07-24-PB11红外遥控接入验证记录.md` |
 | PB11 红外阶段二 | 进行中；架空的 100/220 mm/s 四方向、三档/长按、`OK`/`0`、251 ms 失联停车和演示门控通过；落地 100 mm/s 遥控前进/航向保持/松键制动通过，仍缺落地后退/左右转 | 同上 |
 | M6 软件基础设施 | 运行期参数、V1 文本事务、A/B Flash、50 Hz 文本遥测、连续模拟位置、弯道方向锁存和有界失线飞行记录均已实现；100 mm/s 连续模拟位置已实车显著改善。r12 reset diagnostics 已通过主机模型、目标构建，以及 power、短按 NRST/BOOTRST、长按 NRST/POR、受控 SYSRST/WWDT 上板验证。V2、`m6link`、GUI、真实 HardFault、日志压力与高速长期运行仍未实现/验证 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md`、`docs/2026-07-26-M6-V2通信与复位可观测性验证记录.md` |
-| 当前组合构建/上板证据 | 当前源树 97 项主机回归通过；正式 r12 Rebuild 为 `Code=43580, RO-data=9416, RW-data=8, ZI-data=25704`，测试 `r12-fi` 为 `Code=43620, RO-data=9432, RW-data=8, ZI-data=25696`，两者均 0 error、0 warning且低于 `0x1F800`。正式 r12 已验证 raw `0x01` power、`0x0C` external BOOTRST 与 `0x02` external POR；测试镜像已验证 raw `0x1B` SYSRST 恢复 coarse/detail/合成 scratch，以及 raw `0x0E` WWDT 仅恢复 coarse并锁存 Safety `0x20`。各复位快照均为 PWM/目标 0、任务 miss 0、UART/遥测 drop 0；当前仍须恢复正式 r12，尚未做运动、日志压力或长期运行验证 | 同上 |
+| 当前组合构建/上板证据 | 当前源树 97 项主机回归通过；正式 r12 Rebuild 为 `Code=43580, RO-data=9416, RW-data=8, ZI-data=25704`，测试 `r12-fi` 为 `Code=43620, RO-data=9432, RW-data=8, ZI-data=25696`，两者均 0 error、0 warning且低于 `0x1F800`。正式 r12 已验证 raw `0x01` power、`0x0C` external BOOTRST 与 `0x02` external POR；测试镜像已验证 raw `0x1B` SYSRST 恢复 coarse/detail/合成 scratch，以及 raw `0x0E` WWDT 仅恢复 coarse并锁存 Safety `0x20`。正式 r12 已重新恢复且测试入口消失；最终快照为 Safety IDLE、PWM/目标/任务 miss/UART/遥测 drop 0。尚未做运动、日志压力或长期运行验证 | 同上 |
 
 这些是已有证据的摘要。只有实际重新运行主机测试、Keil 构建或硬件测试后，才能更新相应证据；源代码检查不能写成目标编译或上板验证。
 
@@ -242,3 +242,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 2026-07-26：用户手动下载精确 `r12-fi` 后，COM10 确认 schema/revision 1、defaults/generation 0、测试帮助标记、Safety IDLE、PWM/目标/漏期/丢包 0。受控 `Z` 得到 raw `0x1B software_sys`，boot `1→2`，coarse/detail/合成 HardFault scratch 均恢复，PC/LR/xPSR 按空栈设计为 0；受控 `W` 得到 raw `0x0E wwdt0`，boot `2→3`，只恢复 coarse，Safety 锁存 `0x20`，PWM/目标/漏期/丢包仍为 0。该结果验证 SYSRST 与 WWDT 实际分类/保持边界，但不代表真实 HardFault 栈捕获；取证前未清故障。当前测试镜像仍在 MCU 上，必须手动恢复正式 r12 并确认帮助中无 `TEST ONLY` 后才能继续。
 
 2026-07-26：首次恢复正式镜像后，COM10 的精确 r12 probe 连续超时；短按复位后裸 `h` 返回旧 M5 菜单，存在 `2=active-level` 且没有 M6 transaction。旧固件 `v/c` 为 Safety IDLE、故障/PWM/目标/漏期 0，UART `tx_drop=337`。二进制字符串比对确认仓库根目录 AXF 恰含 `M5 LINE FOLLOWING`/`2=active-level`，而 `.worktrees\m6-runtime-tuning` AXF 含精确 r12 身份与 M6 transaction，因此根因是手动打开了根目录旧工程，不是 r12 事务失效。已要求重新下载精确工作树工程；当前不能记为正式 r12 已恢复。
+
+2026-07-26：用户重新手动下载精确工作树正式工程；下载后目标暂未运行，短按 NRST 后 COM10 精确确认 `M6-runtime-20260726-r12`、schema/revision 1、defaults/generation 0。帮助含 M6 transaction 且无 `TEST ONLY`/`FAULT INJECTION`，证明测试入口已移除；`v/c` 报 raw `0x0C external_boot`、boot 5、coarse 有效，Safety IDLE、故障/PWM/目标 0、四级任务漏期 0、UART/遥测 drop 和格式错误 0。受控复位矩阵至此完成并安全恢复正式 r12；本轮没有命令行下载、动作、改参、保存或清除测试故障。
