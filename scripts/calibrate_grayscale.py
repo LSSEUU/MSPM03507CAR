@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 import json
+from pathlib import Path
 import re
 import sys
 import time
@@ -203,15 +204,34 @@ def format_stage_json(label: str, stats: StageStats) -> str:
     return json.dumps(payload, separators=(",", ":"))
 
 
-def _load_pyserial():
-    try:
-        import serial  # type: ignore
-        from serial.tools import list_ports  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError(
-            "pyserial is required; install it with: python -m pip install pyserial"
-        ) from exc
-    return serial, list_ports
+def _load_session_type():
+    source = Path(__file__).resolve().parents[1] / "python" / "src"
+    if str(source) not in sys.path:
+        sys.path.insert(0, str(source))
+    from m6link import Session
+
+    return Session
+
+
+class LegacySessionPort:
+    """Expose the small line-oriented surface used by the legacy collector."""
+
+    def __init__(self, session) -> None:
+        self.session = session
+
+    def write(self, command: bytes) -> int:
+        text = command.decode("ascii")
+        self.session.legacy_command(text)
+        return len(command)
+
+    def flush(self) -> None:
+        # Session.legacy_command waits until its single owner thread has
+        # completed the physical write.
+        return None
+
+    def readline(self) -> bytes:
+        line = self.session.read_legacy_line(timeout=0.1)
+        return (line + "\r\n").encode("utf-8") if line else b""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -232,16 +252,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        serial, list_ports = _load_pyserial()
+        Session = _load_session_type()
         if args.list_ports:
-            for port in list_ports.comports():
-                print(f"{port.device}\t{port.description}")
+            for port in Session.discover_ports():
+                print(port)
             return 0
         if not args.port:
             parser.error("--port is required unless --list-ports is used")
 
-        with serial.Serial(args.port, args.baud, timeout=0.1) as serial_port:
-            serial_port.reset_input_buffer()
+        session = Session(
+            port=args.port,
+            baudrate=args.baud,
+            legacy=True,
+            timeout=max(0.1, args.timeout),
+        )
+        try:
+            session.connect()
+            serial_port = LegacySessionPort(session)
             if args.stage:
                 label = args.stage.upper()
                 stats = capture_stage(
@@ -252,6 +279,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
             white = capture_stage(serial_port, "WHITE", args.timeout)
             black = capture_stage(serial_port, "BLACK LINE", args.timeout)
+        finally:
+            session.close(clean=False)
 
         print_stats("white", white)
         print_stats("black", black)

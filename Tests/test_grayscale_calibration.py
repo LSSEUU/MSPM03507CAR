@@ -164,6 +164,13 @@ class GrayscaleCalibrationTests(unittest.TestCase):
 
         self.assertEqual(read_sample.call_count, 3)
 
+    def test_production_entry_delegates_uart_to_m6link_session(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertNotIn("import serial", source)
+        self.assertNotIn("serial.Serial", source)
+        self.assertIn("LegacySessionPort", source)
+        self.assertIn("Session(", source)
+
 
 if __name__ == "__main__":
     unittest.main()
