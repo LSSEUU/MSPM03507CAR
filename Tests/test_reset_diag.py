@@ -65,7 +65,7 @@ class ResetDiagnosticsTests(unittest.TestCase):
         paths = [node.text for node in root.findall(".//FilePath")]
         self.assertIn("../System/reset_diag.c", paths)
 
-    def test_reset_report_and_r12_identity_are_exposed(self):
+    def test_reset_report_and_current_identity_are_exposed(self):
         diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
             encoding="utf-8"
         )
@@ -96,8 +96,8 @@ class ResetDiagnosticsTests(unittest.TestCase):
             main.index("if (Scheduler_Take(SCHEDULER_TASK_100MS))"),
             main.index("Diagnostics_ServiceBackground();"),
         )
-        self.assertIn('"M6-runtime-20260726-r12"', protocol)
-        self.assertEqual(flash.count("M6-runtime-20260726-r12"), 2)
+        self.assertIn('"M6-runtime-20260726-r13"', protocol)
+        self.assertEqual(flash.count("M6-runtime-20260726-r13"), 2)
 
         for prefix in ("RESET ", "RESETCTX ", "RESETIO "):
             source_line = next(

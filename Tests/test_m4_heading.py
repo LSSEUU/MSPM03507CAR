@@ -67,7 +67,7 @@ class M4HeadingTests(unittest.TestCase):
         self.assertIn("Diagnostics_StartHeadingTest", diagnostics)
         self.assertIn("SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO)", diagnostics)
         self.assertIn("CSV: M4,time_ms", diagnostics)
-        self.assertIn("WheelSpeed_GetSnapshot(&wheel_snapshot)", diagnostics)
+        self.assertIn("WheelSpeed_GetSnapshot(&wheel)", diagnostics)
 
 
 if __name__ == "__main__":

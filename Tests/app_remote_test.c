@@ -180,6 +180,11 @@ bool Diagnostics_ActionCancel(uint32_t now_ms)
 
 void debug_printf(const char *format, ...) { (void)format; }
 void debug_println(const char *text) { (void)text; }
+int debug_try_write(const char *data, size_t length)
+{
+    (void)data;
+    return (length > 0U) ? 1 : 0;
+}
 
 static void test_four_directions_and_heartbeat(void)
 {

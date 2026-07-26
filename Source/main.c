@@ -266,6 +266,6 @@ int main(void)
         ResetDiag_Checkpoint(Safety_HasFault() ?
             RESET_DIAG_CHECKPOINT_SAFETY_FAULT :
             RESET_DIAG_CHECKPOINT_IDLE);
-        __WFI();
+        if (!debug_kbhit()) __WFI();
     }
 }

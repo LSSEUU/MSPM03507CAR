@@ -8,15 +8,15 @@
 #include <string.h>
 
 #define DEBUG_TX_BUFFER_SIZE  1024U
-#define DEBUG_RX_BUFFER_SIZE    64U
+#define DEBUG_RX_BUFFER_SIZE   256U
 
 static DebugStats_t debug_stats;
 static volatile uint8_t tx_buffer[DEBUG_TX_BUFFER_SIZE];
 static volatile uint16_t tx_read;
 static volatile uint16_t tx_write;
 static volatile uint8_t rx_buffer[DEBUG_RX_BUFFER_SIZE];
-static volatile uint8_t rx_read;
-static volatile uint8_t rx_write;
+static volatile uint16_t rx_read;
+static volatile uint16_t rx_write;
 static volatile uint32_t emergency_epoch;
 static DebugEmergencyCallback_t emergency_callback;
 
@@ -25,9 +25,9 @@ static uint16_t Debug_TxNext(uint16_t index)
     return (uint16_t)((index + 1U) % DEBUG_TX_BUFFER_SIZE);
 }
 
-static uint8_t Debug_RxNext(uint8_t index)
+static uint16_t Debug_RxNext(uint16_t index)
 {
-    return (uint8_t)((index + 1U) % DEBUG_RX_BUFFER_SIZE);
+    return (uint16_t)((index + 1U) % DEBUG_RX_BUFFER_SIZE);
 }
 
 static void Debug_FillTxFIFO(void)
@@ -46,7 +46,7 @@ static void Debug_DrainRxFIFO(void)
 {
     while (!DL_UART_isRXFIFOEmpty(UART_0_INST)) {
         uint8_t byte = (uint8_t)DL_UART_receiveData(UART_0_INST);
-        uint8_t next;
+        uint16_t next;
         debug_stats.rx_bytes++;
         if ((byte == (uint8_t)'S') || (byte == (uint8_t)' ')) {
             emergency_epoch++;
@@ -132,15 +132,26 @@ void debug_putc(char c)
 
 char debug_getc(void)
 {
-    uint32_t primask = __get_PRIMASK();
+    uint8_t byte;
     char result = '\0';
+    if (debug_read(&byte, 1U) == 1U) result = (char)byte;
+    return result;
+}
+
+size_t debug_read(uint8_t *data, size_t capacity)
+{
+    uint32_t primask;
+    size_t length = 0U;
+
+    if ((data == NULL) || (capacity == 0U)) return 0U;
+    primask = __get_PRIMASK();
     __disable_irq();
-    if (rx_read != rx_write) {
-        result = (char)rx_buffer[rx_read];
+    while ((length < capacity) && (rx_read != rx_write)) {
+        data[length++] = rx_buffer[rx_read];
         rx_read = Debug_RxNext(rx_read);
     }
     if (primask == 0U) __enable_irq();
-    return result;
+    return length;
 }
 
 void debug_print(const char *text)

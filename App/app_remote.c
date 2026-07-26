@@ -14,6 +14,18 @@
 
 static AppRemoteSnapshot_t remote;
 static AppRemoteConfig_t active_config;
+static uint8_t remote_notice_flags;
+
+#define APP_REMOTE_NOTICE_HEARTBEAT_STOP (1U << 0)
+#define APP_REMOTE_NOTICE_DEMO_TIMEOUT   (1U << 1)
+#define APP_REMOTE_NOTICE_CAPTURE_END    (1U << 2)
+
+static const char k_notice_heartbeat_stop[] =
+    "IR manual heartbeat expired; normal brake to IDLE.\r\n";
+static const char k_notice_demo_timeout[] =
+    "IR demo confirmation timed out.\r\n";
+static const char k_notice_capture_end[] =
+    "IR key capture ended after 30 s.\r\n";
 
 static bool AppRemote_IsFinite(float value)
 {
@@ -262,11 +274,35 @@ static void AppRemote_HandleFull(const IrNecEvent_t *event)
 void AppRemote_Init(void)
 {
     memset(&remote, 0, sizeof(remote));
+    remote_notice_flags = 0U;
     AppRemote_GetDefaultConfig(&active_config);
     remote.speed_mm_s = (uint16_t)(active_config.speed_medium_mm_s + 0.5f);
     remote.actions_enabled = (IR_REMOTE_KEYMAP_VERIFIED != 0);
     remote.heading_hold_enabled = active_config.heading_hold;
     IrReceiver_Init();
+}
+
+static void AppRemote_ServiceNotice(void)
+{
+    if ((remote_notice_flags & APP_REMOTE_NOTICE_HEARTBEAT_STOP) != 0U) {
+        if (debug_try_write(k_notice_heartbeat_stop,
+                sizeof(k_notice_heartbeat_stop) - 1U)) {
+            remote_notice_flags &=
+                (uint8_t)~APP_REMOTE_NOTICE_HEARTBEAT_STOP;
+        }
+    } else if ((remote_notice_flags & APP_REMOTE_NOTICE_DEMO_TIMEOUT) != 0U) {
+        if (debug_try_write(k_notice_demo_timeout,
+                sizeof(k_notice_demo_timeout) - 1U)) {
+            remote_notice_flags &=
+                (uint8_t)~APP_REMOTE_NOTICE_DEMO_TIMEOUT;
+        }
+    } else if ((remote_notice_flags & APP_REMOTE_NOTICE_CAPTURE_END) != 0U) {
+        if (debug_try_write(k_notice_capture_end,
+                sizeof(k_notice_capture_end) - 1U)) {
+            remote_notice_flags &=
+                (uint8_t)~APP_REMOTE_NOTICE_CAPTURE_END;
+        }
+    }
 }
 
 void AppRemote_Poll(void)
@@ -295,6 +331,7 @@ void AppRemote_Poll(void)
             }
         }
     }
+    AppRemote_ServiceNotice();
 }
 
 void AppRemote_Task20ms(uint32_t now_ms)
@@ -305,12 +342,12 @@ void AppRemote_Task20ms(uint32_t now_ms)
             IR_REMOTE_HEARTBEAT_MS)) {
         AppRemote_StopManual();
         remote.heartbeat_stops++;
-        debug_println("IR manual heartbeat expired; normal brake to IDLE.");
+        remote_notice_flags |= APP_REMOTE_NOTICE_HEARTBEAT_STOP;
     } else if ((remote.state == APP_REMOTE_PENDING_DEMO) &&
                SystemTime_Reached(now_ms, remote.pending_deadline_ms)) {
         (void)Diagnostics_ActionCancel(now_ms);
         remote.state = APP_REMOTE_IDLE;
-        debug_println("IR demo confirmation timed out.");
+        remote_notice_flags |= APP_REMOTE_NOTICE_DEMO_TIMEOUT;
     } else if ((remote.state == APP_REMOTE_DEMO_RUNNING) &&
                Diagnostics_ActionIsIdle() &&
                (SystemState_Get() == SYSTEM_STATE_IDLE)) {
@@ -318,7 +355,7 @@ void AppRemote_Task20ms(uint32_t now_ms)
     } else if ((remote.state == APP_REMOTE_CAPTURE) &&
                SystemTime_Reached(now_ms, remote.capture_deadline_ms)) {
         remote.state = APP_REMOTE_IDLE;
-        debug_println("IR key capture ended after 30 s.");
+        remote_notice_flags |= APP_REMOTE_NOTICE_CAPTURE_END;
     }
     if (Safety_HasFault() && (remote.state != APP_REMOTE_CAPTURE)) {
         if (remote.heading_hold_active) Heading_Stop();

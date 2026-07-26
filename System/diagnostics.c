@@ -59,6 +59,36 @@ typedef enum {
 
 #define SPEED_DIAG_LEFT_MASK  (1U << WHEEL_SPEED_LEFT)
 #define SPEED_DIAG_RIGHT_MASK (1U << WHEEL_SPEED_RIGHT)
+#define DIAGNOSTICS_RX_BATCH_BYTES 32U
+#define DIAGNOSTICS_100MS_QUEUE_SIZE 3U
+
+typedef struct {
+    uint32_t now_ms;
+    uint32_t safety_fault_bits;
+    bool legacy_csv_enabled;
+    SpeedDiagState_t speed_state;
+    HeadingDiagState_t heading_state;
+    HeadingMode_t heading_mode;
+    AppLineState_t line_app_state;
+    LineFollowState_t line_state;
+    LinePolarity_t line_polarity;
+    bool wheel_saturated[WHEEL_SPEED_COUNT];
+    int16_t wheel_pwm[WHEEL_SPEED_COUNT];
+    float wheel_requested[WHEEL_SPEED_COUNT];
+    float wheel_ramped[WHEEL_SPEED_COUNT];
+    float wheel_filtered[WHEEL_SPEED_COUNT];
+    float heading_yaw;
+    float heading_rate;
+    float heading_target;
+    float heading_error;
+    float heading_left_target;
+    float heading_right_target;
+    float line_position;
+    float line_confidence;
+    float line_correction;
+    float line_left_target;
+    float line_right_target;
+} Diagnostics100msEvent_t;
 
 static DiagReport_t reports[DIAG_PERIPHERAL_COUNT];
 static bool motor_test_passed;
@@ -113,10 +143,20 @@ static bool line_trace_report_pending;
 static bool line_trace_report_header_pending;
 static uint8_t line_trace_report_index;
 static LineTraceInfo_t line_trace_report_info;
+static Diagnostics100msEvent_t
+    diagnostics_100ms_queue[DIAGNOSTICS_100MS_QUEUE_SIZE];
+static uint8_t diagnostics_100ms_read;
+static uint8_t diagnostics_100ms_write;
+static uint32_t diagnostics_100ms_dropped;
 
 #ifdef M2_FAULT_INJECTION_TEST
 static bool fault_injection_stop_watchdog;
 #endif
+
+static uint8_t Diagnostics_100msNext(uint8_t index)
+{
+    return (uint8_t)((index + 1U) % DIAGNOSTICS_100MS_QUEUE_SIZE);
+}
 
 static void Diagnostics_Set(DiagPeripheral_t peripheral, DiagStatus_t status,
     uint32_t samples, uint32_t errors, const char *detail)
@@ -441,10 +481,11 @@ static void Diagnostics_PrintCommunication(void)
 {
     DebugStats_t s;
     debug_get_stats(&s);
-    debug_printf("COMM tx=%lu rx=%lu tx_drop=%lu rx_drop=%lu format=%lu baud=115200 8N1\r\n",
+    debug_printf("COMM tx=%lu rx=%lu tx_drop=%lu rx_drop=%lu format=%lu diag100_drop=%lu baud=115200 8N1\r\n",
         (unsigned long)s.tx_bytes, (unsigned long)s.rx_bytes,
         (unsigned long)s.tx_dropped, (unsigned long)s.rx_dropped,
-        (unsigned long)s.format_errors);
+        (unsigned long)s.format_errors,
+        (unsigned long)diagnostics_100ms_dropped);
 }
 
 static void Diagnostics_QueueInfraredReport(void)
@@ -1045,6 +1086,9 @@ void Diagnostics_Init(void)
     heading_diag_hold_speed_mm_s = HEADING_STRAIGHT_TEST_SPEED_MM_S;
     heading_diag_hold_duration_ms = HEADING_STRAIGHT_TEST_DURATION_MS;
     line_previous_state = APP_LINE_IDLE;
+    memset(diagnostics_100ms_queue, 0, sizeof(diagnostics_100ms_queue));
+    diagnostics_100ms_read = diagnostics_100ms_write = 0U;
+    diagnostics_100ms_dropped = 0U;
     Diagnostics_ResetSpeedMetrics();
 #ifdef M2_FAULT_INJECTION_TEST
     fault_injection_stop_watchdog = false;
@@ -1351,11 +1395,22 @@ void Diagnostics_Poll(void)
         }
     }
 
-    if (!debug_kbhit()) return;
     {
+    uint32_t rx_index;
+    for (rx_index = 0U;
+         (rx_index < DIAGNOSTICS_RX_BATCH_BYTES) && debug_kbhit();
+         rx_index++) {
     char command = debug_getc();
+    bool frame_was_active = ControlProtocol_IsFrameActive();
+    bool transaction_byte;
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_CONTROL_RX);
-    if (ControlProtocol_ProcessByte(command, now_ms)) return;
+    transaction_byte = ControlProtocol_ProcessByte(command, now_ms);
+    if (transaction_byte) {
+        /* Completing a transaction can apply, save, or start logging.  Keep
+         * that side-effect budget at one completed frame per main pass. */
+        if (frame_was_active && !ControlProtocol_IsFrameActive()) break;
+        continue;
+    }
     switch (command) {
         case 'h': case 'H': Diagnostics_PrintHelp(); break;
         case 's':
@@ -1545,156 +1600,211 @@ void Diagnostics_Poll(void)
         case '\r': case '\n': break;
         default: debug_println("Unknown command; h=help."); break;
     }
+    /* A legacy byte can run a command. Keep that side-effect budget at one
+     * per main-loop pass; only bytes inside a transaction are batch-drained. */
+    break;
+    }
     }
 }
+
+static void Diagnostics_Service100ms(const Diagnostics100msEvent_t *event);
 
 void Diagnostics_ServiceBackground(void)
 {
     uint32_t now_ms = SystemTime_Now();
     if (safety_report_pending &&
-        SystemTime_Reached(now_ms, safety_report_next_line_ms)) {
+        SystemTime_Reached(now_ms, safety_report_next_line_ms) &&
+        !Diagnostics_ActionTelemetryActive()) {
         Diagnostics_ServiceSafetyReport();
         safety_report_next_line_ms = now_ms + TASK_100MS_PERIOD_MS;
+        return;
+    }
+    if (diagnostics_100ms_read != diagnostics_100ms_write) {
+        Diagnostics_Service100ms(
+            &diagnostics_100ms_queue[diagnostics_100ms_read]);
+        diagnostics_100ms_read = Diagnostics_100msNext(diagnostics_100ms_read);
     }
 }
 
 void Diagnostics_Task100ms(void)
 {
     uint32_t now_ms = SystemTime_Now();
-    bool legacy_csv_enabled = !M6Telemetry_IsLogging();
+    uint8_t next;
+    Diagnostics100msEvent_t *event;
+    WheelSpeedSnapshot_t wheel;
+    HeadingSnapshot_t heading;
+    AppLineSnapshot_t line;
+    SafetySnapshot_t safety;
+    uint32_t i;
+
+    WheelSpeed_GetSnapshot(&wheel);
+    Heading_GetSnapshot(&heading);
+    AppLine_GetSnapshot(&line);
+    Safety_GetSnapshot(&safety);
+    if ((speed_diag_state == SPEED_DIAG_RUNNING) &&
+        ((uint32_t)(now_ms - speed_diag_started_ms) >=
+         SPEED_DIAGNOSTIC_SETTLE_MS)) {
+        for (i = 0U; i < (uint32_t)WHEEL_SPEED_COUNT; i++) {
+            float error;
+            float deadband;
+            if ((speed_diag_wheel_mask & (1U << i)) == 0U) continue;
+            error = speed_diag_target_mm_s - wheel.filtered_mm_s[i];
+            deadband = speed_diag_target_mm_s * 0.05f;
+            speed_diag_error_sum[i] += Diagnostics_Abs(error);
+            speed_diag_samples[i]++;
+            if ((Diagnostics_Abs(error) > deadband) &&
+                (speed_diag_previous_error[i] != 0.0f) &&
+                ((error * speed_diag_previous_error[i]) < 0.0f)) {
+                speed_diag_sign_changes[i]++;
+            }
+            if (Diagnostics_Abs(error) > deadband)
+                speed_diag_previous_error[i] = error;
+        }
+    }
+
+    next = Diagnostics_100msNext(diagnostics_100ms_write);
+    if (next == diagnostics_100ms_read) {
+        diagnostics_100ms_dropped++;
+        return;
+    }
+    event = &diagnostics_100ms_queue[diagnostics_100ms_write];
+    memset(event, 0, sizeof(*event));
+    event->now_ms = now_ms;
+    event->safety_fault_bits = safety.fault_bits;
+    event->legacy_csv_enabled = !M6Telemetry_IsLogging();
+    event->speed_state = speed_diag_state;
+    event->heading_state = heading_diag_state;
+    event->heading_mode = heading.mode;
+    event->line_app_state = line.state;
+    event->line_state = line.control.state;
+    event->line_polarity = line.control.polarity;
+    for (i = 0U; i < (uint32_t)WHEEL_SPEED_COUNT; i++) {
+        event->wheel_saturated[i] = wheel.saturated[i];
+        event->wheel_pwm[i] = wheel.pwm[i];
+        event->wheel_requested[i] = wheel.requested_mm_s[i];
+        event->wheel_ramped[i] = wheel.ramped_mm_s[i];
+        event->wheel_filtered[i] = wheel.filtered_mm_s[i];
+    }
+    event->heading_yaw = heading.yaw_deg;
+    event->heading_rate = heading.yaw_rate_deg_s;
+    event->heading_target = heading.target_deg;
+    event->heading_error = heading.error_deg;
+    event->heading_left_target = heading.left_target_mm_s;
+    event->heading_right_target = heading.right_target_mm_s;
+    event->line_position = line.control.position;
+    event->line_confidence = line.control.confidence;
+    event->line_correction = line.control.correction_mm_s;
+    event->line_left_target = line.control.left_target_mm_s;
+    event->line_right_target = line.control.right_target_mm_s;
+    diagnostics_100ms_write = next;
+}
+
+static void Diagnostics_Service100ms(const Diagnostics100msEvent_t *event)
+{
+    uint32_t now_ms = event->now_ms;
+    bool legacy_csv_enabled = event->legacy_csv_enabled;
     if (!boot_reported &&
         ((uint32_t)(now_ms - boot_started_ms) >= BOOT_SELF_TEST_SETTLE_MS)) {
         boot_reported = true;
-        Diagnostics_PrintReport();
-        if (!Safety_HasFault()) (void)SystemState_CompleteSelfTest(true);
+        if (!report_pending) Diagnostics_PrintReport();
+        if (event->safety_fault_bits == 0U)
+            (void)SystemState_CompleteSelfTest(true);
     }
-    if (infrared_report_pending)
-        Diagnostics_ServiceInfraredReport();
-    else if (line_trace_report_pending)
-        Diagnostics_ServiceLineTraceReport();
-    else if (report_pending)
-        Diagnostics_ServiceReport();
-    else if (line_calibration_report_pending)
-        Diagnostics_ServiceLineCalibrationReport();
-    else if (gray_report_pending)
-        Diagnostics_ServiceGrayReport();
-    if ((speed_diag_state == SPEED_DIAG_RUNNING) ||
-        (speed_diag_state == SPEED_DIAG_RAMP_DOWN)) {
-        WheelSpeedSnapshot_t wheel_snapshot;
-        uint32_t i;
-        WheelSpeed_GetSnapshot(&wheel_snapshot);
+    if ((event->speed_state == SPEED_DIAG_RUNNING) ||
+        (event->speed_state == SPEED_DIAG_RAMP_DOWN)) {
         if (legacy_csv_enabled) {
-            SafetySnapshot_t safety_snapshot;
             uint32_t saturated;
-            Safety_GetSnapshot(&safety_snapshot);
             saturated =
-                (wheel_snapshot.saturated[WHEEL_SPEED_LEFT] ? 1U : 0U) |
-                (wheel_snapshot.saturated[WHEEL_SPEED_RIGHT] ? 2U : 0U);
+                (event->wheel_saturated[WHEEL_SPEED_LEFT] ? 1U : 0U) |
+                (event->wheel_saturated[WHEEL_SPEED_RIGHT] ? 2U : 0U);
             debug_printf("M3,%lu,%s,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,%lu,0x%08lX\r\n",
                 (unsigned long)now_ms,
-                (speed_diag_state == SPEED_DIAG_RUNNING) ? "RUN" : "STOP",
+                (event->speed_state == SPEED_DIAG_RUNNING) ? "RUN" : "STOP",
                 (long)Diagnostics_Round(
-                    wheel_snapshot.requested_mm_s[WHEEL_SPEED_LEFT]),
+                    event->wheel_requested[WHEEL_SPEED_LEFT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.requested_mm_s[WHEEL_SPEED_RIGHT]),
+                    event->wheel_requested[WHEEL_SPEED_RIGHT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
+                    event->wheel_ramped[WHEEL_SPEED_LEFT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+                    event->wheel_ramped[WHEEL_SPEED_RIGHT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
+                    event->wheel_filtered[WHEEL_SPEED_LEFT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
-                wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
-                wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
+                    event->wheel_filtered[WHEEL_SPEED_RIGHT]),
+                event->wheel_pwm[WHEEL_SPEED_LEFT],
+                event->wheel_pwm[WHEEL_SPEED_RIGHT],
                 (unsigned long)saturated,
-                (unsigned long)safety_snapshot.fault_bits);
-        }
-
-        if ((speed_diag_state == SPEED_DIAG_RUNNING) &&
-            ((uint32_t)(now_ms - speed_diag_started_ms) >=
-             SPEED_DIAGNOSTIC_SETTLE_MS)) {
-            for (i = 0U; i < (uint32_t)WHEEL_SPEED_COUNT; i++) {
-                float error;
-                float deadband;
-                if ((speed_diag_wheel_mask & (1U << i)) == 0U) continue;
-                error = speed_diag_target_mm_s -
-                        wheel_snapshot.filtered_mm_s[i];
-                deadband = speed_diag_target_mm_s * 0.05f;
-                speed_diag_error_sum[i] += Diagnostics_Abs(error);
-                speed_diag_samples[i]++;
-                if ((Diagnostics_Abs(error) > deadband) &&
-                    (speed_diag_previous_error[i] != 0.0f) &&
-                    ((error * speed_diag_previous_error[i]) < 0.0f)) {
-                    speed_diag_sign_changes[i]++;
-                }
-                if (Diagnostics_Abs(error) > deadband)
-                    speed_diag_previous_error[i] = error;
-            }
+                (unsigned long)event->safety_fault_bits);
+            return;
         }
     }
     if (legacy_csv_enabled &&
-        ((heading_diag_state == HEADING_DIAG_RUNNING) ||
-         (heading_diag_state == HEADING_DIAG_RAMP_DOWN))) {
-        HeadingSnapshot_t heading_snapshot;
-        SafetySnapshot_t safety_snapshot;
-        Heading_GetSnapshot(&heading_snapshot);
-        Safety_GetSnapshot(&safety_snapshot);
-        WheelSpeedSnapshot_t wheel_snapshot;
-        WheelSpeed_GetSnapshot(&wheel_snapshot);
+        ((event->heading_state == HEADING_DIAG_RUNNING) ||
+         (event->heading_state == HEADING_DIAG_RAMP_DOWN))) {
         debug_printf("M4,%lu,%s,%s,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,0x%08lX\r\n",
                 (unsigned long)now_ms,
-                (heading_diag_state == HEADING_DIAG_RUNNING) ? "RUN" : "STOP",
-                Diagnostics_HeadingModeName(heading_snapshot.mode),
-                (long)Diagnostics_Round(heading_snapshot.yaw_deg * 100.0f),
+                (event->heading_state == HEADING_DIAG_RUNNING) ?
+                    "RUN" : "STOP",
+                Diagnostics_HeadingModeName(event->heading_mode),
+                (long)Diagnostics_Round(event->heading_yaw * 100.0f),
+                (long)Diagnostics_Round(event->heading_rate * 100.0f),
+                (long)Diagnostics_Round(event->heading_target * 100.0f),
+                (long)Diagnostics_Round(event->heading_error * 100.0f),
+                (long)Diagnostics_Round(event->heading_left_target),
+                (long)Diagnostics_Round(event->heading_right_target),
                 (long)Diagnostics_Round(
-                    heading_snapshot.yaw_rate_deg_s * 100.0f),
-                (long)Diagnostics_Round(heading_snapshot.target_deg * 100.0f),
-                (long)Diagnostics_Round(heading_snapshot.error_deg * 100.0f),
-                (long)Diagnostics_Round(heading_snapshot.left_target_mm_s),
-                (long)Diagnostics_Round(heading_snapshot.right_target_mm_s),
+                    event->wheel_ramped[WHEEL_SPEED_LEFT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
+                    event->wheel_ramped[WHEEL_SPEED_RIGHT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+                    event->wheel_filtered[WHEEL_SPEED_LEFT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
-                (long)Diagnostics_Round(
-                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
-                wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
-                wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
-            (unsigned long)safety_snapshot.fault_bits);
+                    event->wheel_filtered[WHEEL_SPEED_RIGHT]),
+                event->wheel_pwm[WHEEL_SPEED_LEFT],
+                event->wheel_pwm[WHEEL_SPEED_RIGHT],
+            (unsigned long)event->safety_fault_bits);
+        return;
     }
     if (legacy_csv_enabled) {
-        AppLineSnapshot_t app;
-        AppLine_GetSnapshot(&app);
-        if (app.state == APP_LINE_RUNNING) {
-            SafetySnapshot_t safety_snapshot;
-            WheelSpeedSnapshot_t wheel_snapshot;
-            Safety_GetSnapshot(&safety_snapshot);
-            WheelSpeed_GetSnapshot(&wheel_snapshot);
+        if (event->line_app_state == APP_LINE_RUNNING) {
             debug_printf("M5,%lu,RUN,%s,%s,%ld,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%d,%d,0x%08lX\r\n",
                 (unsigned long)now_ms,
-                Diagnostics_LineStateName(app.control.state),
-                Diagnostics_LinePolarityName(app.control.polarity),
-                (long)Diagnostics_Round(app.control.position * 1000.0f),
+                Diagnostics_LineStateName(event->line_state),
+                Diagnostics_LinePolarityName(event->line_polarity),
+                (long)Diagnostics_Round(event->line_position * 1000.0f),
                 (unsigned long)Diagnostics_ScalePositive(
-                    app.control.confidence, 1000.0f),
-                (long)Diagnostics_Round(app.control.correction_mm_s),
-                (long)Diagnostics_Round(app.control.left_target_mm_s),
-                (long)Diagnostics_Round(app.control.right_target_mm_s),
+                    event->line_confidence, 1000.0f),
+                (long)Diagnostics_Round(event->line_correction),
+                (long)Diagnostics_Round(event->line_left_target),
+                (long)Diagnostics_Round(event->line_right_target),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_LEFT]),
+                    event->wheel_ramped[WHEEL_SPEED_LEFT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.ramped_mm_s[WHEEL_SPEED_RIGHT]),
+                    event->wheel_ramped[WHEEL_SPEED_RIGHT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_LEFT]),
+                    event->wheel_filtered[WHEEL_SPEED_LEFT]),
                 (long)Diagnostics_Round(
-                    wheel_snapshot.filtered_mm_s[WHEEL_SPEED_RIGHT]),
-                wheel_snapshot.pwm[WHEEL_SPEED_LEFT],
-                wheel_snapshot.pwm[WHEEL_SPEED_RIGHT],
-                (unsigned long)safety_snapshot.fault_bits);
+                    event->wheel_filtered[WHEEL_SPEED_RIGHT]),
+                event->wheel_pwm[WHEEL_SPEED_LEFT],
+                event->wheel_pwm[WHEEL_SPEED_RIGHT],
+                (unsigned long)event->safety_fault_bits);
+            return;
         }
+    }
+    /* An idle snapshot can be delayed across the instant an action starts.
+     * Keep all ordinary reports pending until the live action is over. */
+    if (Diagnostics_ActionTelemetryActive()) return;
+    if (infrared_report_pending) {
+        Diagnostics_ServiceInfraredReport();
+    } else if (line_trace_report_pending) {
+        Diagnostics_ServiceLineTraceReport();
+    } else if (report_pending) {
+        Diagnostics_ServiceReport();
+    } else if (line_calibration_report_pending) {
+        Diagnostics_ServiceLineCalibrationReport();
+    } else if (gray_report_pending) {
+        Diagnostics_ServiceGrayReport();
     }
 }
 

@@ -74,14 +74,40 @@ class M6TelemetryTests(unittest.TestCase):
             encoding="utf-8"
         )
         task = diagnostics.split("void Diagnostics_Task100ms(void)", 1)[1].split(
-            "const DiagReport_t *Diagnostics_GetReports", 1
+            "static void Diagnostics_Service100ms", 1
         )[0]
+        legacy_service = diagnostics.split(
+            "static void Diagnostics_Service100ms", 1
+        )[1].split("const DiagReport_t *Diagnostics_GetReports", 1)[0]
         main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")
 
+        self.assertNotIn("debug_", task)
+        self.assertNotIn("printf", task)
         self.assertIn(
-            "bool legacy_csv_enabled = !M6Telemetry_IsLogging();", task
+            "event->legacy_csv_enabled = !M6Telemetry_IsLogging();",
+            task,
         )
-        self.assertGreaterEqual(task.count("legacy_csv_enabled"), 4)
+        self.assertIn(
+            "bool legacy_csv_enabled = event->legacy_csv_enabled;",
+            legacy_service,
+        )
+        self.assertGreaterEqual(legacy_service.count("legacy_csv_enabled"), 4)
+        self.assertLess(
+            legacy_service.index('debug_printf("M3,'),
+            legacy_service.index("if (infrared_report_pending)"),
+        )
+        self.assertLess(
+            legacy_service.index('debug_printf("M4,'),
+            legacy_service.index("if (infrared_report_pending)"),
+        )
+        self.assertLess(
+            legacy_service.index('debug_printf("M5,'),
+            legacy_service.index("if (infrared_report_pending)"),
+        )
+        self.assertLess(
+            legacy_service.index("if (Diagnostics_ActionTelemetryActive()) return;"),
+            legacy_service.index("if (infrared_report_pending)"),
+        )
         self.assertLess(
             main.index("if (Scheduler_Take(SCHEDULER_TASK_100MS))"),
             main.index("M6Telemetry_Service();"),

@@ -20,6 +20,8 @@ void debug_putc(char c);
 /* Atomically enqueue a complete record. Nothing is queued on backpressure. */
 int debug_try_write(const char *data, size_t length);
 char debug_getc(void);
+/* Remove at most capacity bytes in one bounded critical section. */
+size_t debug_read(uint8_t *data, size_t capacity);
 void debug_print(const char *text);
 void debug_println(const char *text);
 void debug_newline(void);
