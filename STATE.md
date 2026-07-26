@@ -22,7 +22,7 @@
 
 1. `r12` 的 power、短/长 NRST 与 `r12-fi` 的受控 SYSRST/WWDT 矩阵均已取证；正式 r12 已恢复，并以精确身份及帮助中无 `TEST ONLY` 双重核对测试入口移除。不得延长、禁用或旁路 WWDT，也不得把合成 scratch 写成真实 HardFault 异常入口通过。
 2. 现有 UART 热路径诊断与 R2 清理已在待上板 r13 源码完成，精确 V2 wire registry、消息字段和 C/Python golden vectors 也已冻结；下一步实现 R3 C/Python codec、分帧、CRC、序号和单帧优先 TX，再接优先队列与背压。UART RX ISR 的 `S`/空格急停必须独立保留。
-3. 抽出 Python `m6link`，由唯一 Session 串口所有者供 CLI、GUI、自动调参和 AI 调车共用，并保持现有 V1 单次写入、参数事务和急停语义。
+3. Python `m6link` 已抽包：只有 `Session` 负责 pyserial 创建和串口读写，后台线程统一仲裁 V1/V2、RPC 与最高优先级裸 `S`；默认探测 V2，V1 必须显式 legacy。公共模型、查询、参数事务、telemetry、事件、录制/回放/评分及两阶段动作接口已实现，RPC 不做盲重试，已发送但无确定结果时阻断后续事务。`arm_action()` 只返回 token/10 s 有效期，任何库/CLI/GUI 路径都不会自动 Confirm。冻结 JSON/schema 随 wheel 打包并在安装态重新校验 SHA；旧 `m6_tune.py` 已成为薄壳，旧参数、CSV/JSON 与评分兼容。当前聚焦验证为 27 passed、10 subtests passed；尚未连接真实 r14。
 4. 最小桌面 GUI 已实现：默认要求 V2、V1 仅能显式选择；提供 identity/reset/任务/UART/link 诊断、轮速/航向/八路灰度与质心曲线、参数事务、独立 Arm/Confirm/Cancel、常驻急停、录制/回放/评分和逐步重新 Arm 的测试向导。未发布 capability 对应的页签、按钮和动作组会隐藏；当前 15 项 headless/fake Session 测试通过，但尚未连接真实 r14 串口或完成 GUI 长时运行。
 5. GUI/统一链路具备可观测性后，验证日志关闭/开启及不同频率下均无复位、漏期和异常丢包。
 6. 完成架空轮速复核后，落地按 `160→180→200→220→250 mm/s` 依次验证直线与左右弧线；任一级出现故障、复位、持续饱和、漏期或明显振荡立即回退。
