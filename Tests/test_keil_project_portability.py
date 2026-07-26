@@ -30,8 +30,12 @@ class KeilProjectPortabilityTests(unittest.TestCase):
 
     def test_project_reserves_the_two_parameter_sectors(self):
         root = ET.fromstring(PROJECT_FILE.read_text(encoding="utf-8"))
-        self.assertEqual(root.findtext(".//OnChipMemories/IROM/Size"), "0x1F800")
-        self.assertEqual(root.findtext(".//OnChipMemories/OCR_RVCT4/Size"), "0x1F800")
+        self.assertEqual(
+            int(root.findtext(".//OnChipMemories/IROM/Size"), 0), 0x1F800
+        )
+        self.assertEqual(
+            int(root.findtext(".//OnChipMemories/OCR_RVCT4/Size"), 0), 0x1F800
+        )
 
     def test_project_has_no_machine_specific_tool_path(self):
         project = PROJECT_FILE.read_text(encoding="utf-8")

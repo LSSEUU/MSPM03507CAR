@@ -15,6 +15,7 @@
 #include "motor.h"
 #include "oled.h"
 #include "parameter_store.h"
+#include "reset_diag.h"
 #include "safety.h"
 #include "scheduler.h"
 #include "system_state.h"
@@ -78,9 +79,11 @@ static IrReceiverStats_t infrared_report_receiver;
 static AppRemoteSnapshot_t infrared_report_app;
 static bool safety_report_pending;
 static uint8_t safety_report_line;
+static uint32_t safety_report_next_line_ms;
 static SystemState_t safety_report_system_state;
 static SafetySnapshot_t safety_report_snapshot;
 static SchedulerStats_t safety_report_scheduler;
+static ResetDiagSnapshot_t safety_report_reset;
 static bool line_calibration_report_pending;
 static uint8_t line_calibration_report_line;
 static LineCalibration_t line_calibration_report;
@@ -493,7 +496,9 @@ static void Diagnostics_QueueSafetyReport(void)
     safety_report_system_state = SystemState_Get();
     Safety_GetSnapshot(&safety_report_snapshot);
     Scheduler_GetStats(&safety_report_scheduler);
+    ResetDiag_GetSnapshot(&safety_report_reset);
     safety_report_line = 0U;
+    safety_report_next_line_ms = SystemTime_Now();
     safety_report_pending = true;
 }
 
@@ -513,6 +518,46 @@ static void Diagnostics_ServiceSafetyReport(void)
     if (!safety_report_pending || Diagnostics_ActionTelemetryActive()) return;
 
     if (safety_report_line == 0U) {
+        debug_printf("RESET raw=0x%02lX cause=%s class=%s boot=%lu checkpoint=%s prev_coarse=%u prev_detail=%u hardfault=%u\r\n",
+            (unsigned long)safety_report_reset.raw_cause,
+            ResetDiag_RawName(safety_report_reset.raw_cause),
+            ResetDiag_ClassName(safety_report_reset.reset_class),
+            (unsigned long)safety_report_reset.boot_id,
+            ResetDiag_CheckpointName(safety_report_reset.checkpoint),
+            safety_report_reset.previous_coarse_valid,
+            safety_report_reset.previous_detail_valid,
+            safety_report_reset.previous_hardfault);
+    } else if (safety_report_line == 1U) {
+        debug_printf("RESETCTX prev_boot8=%u prev_boot=%lu prev_cp=%s detail_cp=%s seq=%lu time=%lu wwdt=%lu hf_pc=0x%08lX hf_lr=0x%08lX hf_xpsr=0x%08lX\r\n",
+            safety_report_reset.previous_boot_id_low,
+            (unsigned long)safety_report_reset.previous_boot_id,
+            ResetDiag_CheckpointName(
+                safety_report_reset.previous_checkpoint),
+            ResetDiag_CheckpointName((ResetDiagCheckpoint_t)
+                safety_report_reset.previous_detail_checkpoint),
+            (unsigned long)safety_report_reset.previous_sequence,
+            (unsigned long)safety_report_reset.previous_time_ms,
+            (unsigned long)safety_report_reset.
+                previous_last_watchdog_service_ms,
+            (unsigned long)safety_report_reset.previous_hardfault_pc,
+            (unsigned long)safety_report_reset.previous_hardfault_lr,
+            (unsigned long)safety_report_reset.previous_hardfault_xpsr);
+    } else if (safety_report_line == 2U) {
+        debug_printf("RESETIO faults=0x%08lX miss=%lu drop=%lu/%lu/%lu pending=0x%02lX missed=0x%02lX state=%u q=%u health=0x%02X\r\n",
+            (unsigned long)safety_report_reset.previous_safety_fault_bits,
+            (unsigned long)safety_report_reset.
+                previous_scheduler_missed_total,
+            (unsigned long)safety_report_reset.previous_uart_tx_dropped,
+            (unsigned long)safety_report_reset.previous_uart_rx_dropped,
+            (unsigned long)safety_report_reset.previous_telemetry_dropped,
+            (unsigned long)safety_report_reset.
+                previous_scheduler_pending_mask,
+            (unsigned long)safety_report_reset.
+                previous_scheduler_missed_mask,
+            safety_report_reset.previous_system_state,
+            safety_report_reset.previous_telemetry_queued,
+            safety_report_reset.previous_scheduler_health_mask);
+    } else if (safety_report_line == 3U) {
         debug_printf("SAFETY state=%s faults=0x%08lX first=%lu last=%lu action=%u deadline=%lu pwm=%d,%d\r\n",
             SystemState_Name(safety_report_system_state),
             (unsigned long)safety_report_snapshot.fault_bits,
@@ -522,7 +567,7 @@ static void Diagnostics_ServiceSafetyReport(void)
             (unsigned long)safety_report_snapshot.action_deadline_ms,
             safety_report_snapshot.applied_motor_a,
             safety_report_snapshot.applied_motor_b);
-    } else if (safety_report_line == 1U) {
+    } else if (safety_report_line == 4U) {
         debug_printf("CONTEXT target=%d,%d speed=%d,%d requested_pwm=%d,%d\r\n",
             safety_report_snapshot.target_speed_left_mm_s,
             safety_report_snapshot.target_speed_right_mm_s,
@@ -983,6 +1028,7 @@ void Diagnostics_Init(void)
     infrared_report_line = 0U;
     safety_report_pending = false;
     safety_report_line = 0U;
+    safety_report_next_line_ms = 0U;
     line_calibration_report_pending = false;
     line_calibration_report_line = 0U;
     speed_diag_state = SPEED_DIAG_IDLE;
@@ -1292,6 +1338,7 @@ void Diagnostics_Poll(void)
     if (!debug_kbhit()) return;
     {
     char command = debug_getc();
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_CONTROL_RX);
     if (ControlProtocol_ProcessByte(command, now_ms)) return;
     switch (command) {
         case 'h': case 'H': Diagnostics_PrintHelp(); break;
@@ -1478,6 +1525,16 @@ void Diagnostics_Poll(void)
     }
 }
 
+void Diagnostics_ServiceBackground(void)
+{
+    uint32_t now_ms = SystemTime_Now();
+    if (safety_report_pending &&
+        SystemTime_Reached(now_ms, safety_report_next_line_ms)) {
+        Diagnostics_ServiceSafetyReport();
+        safety_report_next_line_ms = now_ms + TASK_100MS_PERIOD_MS;
+    }
+}
+
 void Diagnostics_Task100ms(void)
 {
     uint32_t now_ms = SystemTime_Now();
@@ -1498,8 +1555,6 @@ void Diagnostics_Task100ms(void)
         Diagnostics_ServiceLineCalibrationReport();
     else if (gray_report_pending)
         Diagnostics_ServiceGrayReport();
-    else
-        Diagnostics_ServiceSafetyReport();
     if ((speed_diag_state == SPEED_DIAG_RUNNING) ||
         (speed_diag_state == SPEED_DIAG_RAMP_DOWN)) {
         WheelSpeedSnapshot_t wheel_snapshot;

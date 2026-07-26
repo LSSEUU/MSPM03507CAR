@@ -1,6 +1,7 @@
 #include "safety.h"
 
 #include "motor.h"
+#include "reset_diag.h"
 #include "system_state.h"
 #include "system_time.h"
 #include "vehicle_config.h"
@@ -103,6 +104,7 @@ void Safety_RaiseFault(uint32_t fault_bits, uint32_t now_ms)
     safety.required_sensor_mask = 0U;
     SystemState_EnterFault();
     Safety_StopMotor();
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_SAFETY_FAULT);
     Safety_ExitCritical(key);
 }
 

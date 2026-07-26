@@ -1,4 +1,5 @@
 #include "motor.h"
+#include "reset_diag.h"
 #include "safety.h"
 #include "scheduler.h"
 #include "system_state.h"
@@ -9,6 +10,12 @@
 static int16_t motor_a;
 static int16_t motor_b;
 static uint32_t motor_stop_count;
+static ResetDiagCheckpoint_t reset_checkpoint;
+
+void ResetDiag_Checkpoint(ResetDiagCheckpoint_t checkpoint)
+{
+    reset_checkpoint = checkpoint;
+}
 
 void Motor_Init(void) {}
 
@@ -91,6 +98,7 @@ static void test_action_timeout_and_motor_veto(void)
     Safety_Evaluate(110U);
     Safety_GetSnapshot(&snapshot);
     assert((snapshot.fault_bits & SAFETY_FAULT_ACTION_TIMEOUT) != 0U);
+    assert(reset_checkpoint == RESET_DIAG_CHECKPOINT_SAFETY_FAULT);
     assert(SystemState_Get() == SYSTEM_STATE_FAULT);
     assert(motor_a == 0 && motor_b == 0);
     assert(Safety_ClearFaults(111U));

@@ -15,6 +15,7 @@
 #include "m6_telemetry.h"
 #include "oled.h"
 #include "parameter_store.h"
+#include "reset_diag.h"
 #include "safety.h"
 #include "scheduler.h"
 #include "system_state.h"
@@ -28,12 +29,14 @@ static void Main_EmergencyStopCallback(void)
 {
     M6Telemetry_StopFromISR();
     Safety_EmergencyStop(SystemTime_Now());
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_EMERGENCY);
 }
 
 static void Main_ControlParamsCommitted(const ControlParamsCommit_t *commit)
 {
-    if (!ControlRuntime_ApplyActive(commit))
+    if (!ControlRuntime_ApplyActive(commit)) {
         Safety_EmergencyStop(SystemTime_Now());
+    }
 }
 
 static void Main_CompleteTask(SchedulerTask_t task, uint32_t started_ms,
@@ -45,13 +48,47 @@ static void Main_CompleteTask(SchedulerTask_t task, uint32_t started_ms,
     Scheduler_Complete(task);
 }
 
+static void Main_RecordHealthyWindow(uint32_t now_ms,
+                                     uint32_t last_watchdog_service_ms)
+{
+    SchedulerStats_t scheduler;
+    SafetySnapshot_t safety;
+    DebugStats_t debug;
+    M6TelemetryStats_t telemetry;
+    ResetDiagHealth_t health = {0};
+    uint32_t index;
+
+    Scheduler_GetStats(&scheduler);
+    Safety_GetSnapshot(&safety);
+    debug_get_stats(&debug);
+    M6Telemetry_GetStats(&telemetry);
+    health.now_ms = now_ms;
+    health.last_watchdog_service_ms = last_watchdog_service_ms;
+    for (index = 0U; index < (uint32_t)SCHEDULER_TASK_COUNT; index++)
+        health.scheduler_missed_total += scheduler.miss_count[index];
+    health.safety_fault_bits = safety.fault_bits;
+    health.uart_tx_dropped = debug.tx_dropped;
+    health.uart_rx_dropped = debug.rx_dropped;
+    health.telemetry_dropped = telemetry.dropped;
+    health.scheduler_pending_mask = scheduler.pending_mask;
+    health.scheduler_missed_mask = scheduler.missed_mask;
+    health.checkpoint = RESET_DIAG_CHECKPOINT_TASK_20MS;
+    health.system_state = (uint8_t)SystemState_Get();
+    health.telemetry_queued = telemetry.queued;
+    health.scheduler_health_mask = (uint8_t)SCHEDULER_CRITICAL_TASKS_MASK;
+    ResetDiag_RecordHealthyWindow(&health);
+}
+
 int main(void)
 {
     uint32_t reset_cause = (uint32_t)DL_SYSCTL_getResetCause();
     uint32_t last_gyro_frame = 0U;
     uint32_t last_gray_scan = 0U;
+    uint32_t last_watchdog_service_ms = 0U;
 
+    ResetDiag_EarlyInit(reset_cause);
     SYSCFG_DL_init();
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_INIT);
     Motor_Init();
 
     Scheduler_Init();
@@ -84,14 +121,17 @@ int main(void)
 
     Diagnostics_Init();
     AppRemote_Init();
-    if (!ControlRuntime_ApplyActive(NULL))
+    if (!ControlRuntime_ApplyActive(NULL)) {
         Safety_EmergencyStop(SystemTime_Now());
+    }
     M6Telemetry_Init();
     ControlProtocol_Init(Main_ControlParamsCommitted);
     Diagnostics_RunBootSelfTest();
 
     while (1) {
-        uint32_t missed = Scheduler_TakeMissedMask();
+        uint32_t missed;
+        M6TelemetryStats_t background_telemetry;
+        missed = Scheduler_TakeMissedMask();
         if (missed != 0U) {
             Safety_RaiseFault(SAFETY_FAULT_SCHEDULER_DEADLINE,
                               SystemTime_Now());
@@ -105,6 +145,7 @@ int main(void)
             EncoderSnapshot_t encoder;
             WheelSpeedSnapshot_t wheel;
 
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TASK_5MS);
             ControlProtocol_WheelBoundary();
             Encoder_GetSnapshot(&encoder);
             WheelSpeed_Update(encoder.count_a, encoder.count_b, started);
@@ -141,6 +182,7 @@ int main(void)
             GyroSnapshot_t gyro;
             GrayscaleSnapshot_t gray;
 
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TASK_10MS);
             Gyro_Update();
             Gyro_GetSnapshot(&gyro);
             if (gyro.valid_frames != last_gyro_frame) {
@@ -149,6 +191,7 @@ int main(void)
                                     gyro.last_update_ms);
             }
 
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_GRAYSCALE);
             if (!Grayscale_IsScanPending()) (void)Grayscale_RequestScan();
             Grayscale_Task(started);
             Grayscale_GetSnapshot(&gray);
@@ -168,6 +211,7 @@ int main(void)
             GyroSnapshot_t gyro;
             HeadingSnapshot_t heading;
 
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TASK_20MS);
             AppRemote_Task20ms(started);
             Gyro_GetSnapshot(&gyro);
             Heading_UpdateWithRate(
@@ -180,27 +224,48 @@ int main(void)
                                      heading.right_target_mm_s);
             }
             AppLine_Task20ms(started);
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TELEMETRY);
             M6Telemetry_Capture20ms(started);
             Main_CompleteTask(SCHEDULER_TASK_20MS, started,
                               TASK_20MS_PERIOD_MS);
             if (Scheduler_ConsumeHealthyWindow()) {
+                bool service_watchdog = true;
 #ifdef M2_FAULT_INJECTION_TEST
-                if (!Diagnostics_FaultInjectionStopWatchdog())
+                service_watchdog = !Diagnostics_FaultInjectionStopWatchdog();
 #endif
+                if (service_watchdog) {
                     Watchdog_Service();
+                    last_watchdog_service_ms = SystemTime_Now();
+                    ResetDiag_Checkpoint(
+                        RESET_DIAG_CHECKPOINT_WWDT_SERVICE);
+                }
+                Main_RecordHealthyWindow(SystemTime_Now(),
+                                         last_watchdog_service_ms);
             }
         }
 
         if (Scheduler_Take(SCHEDULER_TASK_100MS)) {
             uint32_t started = SystemTime_Now();
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TASK_100MS);
             Diagnostics_Task100ms();
             Main_CompleteTask(SCHEDULER_TASK_100MS, started,
                               TASK_100MS_PERIOD_MS);
         }
 
+        Diagnostics_ServiceBackground();
+        M6Telemetry_GetStats(&background_telemetry);
+        if (background_telemetry.queued != 0U)
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TELEMETRY);
         M6Telemetry_Service();
+        if (Grayscale_IsScanPending())
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_GRAYSCALE);
         Grayscale_Task(SystemTime_Now());
+        if (OLED_ServicePending())
+            ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_OLED);
         OLED_Service();
+        ResetDiag_Checkpoint(Safety_HasFault() ?
+            RESET_DIAG_CHECKPOINT_SAFETY_FAULT :
+            RESET_DIAG_CHECKPOINT_IDLE);
         __WFI();
     }
 }

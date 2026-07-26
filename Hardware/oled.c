@@ -157,6 +157,11 @@ void OLED_RequestRefresh(void)
     oled_refresh_pending = true;
 }
 
+bool OLED_ServicePending(void)
+{
+    return oled_refresh_pending && oled_stats.present;
+}
+
 void OLED_Service(void)
 {
     uint8_t value;

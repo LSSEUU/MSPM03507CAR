@@ -485,6 +485,11 @@
           <GroupName>System</GroupName>
           <Files>
             <File>
+              <FileName>reset_diag.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/reset_diag.c</FilePath>
+            </File>
+            <File>
               <FileName>diagnostics_health.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/diagnostics_health.c</FilePath>

@@ -3,6 +3,7 @@
 #include "app_line.h"
 #include "control_params.h"
 #include "heading.h"
+#include "reset_diag.h"
 #include "safety.h"
 #include "scheduler.h"
 #include "uart_debug.h"
@@ -22,6 +23,7 @@ static DebugStats_t debug_stats;
 static bool uart_accept;
 static char uart_output[8192];
 static size_t uart_length;
+static uint32_t reset_encode_count;
 
 void WheelSpeed_GetSnapshot(WheelSpeedSnapshot_t *snapshot) { *snapshot = wheel; }
 void Heading_GetSnapshot(HeadingSnapshot_t *snapshot) { *snapshot = heading; }
@@ -29,6 +31,12 @@ void AppLine_GetSnapshot(AppLineSnapshot_t *snapshot) { *snapshot = app_line; }
 void Safety_GetSnapshot(SafetySnapshot_t *snapshot) { *snapshot = safety; }
 void Scheduler_GetStats(SchedulerStats_t *stats) { *stats = scheduler; }
 void debug_get_stats(DebugStats_t *stats) { *stats = debug_stats; }
+
+void ResetDiag_Checkpoint(ResetDiagCheckpoint_t checkpoint)
+{
+    if (checkpoint == RESET_DIAG_CHECKPOINT_TX_ENCODE)
+        reset_encode_count++;
+}
 
 int debug_try_write(const char *data, size_t length)
 {
@@ -124,6 +132,7 @@ int main(void)
     assert(stats.transmitted == 8U);
     assert(stats.dropped == 3U);
     assert(stats.queued == 0U);
+    assert(reset_encode_count == stats.formatted);
 
     assert(strncmp(uart_output, "M6,time_ms,revision", 19U) == 0);
     header_end = strstr(uart_output, "\r\n");

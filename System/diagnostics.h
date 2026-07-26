@@ -17,6 +17,7 @@ typedef enum {
 void Diagnostics_Init(void);
 void Diagnostics_RunBootSelfTest(void);
 void Diagnostics_Poll(void);
+void Diagnostics_ServiceBackground(void);
 void Diagnostics_Task100ms(void);
 void Diagnostics_PrintHelp(void);
 void Diagnostics_PrintReport(void);

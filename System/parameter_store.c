@@ -5,6 +5,7 @@
 
 #ifndef PARAMETER_STORE_HOST_TEST
 #include "ti_msp_dl_config.h"
+#include "reset_diag.h"
 
 #define PARAMETER_STORE_MAIN_SECTOR(address) \
     ((uint32_t)(address) / (uint32_t)PARAMETER_STORE_SLOT_SIZE)
@@ -447,6 +448,7 @@ ParameterStoreResult_t ParameterStore_SaveActive(void)
     ParameterStore_BuildRecord(&record, ControlParams_Active(),
         next_generation, ControlParams_Revision(), true);
 
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_PARAMETER_FLASH);
     DL_FlashCTL_executeClearStatus(FLASHCTL);
     DL_FlashCTL_unprotectSector(FLASHCTL, target_address,
                                 DL_FLASHCTL_REGION_SELECT_MAIN);

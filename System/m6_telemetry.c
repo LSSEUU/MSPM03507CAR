@@ -3,6 +3,7 @@
 #include "app_line.h"
 #include "control_params.h"
 #include "heading.h"
+#include "reset_diag.h"
 #include "safety.h"
 #include "scheduler.h"
 #include "uart_debug.h"
@@ -334,6 +335,7 @@ void M6Telemetry_Service(void)
         if (s_read == s_write) return;
         s = &s_queue[s_read];
         s_formatted++;
+        ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_ENCODE);
         if (!format_sample(s)) {
             s_dropped++;
             s_read = next_index(s_read);

@@ -43,9 +43,12 @@ LR_IROM1 0x00000000 0x0001F800  {    ; load region size_region
    .ANY (+RO)
    .ANY (+XO)
   }
-  RW_IRAM2 0x20200000 0x00008000  {  ; RW data
+  RW_IRAM2 0x20200000 0x00007F00  {  ; initialized RW/ZI data
    .ANY (+RW +ZI)
    .ANY (.ramfunc)
+  }
+  RW_NOINIT 0x20207F00 UNINIT 0x00000100  {  ; retained reset breadcrumbs
+   reset_diag.o(.bss.noinit.reset_diag)
   }
 }
 

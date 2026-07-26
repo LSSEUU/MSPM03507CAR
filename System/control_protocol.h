@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define CONTROL_PROTOCOL_FIRMWARE_ID "M6-runtime-20260726-r11"
+#define CONTROL_PROTOCOL_FIRMWARE_ID "M6-runtime-20260726-r12"
 #define CONTROL_PROTOCOL_SCHEMA_VERSION CONTROL_PARAMS_SCHEMA_VERSION
 /* Payload only; CR/LF keeps every complete wire frame within 60 bytes. */
 #define CONTROL_PROTOCOL_MAX_FRAME 58U

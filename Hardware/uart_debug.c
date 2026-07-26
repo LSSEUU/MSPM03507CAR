@@ -1,4 +1,5 @@
 #include "uart_debug.h"
+#include "reset_diag.h"
 #include "ti_msp_dl_config.h"
 
 #include <stdarg.h>
@@ -87,6 +88,7 @@ int debug_try_write(const char *data, size_t length)
     if ((data == NULL) || (length == 0U) ||
         (length >= DEBUG_TX_BUFFER_SIZE)) return 0;
 
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_SUBMIT);
     primask = __get_PRIMASK();
     __disable_irq();
     used = (tx_write >= tx_read) ? (uint16_t)(tx_write - tx_read) :
@@ -143,6 +145,7 @@ char debug_getc(void)
 
 void debug_print(const char *text)
 {
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_SUBMIT);
     while (*text != '\0') debug_putc(*text++);
 }
 
@@ -164,6 +167,7 @@ void debug_printf(const char *format, ...)
     va_list args;
     int length;
 
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_ENCODE);
     va_start(args, format);
     length = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
@@ -171,6 +175,7 @@ void debug_printf(const char *format, ...)
     if (length < 0 || length >= (int)sizeof(buffer)) {
         debug_stats.format_errors++;
     }
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_SUBMIT);
     for (int i = 0; i < length && i < (int)sizeof(buffer) - 1; i++) {
         debug_putc(buffer[i]);
     }
