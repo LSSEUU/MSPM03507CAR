@@ -228,6 +228,15 @@ class M6LinkSessionTests(unittest.TestCase):
         self.assertNotIn(int(RpcOpcode.ACTION_CONFIRM), fake.opcodes)
         session.close()
 
+    def test_empty_subscription_response_decodes_as_an_empty_array(self):
+        fake = V2FakeSerial()
+        session = Session(transport=fake, timeout=0.5)
+        session.connect()
+        subscriptions, estimated_bps = session.subscribe({})
+        self.assertEqual(subscriptions, ())
+        self.assertEqual(estimated_bps, 0)
+        session.close()
+
     def test_manual_recording_can_stop_without_consuming_controller_events(self):
         fake = V2FakeSerial()
         session = Session(transport=fake, timeout=0.5)

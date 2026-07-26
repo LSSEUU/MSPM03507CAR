@@ -48,6 +48,12 @@ def decode_layout(name: str, data: bytes, *, exact: bool = True) -> dict[str, An
         size = int(field["size"])
         kind = str(field["kind"])
         if offset >= len(data):
+            if kind == "layout_array":
+                count = int(result[str(field["count_field"])])
+                if count == 0:
+                    result[field_name] = ()
+                    continue
+                raise IntegrityError(f"{name}.{field_name} is truncated")
             continue
         raw = _require_bytes(data, offset, min(size, len(data) - offset), f"{name}.{field_name}")
         if len(raw) != size and kind not in ("bytes", "layout_array", "layout_union"):
