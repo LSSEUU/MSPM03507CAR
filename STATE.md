@@ -9,8 +9,8 @@
 - 项目：立创·天猛星 MSPM0G3507-64P 两轮差速小车固件，系统时钟 32 MHz，Keil ARM Compiler 6.22。
 - 当前入口：`Source/main.c`；`Source/ti_msp_dl_config.c/.h` 是受回归测试保护的唯一冻结板级配置，修订号 `20260725`，不得用旧 `.syscfg` 覆盖。
 - 里程碑：M0–M5 已完成；PB11 红外遥控阶段一完成，阶段二已完成全部架空路径和 100 mm/s 落地前进/制动，用户自行测试按键功能无异常，正式落地后退/左右转延后到算法定型后；M6 软件基础设施、架空轮速矩阵和 100 mm/s 落地直行/制动/航向筛选已取证，巡线分级、220 mm/s×5 圈和掉电保持验收尚未完成；M7 尚未开始。
-- 当前运行镜像：`M6-runtime-20260726-r11`。用户已手动下载，2026-07-26 经 COM10 精确核对为 schema 1、revision 1、source `defaults`、generation 0；空闲 Safety `IDLE`、故障/PWM/目标/任务漏期/UART 丢包均为 0。新模拟八路的连续标定强度位置保留，失线搜索恢复为 `r9` 已知可重新获线的行为，并带 48 帧 RAM 飞行记录器；赛题/赛道公布前不再为未知直角弯试新的纯巡线搜索参数。
-- 当前源码候选：`M6-runtime-20260726-r12` 已实现 reset diagnostics；96 项主机测试通过，Keil ARMCLANG 6.22 Rebuild 为 0 error、0 warning，`Code=43580, RO-data=9416, RW-data=8, ZI-data=25704`，最高普通镜像字节 `0x0000CF0F`，低于参数区 `0x0001F800`。专用 256 B `UNINIT` 区位于 `0x20207F00`；当前车上仍是已核对的 `r11`，`r12` 尚未下载，所有跨复位保持、HardFault、日志负载和长期运行结论均待上板验证。
+- 最近一次已确认运行镜像：`M6-runtime-20260726-r11`。此前经 COM10 精确核对为 schema 1、revision 1、source `defaults`、generation 0，空闲 Safety `IDLE`、故障/PWM/目标/任务漏期/UART 丢包均为 0。随后 r12 命令行下载在 SWD `DebugPortStart` 阶段连续两次失败且没有 `Verify OK`，紧接的 r11 串口 probe 超时；当前 MCU 实际运行身份未确认，必须由用户手动下载/恢复后重新核对，不能写成 r12 已运行。
+- 当前源码候选：`M6-runtime-20260726-r12` 已实现 reset diagnostics；96 项主机测试通过，Keil ARMCLANG 6.22 Rebuild 为 0 error、0 warning，`Code=43580, RO-data=9416, RW-data=8, ZI-data=25704`，最高普通镜像字节 `0x0000CF0F`，低于参数区 `0x0001F800`。专用 256 B `UNINIT` 区位于 `0x20207F00`；`r12` 尚无成功下载或硬件身份，所有跨复位保持、HardFault、日志负载和长期运行结论均待上板验证。
 - PB11 阶段二进行中：架空的三档、100/220 mm/s 四方向、251 ms 失联制动、`OK`/`0`、直行/±90°/巡线门控均通过；落地以 100 mm/s 完成遥控前进、航向保持和松键制动，用户确认车辆前进且停车正常，并自行确认其余按键功能无异常。正式落地后退/左右转仍保留为 PB11 最终验收项，但按用户决定不再阻塞使用串口急停与物理中止保护的 M6 算法调试。
 - 开始任何工作前先执行 `git status --short`，保留所有不属于当前任务的改动。需要细节时按第 9 节只读取对应文档，不要一次加载全部验证记录或 PDF。
 
@@ -20,7 +20,7 @@
 
 当前优先目标依次为高速直线、平滑左右弧线、高速陀螺仪角度/角速度控制和系统长期无复位。后续顺序固定为：
 
-1. `r12` 源码/目标构建已补齐原始 reset cause 分类、boot ID、`SHUTDNSTORE` 粗 breadcrumb、`.noinit` 双槽健康摘要和 HardFault scratch；下一步先下载并核对身份，再分别验证可安全触发的复位与日志负载。不得延长、禁用或旁路 WWDT。
+1. `r12` 源码/目标构建已补齐原始 reset cause 分类、boot ID、`SHUTDNSTORE` 粗 breadcrumb、`.noinit` 双槽健康摘要和 HardFault scratch；命令行下载已两次原样失败并达到本轮上限，下一步由用户手动下载后核对身份，再分别验证可安全触发的复位与日志负载。不得延长、禁用或旁路 WWDT。
 2. 在诊断现有热路径后设计并分片实现统一 V2 二进制传输层：分帧、CRC、序号、优先队列和背压；UART RX ISR 的 `S`/空格急停必须独立保留，周期任务不得格式化字符串或阻塞发送。
 3. 抽出 Python `m6link`，供 CLI、GUI、自动调参和 AI 调车共用；再开发连接、曲线、状态、参数事务、测试向导、急停、录制回放和评分 GUI。
 4. 先验证日志关闭/开启及不同频率下均无复位、漏期和异常丢包，再复核架空轮速；落地按 `160→180→200→220→250 mm/s` 依次验证直线与左右弧线，任一级出现故障、复位、持续饱和、漏期或明显振荡立即回退。
@@ -35,6 +35,7 @@
 - 高概率根因是脚本选择了隔离工作树中的 M6 工程，而该目录缺少被 Git 忽略的 `.uvoptx`；主目录工程虽有已验证的 Horco Debug 配置，但当前固件仍是旧主线，不能用它替代 M6 镜像下载。`UV4 -f` 的下载语义正确，不应改成启动调试会话的 `-d`。
 - 当前 SWD 下载偶发 `RDDI-DAP Error`、`Erase Failed`、`Flash Timeout` 或校验不一致；问题早于 Horco 无线 DAP，不能归因于当前应用 WWDT。
 - 本轮没有进行第三次命令行下载；用户在 Keil 中手动打开精确的 M6 工作树工程并完成下载，随后 COM10 返回精确 M6 固件身份，证明新固件实际运行。后续新的下载周期仍遵守首次失败后只原样重试一次的上限。
+- r12 下载前的只读预检再次确认 Keil 6.22、精确工作树、Use Target/CMSIS-AGDI、Horco `4041840e`、SWD 1 MHz 和最新 AXF 均匹配；正式命令第一次失败后只原样重试一次，两次都在 `DebugPortStart` 报 `E310 Debug access failed`、`Cannot access Memory`、`Target DLL has been cancelled`，没有 `Verify OK`。已按上限停止；随后 COM10 的精确 r11 probe 超时，当前固件身份未确认，必须手动下载，不得再发第三次命令或切换自动化方法。
 - Keil 手动配置曾把 IROM 显示上限改为 `0x20000`、SWD 时钟改为 5 MHz；已恢复为 `0x1F800` 和 1 MHz，并重新全量构建。随后 `scripts/flash.ps1 -PreflightOnly` 通过，且明确没有发出擦除/编程命令。
 - 本次手动下载 `r11` 后，工作树工程的 IROM 显示 Size 再次漂移到 `0x20000`，但 OCR 区与实际 scatter 文件仍为 `0x1F800`，既有 r11 MAP/HEX 边界证据不受影响；已在下一次构建前只恢复该安全值，保留工程文件的其他既存改动。
 - 修复后的 `.uvoptx` 配置与脚本防护已经完成两次正式自动下载闭环：`r2` 首次命令成功；`r3` 首次失败后仅原样重试一次并成功，均得到 `Verify OK` 且经 COM10 核对精确身份。日志为未纳入版本控制的 `keil/flash-20260725-140338.log` 和 `keil/flash-20260725-140947.log`。这证明所选工程和 Debug 配置正确，但历史偶发 SWD 故障仍要求每个新下载周期遵守一次原样重试上限。
@@ -42,7 +43,7 @@
 
 ### 后续里程碑
 
-- M6：运行期参数模型、V1 文本事务、A/B Flash 保存、50 Hz 文本遥测、主机评分/保守轮速搜索和正式下载脚本均已实现；`r11` 已完成上板身份和空闲状态核对，`r12` reset diagnostics 已完成源码与目标构建。下一入口是 r12 上板复位/日志负载验证，然后实现 V2 二进制传输层、共享 `m6link` 和 GUI；尚不能记为高速或长期运行硬件完成。
+- M6：运行期参数模型、V1 文本事务、A/B Flash 保存、50 Hz 文本遥测、主机评分/保守轮速搜索和正式下载脚本均已实现；r11 曾完成上板身份和空闲状态核对，r12 reset diagnostics 已完成源码与目标构建。下一入口是用户手动下载 r12、重新核对身份并做复位/日志负载验证，然后实现 V2 二进制传输层、共享 `m6link` 和 GUI；尚不能记为高速或长期运行硬件完成。
 - M7：至少 30 分钟连续运行、低电压、急停物理响应、编码器断开、人为堵转、传感器/通信中断和任务超期验收，并形成可复查记录。
 
 ## 3. 已实现主流程与安全边界
@@ -139,7 +140,7 @@ PA23/VREF+ 与 PA21/VREF− 通过 C44（1 µF）耦合，因此两者必须保�
 | PB11 红外阶段一 | 完成；17 个 NEC 键实测唯一且反码正确，键表冻结；连续长按和运行期 `s` 复位缺陷已关闭 | `docs/2026-07-24-PB11红外遥控接入验证记录.md` |
 | PB11 红外阶段二 | 进行中；架空的 100/220 mm/s 四方向、三档/长按、`OK`/`0`、251 ms 失联停车和演示门控通过；落地 100 mm/s 遥控前进/航向保持/松键制动通过，仍缺落地后退/左右转 | 同上 |
 | M6 软件基础设施 | 运行期参数、V1 文本事务、A/B Flash、50 Hz 文本遥测、连续模拟位置、弯道方向锁存和有界失线飞行记录均已实现；100 mm/s 连续模拟位置已实车显著改善。r12 reset diagnostics 已通过主机模型和目标构建；V2、`m6link`、GUI、跨复位保持和高速长期运行仍未实现/验证 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md`、`docs/2026-07-26-M6-V2通信与复位可观测性验证记录.md` |
-| 当前组合构建/上板证据 | 源码候选 `M6-runtime-20260726-r12`：96 项主机回归通过；Keil ARMCLANG 6.22 Rebuild 为 `Code=43580, RO-data=9416, RW-data=8, ZI-data=25704`，0 error、0 warning；最高普通字节 `0x0000CF0F`，低于 `0x1F800`；256 B reset 保留区以 `UNINIT` 链接在 `0x20207F00`。车上仍为 `r11`：COM10 精确身份、schema 1、defaults/generation 0、Safety IDLE、约 357 s 空闲零漏期/丢包已核对；r12 未下载、未做复位注入、运动或长期运行验证 | 同上 |
+| 当前组合构建/上板证据 | 源码候选 `M6-runtime-20260726-r12`：96 项主机回归通过；Keil ARMCLANG 6.22 Rebuild 为 `Code=43580, RO-data=9416, RW-data=8, ZI-data=25704`，0 error、0 warning；最高普通字节 `0x0000CF0F`，低于 `0x1F800`；256 B reset 保留区以 `UNINIT` 链接在 `0x20207F00`。最近确认的车上镜像是 r11；r12 SWD 下载两次失败且下载后 r11 probe 超时，当前身份未知，未做 r12 复位注入、运动或长期运行验证 | 同上 |
 
 这些是已有证据的摘要。只有实际重新运行主机测试、Keil 构建或硬件测试后，才能更新相应证据；源代码检查不能写成目标编译或上板验证。
 
@@ -224,3 +225,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 2026-07-26：用户手动下载 `r11` 后，COM10 精确确认 `M6-runtime-20260726-r11`、schema 1、revision 1、source `defaults`、generation 0；只读空闲快照为 Safety IDLE、故障/PWM/目标 0、约 357 s 四级任务漏期 0、UART 丢包/格式错误 0。本轮未启动电机、改参数、写 Flash 或执行命令行下载。源码审计确认 `RSTCAUSE` 为 read-to-clear，而 r11 仅把 WWDT0 映射为 Safety `0x20` 后丢弃原值；本次故障 0 只能排除当前启动的未清除 WWDT 复位，不能区分上电、外部、软件或调试器复位，也不能恢复复位前 breadcrumb。后续目标改为 reset diagnostics、V2、`m6link`/GUI、无复位日志矩阵和 160–250 mm/s 直线/平滑弧线/高速航向分级验证；未知直角弯搜索暂停。
 
 2026-07-26：实现待上板的 `M6-runtime-20260726-r12` reset diagnostics：启动只读一次 raw `RSTCAUSE`，加入分类/boot ID、4 B `SHUTDNSTORE` 粗 checkpoint、256 B `UNINIT` 双槽 CRC 健康摘要及 HardFault PC/LR/xPSR scratch；Safety、急停、TX 编码/提交、参数 Flash、WWDT 与后台阶段均有有界 checkpoint。健康窗口保持“先通过原门控并喂狗，再记录”的顺序；`v` 的三条 reset 报告移到所有周期任务后的后台且每 100 ms 至多一行。96 项主机测试通过；Keil 6.22 Rebuild 为 0 error、0 warning，`Code=43580, RO-data=9416, RW-data=8, ZI-data=25704`，最高普通字节 `0xCF0F`，保留区在 `0x20207F00` 且为 `UNINIT`。本轮未下载，车上仍是 r11；跨 SYSRST/BOOTRST/BOR/WWDT/NRST/断电保持、HardFault 和日志负载均不能据源码或构建写成硬件通过，下一步先做 r12 上板身份与复位矩阵。
+
+2026-07-26：提交 r12 源码后，以只读工程文件重新 Rebuild 保持 IROM `0x1F800`，随后 `scripts/flash.ps1 -PreflightOnly` 通过且未擦写。正式命令行下载第一次失败后仅原样重试一次，两次均在 TI pack `DebugPortStart` 阶段报 `E310 Debug access failed`、无法写 AP `0x00000001` 寄存器 `0x0C`、`Cannot access Memory` 和 Target DLL 取消；日志无 `Verify OK`，故按规则停止。下载后的 COM10 精确 r11 probe 超时，当前 MCU 身份未知；没有第三次命令、GUI 自动化、BSL 或配置变体。下一步必须由用户手动打开精确 r12 工作树工程下载，完成后再核对 r12 身份和 reset 报告。
