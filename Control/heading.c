@@ -20,6 +20,10 @@ static float calibration_min_deg;
 static float calibration_max_deg;
 static float hold_base_speed_mm_s;
 static uint8_t turn_settle_samples;
+static float continuous_yaw_deg;
+static float previous_normalized_yaw_deg;
+static float turn_target_continuous_deg;
+static bool continuous_yaw_valid;
 static bool yaw_rate_initialized;
 static float previous_yaw_deg;
 static uint32_t previous_yaw_ms;
@@ -127,6 +131,10 @@ void Heading_StartCalibration(void)
     heading.yaw_rate_deg_s = 0.0f;
     heading.rate_source = HEADING_RATE_NONE;
     yaw_rate_initialized = false;
+    continuous_yaw_valid = false;
+    continuous_yaw_deg = 0.0f;
+    previous_normalized_yaw_deg = 0.0f;
+    turn_target_continuous_deg = 0.0f;
     Heading_Stop();
 }
 
@@ -136,8 +144,9 @@ static void Heading_UpdateControl(void)
     float turn_speed;
     float speed_limit;
     float zone_fraction;
-    heading.error_deg = Heading_NormalizeDegrees(
-        heading.target_deg - heading.yaw_deg);
+    heading.error_deg = heading.mode == HEADING_MODE_TURN ?
+        (turn_target_continuous_deg - continuous_yaw_deg) :
+        Heading_NormalizeDegrees(heading.target_deg - heading.yaw_deg);
     if (heading.mode == HEADING_MODE_HOLD) {
         correction = Heading_Clamp(
             (active_config.straight_kp * heading.error_deg) -
@@ -286,6 +295,14 @@ void Heading_UpdateWithRate(float raw_yaw_deg, uint32_t frame_id,
         }
         heading.yaw_deg = Heading_NormalizeDegrees(
             raw_yaw_deg - heading.zero_offset_deg);
+        if (!continuous_yaw_valid || calibration_completed) {
+            continuous_yaw_deg = heading.yaw_deg;
+            continuous_yaw_valid = true;
+        } else {
+            continuous_yaw_deg += Heading_NormalizeDegrees(
+                heading.yaw_deg - previous_normalized_yaw_deg);
+        }
+        previous_normalized_yaw_deg = heading.yaw_deg;
     }
 
     if (direct_rate_fresh) {
@@ -363,6 +380,7 @@ bool Heading_StartTurn(float relative_degrees)
     heading.reference_deg = heading.yaw_deg;
     heading.target_deg = Heading_NormalizeDegrees(
         heading.reference_deg + relative_degrees);
+    turn_target_continuous_deg = continuous_yaw_deg + relative_degrees;
     heading.yaw_rate_deg_s = 0.0f;
     previous_yaw_deg = heading.yaw_deg;
     previous_yaw_ms = heading.last_update_ms;

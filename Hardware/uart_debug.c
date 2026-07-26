@@ -9,16 +9,24 @@
 
 #define DEBUG_TX_BUFFER_SIZE  1024U
 #define DEBUG_RX_BUFFER_SIZE   256U
+#define DEBUG_V2_BUFFER_SIZE   224U
 
 static DebugStats_t debug_stats;
 static volatile uint8_t tx_buffer[DEBUG_TX_BUFFER_SIZE];
 static volatile uint16_t tx_read;
 static volatile uint16_t tx_write;
+static volatile uint8_t v2_tx_buffer[DEBUG_V2_BUFFER_SIZE];
+static volatile uint16_t v2_tx_index;
+static volatile uint16_t v2_tx_length;
 static volatile uint8_t rx_buffer[DEBUG_RX_BUFFER_SIZE];
 static volatile uint16_t rx_read;
 static volatile uint16_t rx_write;
 static volatile uint32_t emergency_epoch;
+static volatile uint8_t emergency_source;
+static volatile uint16_t rx_high_water;
+static volatile uint16_t tx_high_water;
 static DebugEmergencyCallback_t emergency_callback;
+static volatile uint8_t output_mode; /* 0=text, 1=V1 drain, 2=V2 binary */
 
 static uint16_t Debug_TxNext(uint16_t index)
 {
@@ -30,8 +38,24 @@ static uint16_t Debug_RxNext(uint16_t index)
     return (uint16_t)((index + 1U) % DEBUG_RX_BUFFER_SIZE);
 }
 
+static uint16_t Debug_Queued(uint16_t read, uint16_t write, uint16_t size)
+{
+    return (write >= read) ? (uint16_t)(write - read) :
+        (uint16_t)(size - read + write);
+}
+
 static void Debug_FillTxFIFO(void)
 {
+    if (output_mode == 2U) {
+        while ((v2_tx_index < v2_tx_length) &&
+               !DL_UART_isTXFIFOFull(UART_0_INST)) {
+            DL_UART_transmitData(UART_0_INST, v2_tx_buffer[v2_tx_index++]);
+            debug_stats.tx_bytes++;
+        }
+        if (v2_tx_index == v2_tx_length)
+            DL_UART_disableInterrupt(UART_0_INST, DL_UART_INTERRUPT_TX);
+        return;
+    }
     while ((tx_read != tx_write) && !DL_UART_isTXFIFOFull(UART_0_INST)) {
         DL_UART_transmitData(UART_0_INST, tx_buffer[tx_read]);
         tx_read = Debug_TxNext(tx_read);
@@ -49,6 +73,7 @@ static void Debug_DrainRxFIFO(void)
         uint16_t next;
         debug_stats.rx_bytes++;
         if ((byte == (uint8_t)'S') || (byte == (uint8_t)' ')) {
+            emergency_source = byte == (uint8_t)'S' ? 1U : 2U;
             emergency_epoch++;
             if (emergency_callback != NULL) emergency_callback();
             continue;
@@ -60,6 +85,11 @@ static void Debug_DrainRxFIFO(void)
         }
         rx_buffer[rx_write] = byte;
         rx_write = next;
+        {
+            uint16_t queued = Debug_Queued(rx_read, rx_write,
+                                           DEBUG_RX_BUFFER_SIZE);
+            if (queued > rx_high_water) rx_high_water = queued;
+        }
     }
 }
 
@@ -67,8 +97,13 @@ void debug_init(void)
 {
     memset(&debug_stats, 0, sizeof(debug_stats));
     tx_read = tx_write = 0U;
+    v2_tx_index = v2_tx_length = 0U;
     rx_read = rx_write = 0U;
     emergency_epoch = 0U;
+    emergency_source = 0U;
+    output_mode = 0U;
+    rx_high_water = 0U;
+    tx_high_water = 0U;
     emergency_callback = NULL;
     DL_UART_enableInterrupt(UART_0_INST,
         DL_UART_INTERRUPT_RX |
@@ -79,13 +114,15 @@ void debug_init(void)
     NVIC_EnableIRQ(UART_0_INST_INT_IRQN);
 }
 
-int debug_try_write(const char *data, size_t length)
+static int Debug_TryWriteMode(const uint8_t *data, size_t length,
+                              uint8_t allowed_mode)
 {
     uint32_t primask;
     uint16_t used;
     uint16_t free_bytes;
 
     if ((data == NULL) || (length == 0U) ||
+        (output_mode != allowed_mode) ||
         (length >= DEBUG_TX_BUFFER_SIZE)) return 0;
 
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_SUBMIT);
@@ -102,10 +139,58 @@ int debug_try_write(const char *data, size_t length)
         tx_buffer[tx_write] = (uint8_t)data[i];
         tx_write = Debug_TxNext(tx_write);
     }
+    used = Debug_Queued(tx_read, tx_write, DEBUG_TX_BUFFER_SIZE);
+    if (used > tx_high_water) tx_high_water = used;
     Debug_FillTxFIFO();
     DL_UART_enableInterrupt(UART_0_INST, DL_UART_INTERRUPT_TX);
     if (primask == 0U) __enable_irq();
     return 1;
+}
+
+int debug_try_write(const char *data, size_t length)
+{
+    return Debug_TryWriteMode((const uint8_t *)data, length, 0U);
+}
+
+int debug_try_write_control(const char *data, size_t length)
+{
+    uint8_t mode = output_mode;
+    if (mode > 1U) return 0;
+    return Debug_TryWriteMode((const uint8_t *)data, length, mode);
+}
+
+int debug_try_write_v2(const uint8_t *data, size_t length)
+{
+    uint32_t primask;
+    if ((data == NULL) || (length == 0U) ||
+        (length > DEBUG_V2_BUFFER_SIZE) || (output_mode != 2U)) return 0;
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if ((v2_tx_index != v2_tx_length) || DL_UART_isBusy(UART_0_INST)) {
+        if (primask == 0U) __enable_irq();
+        return 0;
+    }
+    ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_SUBMIT);
+    for (size_t i = 0U; i < length; i++) v2_tx_buffer[i] = data[i];
+    v2_tx_index = 0U;
+    v2_tx_length = (uint16_t)length;
+    if (v2_tx_length > tx_high_water) tx_high_water = v2_tx_length;
+    Debug_FillTxFIFO();
+    DL_UART_enableInterrupt(UART_0_INST, DL_UART_INTERRUPT_TX);
+    if (primask == 0U) __enable_irq();
+    return 1;
+}
+
+void debug_begin_v2_drain(void) { output_mode = 1U; }
+void debug_enter_v2_binary(void)
+{
+    v2_tx_index = v2_tx_length = 0U;
+    output_mode = 2U;
+}
+void debug_leave_v2(void)
+{
+    v2_tx_index = v2_tx_length = 0U;
+    output_mode = 0U;
 }
 
 void debug_set_emergency_callback(DebugEmergencyCallback_t callback)
@@ -118,12 +203,21 @@ void debug_putc(char c)
     uint32_t primask = __get_PRIMASK();
     uint16_t next;
     __disable_irq();
+    if (output_mode != 0U) {
+        if (primask == 0U) __enable_irq();
+        return;
+    }
     next = Debug_TxNext(tx_write);
     if (next == tx_read) {
         debug_stats.tx_dropped++;
     } else {
         tx_buffer[tx_write] = (uint8_t)c;
         tx_write = next;
+        {
+            uint16_t queued = Debug_Queued(tx_read, tx_write,
+                                           DEBUG_TX_BUFFER_SIZE);
+            if (queued > tx_high_water) tx_high_water = queued;
+        }
         Debug_FillTxFIFO();
         DL_UART_enableInterrupt(UART_0_INST, DL_UART_INTERRUPT_TX);
     }
@@ -156,18 +250,21 @@ size_t debug_read(uint8_t *data, size_t capacity)
 
 void debug_print(const char *text)
 {
+    if (output_mode != 0U) return;
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_SUBMIT);
     while (*text != '\0') debug_putc(*text++);
 }
 
 void debug_println(const char *text)
 {
+    if (output_mode != 0U) return;
     debug_print(text);
     debug_newline();
 }
 
 void debug_newline(void)
 {
+    if (output_mode != 0U) return;
     debug_putc('\r');
     debug_putc('\n');
 }
@@ -178,6 +275,7 @@ void debug_printf(const char *format, ...)
     va_list args;
     int length;
 
+    if (output_mode != 0U) return;
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TX_ENCODE);
     va_start(args, format);
     length = vsnprintf(buffer, sizeof(buffer), format, args);
@@ -199,6 +297,9 @@ int debug_kbhit(void)
 
 int debug_tx_idle(void)
 {
+    if (output_mode == 2U)
+        return (v2_tx_index == v2_tx_length) &&
+            !DL_UART_isBusy(UART_0_INST);
     return (tx_read == tx_write) && !DL_UART_isBusy(UART_0_INST);
 }
 
@@ -211,6 +312,27 @@ uint32_t debug_get_emergency_epoch(void)
     if (primask == 0U) __enable_irq();
     return result;
 }
+
+uint8_t debug_get_emergency_source(void)
+{
+    return emergency_source;
+}
+
+uint16_t debug_get_rx_queued(void)
+{
+    return Debug_Queued(rx_read, rx_write, DEBUG_RX_BUFFER_SIZE);
+}
+
+uint16_t debug_get_rx_high_water(void) { return rx_high_water; }
+
+uint16_t debug_get_tx_queued(void)
+{
+    if (output_mode == 2U)
+        return (uint16_t)(v2_tx_length - v2_tx_index);
+    return Debug_Queued(tx_read, tx_write, DEBUG_TX_BUFFER_SIZE);
+}
+
+uint16_t debug_get_tx_high_water(void) { return tx_high_water; }
 
 void debug_get_stats(DebugStats_t *stats)
 {

@@ -44,7 +44,14 @@ class M6TelemetryTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_firmware_and_host_field_inventories_match(self):
-        host_tree = ast.parse((ROOT / "scripts" / "m6_tune.py").read_text())
+        # m6_tune.py is intentionally a thin package entry point.  The
+        # backward-compatible CSV inventory now lives with the shared host
+        # implementation rather than being duplicated in the launcher.
+        host_tree = ast.parse(
+            (ROOT / "python" / "src" / "m6link" / "compat.py").read_text(
+                encoding="utf-8"
+            )
+        )
         host_fields = None
         for node in host_tree.body:
             if isinstance(node, ast.Assign) and any(

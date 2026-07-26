@@ -222,8 +222,12 @@ void M6Telemetry_Init(void)
 
 void M6Telemetry_SetLogging(bool enabled, uint16_t period_ms)
 {
+    uint8_t queued;
     if (enabled && ((period_ms < 20U) || (period_ms > 1000U) ||
                     ((period_ms % 20U) != 0U))) return;
+    queued = (s_write >= s_read) ? (uint8_t)(s_write - s_read) :
+        (uint8_t)(M6_TELEMETRY_QUEUE_SIZE - s_read + s_write);
+    if (!enabled) s_dropped += queued;
     s_enabled = enabled;
     s_period_ms = enabled ? period_ms : 0U;
     s_last_capture_ms = 0U;

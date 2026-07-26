@@ -136,12 +136,16 @@ const ControlParams_t *ControlParams_Active(void);
 const ControlParams_t *ControlParams_Staged(void);
 const ControlParams_t *ControlParams_Defaults(void);
 uint32_t ControlParams_Revision(void);
+uint32_t ControlParams_StageRevision(void);
 ControlParamsSource_t ControlParams_Source(void);
+ControlParamsSource_t ControlParams_StagedSource(void);
 const char *ControlParams_SourceName(ControlParamsSource_t source);
 bool ControlParams_IsDirty(void);
 
 size_t ControlParams_DescriptorCount(void);
 const ControlParamDescriptor_t *ControlParams_DescriptorAt(size_t index);
+bool ControlParams_ReadValueAt(size_t index, const ControlParams_t *params,
+                               ControlParamScalar_t *value);
 ControlParamsResult_t ControlParams_Get(const char *key,
                                         ControlParamReadback_t *readback);
 ControlParamsResult_t ControlParams_Set(const char *key, float value);

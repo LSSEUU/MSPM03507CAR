@@ -15,6 +15,7 @@
 static AppRemoteSnapshot_t remote;
 static AppRemoteConfig_t active_config;
 static uint8_t remote_notice_flags;
+static bool legacy_text_enabled;
 
 #define APP_REMOTE_NOTICE_HEARTBEAT_STOP (1U << 0)
 #define APP_REMOTE_NOTICE_DEMO_TIMEOUT   (1U << 1)
@@ -275,6 +276,7 @@ void AppRemote_Init(void)
 {
     memset(&remote, 0, sizeof(remote));
     remote_notice_flags = 0U;
+    legacy_text_enabled = true;
     AppRemote_GetDefaultConfig(&active_config);
     remote.speed_mm_s = (uint16_t)(active_config.speed_medium_mm_s + 0.5f);
     remote.actions_enabled = (IR_REMOTE_KEYMAP_VERIFIED != 0);
@@ -282,8 +284,18 @@ void AppRemote_Init(void)
     IrReceiver_Init();
 }
 
+void AppRemote_SetLegacyTextEnabled(bool enabled)
+{
+    remote_notice_flags = 0U;
+    legacy_text_enabled = enabled;
+}
+
 static void AppRemote_ServiceNotice(void)
 {
+    if (!legacy_text_enabled) {
+        remote_notice_flags = 0U;
+        return;
+    }
     if ((remote_notice_flags & APP_REMOTE_NOTICE_HEARTBEAT_STOP) != 0U) {
         if (debug_try_write(k_notice_heartbeat_stop,
                 sizeof(k_notice_heartbeat_stop) - 1U)) {
@@ -342,12 +354,14 @@ void AppRemote_Task20ms(uint32_t now_ms)
             IR_REMOTE_HEARTBEAT_MS)) {
         AppRemote_StopManual();
         remote.heartbeat_stops++;
-        remote_notice_flags |= APP_REMOTE_NOTICE_HEARTBEAT_STOP;
+        if (legacy_text_enabled)
+            remote_notice_flags |= APP_REMOTE_NOTICE_HEARTBEAT_STOP;
     } else if ((remote.state == APP_REMOTE_PENDING_DEMO) &&
                SystemTime_Reached(now_ms, remote.pending_deadline_ms)) {
         (void)Diagnostics_ActionCancel(now_ms);
         remote.state = APP_REMOTE_IDLE;
-        remote_notice_flags |= APP_REMOTE_NOTICE_DEMO_TIMEOUT;
+        if (legacy_text_enabled)
+            remote_notice_flags |= APP_REMOTE_NOTICE_DEMO_TIMEOUT;
     } else if ((remote.state == APP_REMOTE_DEMO_RUNNING) &&
                Diagnostics_ActionIsIdle() &&
                (SystemState_Get() == SYSTEM_STATE_IDLE)) {
@@ -355,7 +369,8 @@ void AppRemote_Task20ms(uint32_t now_ms)
     } else if ((remote.state == APP_REMOTE_CAPTURE) &&
                SystemTime_Reached(now_ms, remote.capture_deadline_ms)) {
         remote.state = APP_REMOTE_IDLE;
-        remote_notice_flags |= APP_REMOTE_NOTICE_CAPTURE_END;
+        if (legacy_text_enabled)
+            remote_notice_flags |= APP_REMOTE_NOTICE_CAPTURE_END;
     }
     if (Safety_HasFault() && (remote.state != APP_REMOTE_CAPTURE)) {
         if (remote.heading_hold_active) Heading_Stop();

@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import struct
 import sys
 from typing import Any, Iterable
@@ -23,12 +24,80 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REGISTRY = ROOT / "Tests" / "vectors" / "m6_v2_wire_v1.json"
 DEFAULT_SCHEMA = ROOT / "Tests" / "vectors" / "m6_v2_wire.schema.json"
 DEFAULT_INC = ROOT / "Tests" / "generated" / "m6_v2_wire_vectors.inc"
+DEFAULT_C_WIRE = ROOT / "System" / "m6_wire.h"
 FROZEN_REGISTRY_SHA256 = "23fbd056db28c1fedc7987a34d0893594fddb417f34058851667ffc2d5dca0a2"
 FROZEN_SCHEMA_SHA256 = "95191cda4ea5ed0691126af1fa027ff37b3dd6f920ede9c099cad0b16fce7ede"
 
 
 class RegistryError(ValueError):
     """A deterministic registry or vector invariant was violated."""
+
+
+def _validate_c_wire_registry(registry: dict[str, Any], path: Path = DEFAULT_C_WIRE) -> None:
+    """Keep firmware IDs mechanically bound to the frozen JSON registry."""
+    text = path.read_text(encoding="utf-8")
+    link_text = (ROOT / "System" / "m6_link.h").read_text(encoding="utf-8")
+    combined = text + "\n" + link_text
+    constants = {
+        "M6_WIRE_VERSION": registry["artifact"]["wire_version"],
+        "M6_REGISTRY_REVISION": registry["artifact"]["registry_revision"],
+        "M6_FRAME_DELIMITER": registry["framing"]["delimiter"],
+        "M6_FRAME_ESCAPE": registry["framing"]["escape"],
+        "M6_ESCAPE_XOR": registry["framing"]["escape_xor"],
+        "M6_FRAME_HEADER_SIZE": registry["framing"]["header_size"],
+        "M6_FRAME_CRC_SIZE": registry["framing"]["crc_size"],
+        "M6_MAX_PAYLOAD": registry["framing"]["max_payload"],
+        "M6_MAX_RPC_REQUEST_PAYLOAD": registry["framing"]["max_rpc_request_payload"],
+        "M6_MAX_DECODED_FRAME": registry["framing"]["max_decoded_frame"],
+        "M6_MAX_WIRE_FRAME": registry["framing"]["max_wire_frame"],
+        "M6_INTERBYTE_TIMEOUT_MS": registry["parser"]["interbyte_timeout_ms"],
+        "M6_TOTAL_TIMEOUT_MS": registry["parser"]["total_timeout_ms"],
+        "M6_HELLO_TIMEOUT_MS": registry["semantics"]["resync"]["hello_timeout_ms"],
+        "M6_V1_DRAIN_TIMEOUT_MS": registry["semantics"]["resync"]["tx_drain_timeout_ms"],
+    }
+    for name, value in constants.items():
+        match = re.search(rf"^#define\s+{name}\s+(0x[0-9A-Fa-f]+|[0-9]+)U?\s*$", text, re.MULTILINE)
+        if match is None or int(match.group(1), 0) != value:
+            raise RegistryError(f"C wire constant drift: {name}")
+    for entry in registry["registries"]["frame_types"]:
+        name = f"M6_FRAME_{entry['name']}"
+        match = re.search(rf"^\s*{name}\s*=\s*(0x[0-9A-Fa-f]+|[0-9]+)", text, re.MULTILINE)
+        if match is None or int(match.group(1), 0) != entry["value"]:
+            raise RegistryError(f"C frame registry drift: {name}")
+    for entry in registry["registries"]["capabilities"]:
+        name = f"M6_CAP_{entry['name']}"
+        if name not in text:
+            # Deliberately unpublished capabilities need no firmware symbol.
+            continue
+        match = re.search(rf"^#define\s+{name}\s+\(UINT64_C\(1\)\s*<<\s*([0-9]+)\)", text, re.MULTILINE)
+        if match is None or int(match.group(1)) != entry["bit"]:
+            raise RegistryError(f"C capability registry drift: {name}")
+    masks = {entry["name"]: int(entry["value_hex"], 16)
+             for entry in registry["registries"]["capability_masks"]}
+    match = re.search(
+        r"^#define\s+M6_HANDSHAKE_REQUIRED\s+UINT64_C\(0x([0-9A-Fa-f]+)\)\s*$",
+        text,
+        re.MULTILINE,
+    )
+    if match is None or int(match.group(1), 16) != masks["HANDSHAKE_REQUIRED"]:
+        raise RegistryError("C capability mask drift: M6_HANDSHAKE_REQUIRED")
+    enum_registries = (
+        ("rpc_opcodes", "M6_RPC_"),
+        ("rpc_results", "M6_RESULT_"),
+        ("action_kinds", "M6_ACTION_KIND_"),
+        ("telemetry_streams", "M6_STREAM_"),
+        ("event_codes", "M6_EVENT_"),
+        ("gap_reasons", "M6_GAP_"),
+        ("link_modes", "M6_LINK_"),
+    )
+    for registry_name, prefix in enum_registries:
+        for entry in registry["registries"][registry_name]:
+            name = prefix + entry["name"]
+            if name not in combined:
+                continue
+            match = re.search(rf"^\s*{name}\s*=\s*(0x[0-9A-Fa-f]+|[0-9]+)", combined, re.MULTILINE)
+            if match is None or int(match.group(1), 0) != entry["value"]:
+                raise RegistryError(f"C {registry_name} drift: {name}")
 
 
 def _object_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1612,6 +1681,7 @@ def validate_repository_files(
     _validate_crc_escape_session_vectors(registry)
     wires = _validate_frame_vectors(registry)
     _validate_stream_vectors(registry, wires)
+    _validate_c_wire_registry(registry)
     if check_inc:
         expected_inc = render_inc(registry)
         try:
@@ -1655,6 +1725,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         _validate_crc_escape_session_vectors(registry)
         wires = _validate_frame_vectors(registry)
         _validate_stream_vectors(registry, wires)
+        _validate_c_wire_registry(registry)
         rendered = render_inc(registry)
         if args.print_inc:
             sys.stdout.write(rendered)

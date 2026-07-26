@@ -3,10 +3,14 @@
 #include "app_remote.h"
 #include "diagnostics.h"
 #include "m6_telemetry.h"
+#include "m6_link.h"
+#include "m6_rpc.h"
 #include "motor.h"
 #include "parameter_store.h"
+#include "reset_diag.h"
 #include "safety.h"
 #include "system_state.h"
+#include "system_time.h"
 #include "uart_debug.h"
 #include "wheel_speed.h"
 
@@ -40,6 +44,35 @@ static uint16_t s_apply_completion_id;
 static ControlParamsResult_t s_apply_completion_result;
 static uint32_t s_apply_completion_revision;
 static ControlProtocolCommitCallback_t s_commit_callback;
+static uint32_t s_v2_rx_dropped;
+static bool s_v2_text_frozen;
+
+static bool link_write(const uint8_t *data, uint16_t length, void *context)
+{
+    (void)context;
+    return debug_try_write_v2(data, length) != 0;
+}
+
+static bool link_tx_idle(void *context)
+{
+    (void)context;
+    return debug_tx_idle() != 0;
+}
+
+static bool parse_hex64(const char *text, uint64_t *value)
+{
+    uint64_t result = 0U;
+    if ((text == NULL) || (value == NULL) || (strlen(text) != 16U)) return false;
+    for (uint8_t i = 0U; i < 16U; i++) {
+        uint8_t digit;
+        if ((text[i] >= '0') && (text[i] <= '9')) digit = (uint8_t)(text[i] - '0');
+        else if ((text[i] >= 'a') && (text[i] <= 'f')) digit = (uint8_t)(text[i] - 'a' + 10);
+        else return false;
+        result = (result << 4) | digit;
+    }
+    *value = result;
+    return result != 0U;
+}
 
 static uint8_t next_reply(uint8_t index)
 {
@@ -50,7 +83,7 @@ static void service_replies(void)
 {
     while (s_reply_read != s_reply_write) {
         ControlProtocolReply_t *reply = &s_replies[s_reply_read];
-        if (!debug_try_write(reply->text, reply->length))
+        if (!debug_try_write_control(reply->text, reply->length))
             return;
         s_reply_read = next_reply(s_reply_read);
     }
@@ -257,6 +290,13 @@ static void reply_get(uint16_t id, const char *key)
         queue_reply("ok,%u,meta.source,%s", id, active_source_name());
         return;
     }
+    if (strcmp(key, "meta.capabilities") == 0) {
+        uint64_t capabilities = M6Link_Capabilities();
+        queue_reply("ok,%u,meta.capabilities,%08lx%08lx", id,
+                    (unsigned long)(capabilities >> 32),
+                    (unsigned long)capabilities);
+        return;
+    }
     result = ControlParams_Get(key, &value);
     if (result != CONTROL_PARAMS_OK) {
         queue_reply("err,%u,%s", id, params_error(result));
@@ -430,12 +470,37 @@ static void execute_frame(char *frame)
         }
         return;
     }
+    if (strcmp(fields[1], "mode") == 0) {
+        uint64_t challenge;
+        if ((count != 4U) || (strcmp(fields[2], "v2") != 0) ||
+            !parse_hex64(fields[3], &challenge)) {
+            queue_reply("err,%u,value", id);
+            return;
+        }
+        if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
+            !Diagnostics_ActionIsIdle() || !remote_is_idle() ||
+            ControlParams_HasPendingApply() ||
+            !M6Link_BeginV2(challenge, SystemTime_Now())) {
+            queue_reply("err,%u,state", id);
+            return;
+        }
+        M6Telemetry_SetLogging(false, 0U);
+        Diagnostics_SetLegacyTextEnabled(false);
+        AppRemote_SetLegacyTextEnabled(false);
+        s_v2_text_frozen = true;
+        debug_begin_v2_drain();
+        queue_reply("ok,%u,v2-ready,%s,2,1,96,32,1", id, fields[3]);
+        return;
+    }
     queue_reply("err,%u,verb", id);
 }
 
 void ControlProtocol_Init(ControlProtocolCommitCallback_t commit_callback)
 {
     DebugStats_t stats;
+    ResetDiagSnapshot_t reset;
+    ParameterStoreInfo_t store;
+    M6LinkConfig_t link_config;
     reset_frame();
     s_reply_read = s_reply_write = 0U;
     s_apply_waiting = false;
@@ -448,11 +513,30 @@ void ControlProtocol_Init(ControlProtocolCommitCallback_t commit_callback)
     s_emergency_epoch = debug_get_emergency_epoch();
     debug_get_stats(&stats);
     s_rx_dropped = stats.rx_dropped;
+    s_v2_rx_dropped = stats.rx_dropped;
+    s_v2_text_frozen = false;
+    ResetDiag_GetSnapshot(&reset);
+    ParameterStore_GetInfo(&store);
+    memset(&link_config, 0, sizeof(link_config));
+    link_config.boot_id = reset.boot_id;
+    link_config.raw_reset_cause = reset.raw_cause;
+    link_config.parameter_schema = CONTROL_PARAMS_SCHEMA_VERSION;
+    link_config.capabilities = M6_DEVICE_CAPABILITIES;
+    M6Rpc_Init(commit_callback);
+    M6Link_Init(&link_config, M6Rpc_Execute, link_write, link_tx_idle, NULL,
+                s_emergency_epoch, s_v2_rx_dropped);
 }
 
 bool ControlProtocol_ProcessByte(char byte, uint32_t now_ms)
 {
     uint32_t epoch;
+    DebugStats_t stats;
+    if (M6Link_Mode() != M6_LINK_V1) {
+        debug_get_stats(&stats);
+        M6Link_ProcessByte((uint8_t)byte, now_ms,
+                           debug_get_emergency_epoch(), stats.rx_dropped);
+        return true;
+    }
     (void)now_ms;
     epoch = debug_get_emergency_epoch();
     if (epoch != s_emergency_epoch) {
@@ -501,11 +585,15 @@ void ControlProtocol_WheelBoundary(void)
 {
     ControlParamsCommit_t commit;
     ControlParamsResult_t result;
+    SafetySnapshot_t safety;
 
     if (!ControlParams_HasPendingApply())
         return;
     if (Safety_HasFault()) {
+        Safety_GetSnapshot(&safety);
         ControlParams_CancelPendingApply();
+        M6Rpc_CancelPendingApply(M6_RESULT_SAFETY_FAULT,
+                                 safety.fault_bits);
         if (s_apply_waiting) {
             s_apply_completion_pending = true;
             s_apply_completion_id = s_apply_id;
@@ -518,6 +606,7 @@ void ControlProtocol_WheelBoundary(void)
     result = ControlParams_CommitPendingAtWheelBoundary(&commit);
     if (result == CONTROL_PARAMS_OK) {
         if (s_commit_callback != NULL) s_commit_callback(&commit);
+        M6Rpc_ParameterBoundaryCompleted(result, &commit);
         if (s_apply_waiting) {
             s_apply_completion_pending = true;
             s_apply_completion_id = s_apply_id;
@@ -525,6 +614,7 @@ void ControlProtocol_WheelBoundary(void)
             s_apply_completion_revision = commit.revision;
         }
     } else {
+        M6Rpc_ParameterBoundaryCompleted(result, NULL);
         if (s_apply_waiting) {
             s_apply_completion_pending = true;
             s_apply_completion_id = s_apply_id;
@@ -562,12 +652,28 @@ void ControlProtocol_Service(void)
     if (epoch != s_emergency_epoch) {
         s_emergency_epoch = epoch;
         reset_frame();
-        if (s_apply_waiting) {
+        if (ControlParams_HasPendingApply()) {
             ControlParams_CancelPendingApply();
-            s_apply_waiting = false;
+            M6Rpc_CancelPendingApply(M6_RESULT_WRONG_STATE, 0U);
         }
+        s_apply_waiting = false;
     }
     debug_get_stats(&stats);
+    M6Rpc_Service(SystemTime_Now());
+    M6Link_Service(SystemTime_Now(), epoch, stats.rx_dropped);
+    if ((M6Link_Mode() == M6_LINK_V2_DRAIN) &&
+        (s_reply_read == s_reply_write) && debug_tx_idle()) {
+        debug_enter_v2_binary();
+        M6Link_NotifyV1ReadyComplete(SystemTime_Now());
+    }
+    if (M6Link_Mode() == M6_LINK_V1) {
+        debug_leave_v2();
+        if (s_v2_text_frozen) {
+            Diagnostics_SetLegacyTextEnabled(true);
+            AppRemote_SetLegacyTextEnabled(true);
+            s_v2_text_frozen = false;
+        }
+    }
     if (stats.rx_dropped != s_rx_dropped) {
         if (s_frame_active)
             queue_reply("err,0,frame");

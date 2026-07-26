@@ -50,9 +50,28 @@ class M6ControlProtocolTests(unittest.TestCase):
         self.assertIn("(byte == (uint8_t)'S')", uart)
         self.assertIn("(byte == (uint8_t)' ')", uart)
         self.assertIn("emergency_epoch++", uart)
+        self.assertIn("emergency_source = byte == (uint8_t)'S' ? 1U : 2U", uart)
         self.assertIn("debug_stats.rx_dropped++", uart)
+        self.assertIn("DEBUG_V2_BUFFER_SIZE   224U", uart)
+        self.assertIn("v2_tx_buffer[DEBUG_V2_BUFFER_SIZE]", uart)
+        v2_submit = uart.split("int debug_try_write_v2", 1)[1].split(
+            "void debug_begin_v2_drain", 1
+        )[0]
+        self.assertIn("v2_tx_buffer[i] = data[i]", v2_submit)
+        self.assertNotIn("Debug_TryWriteMode", v2_submit)
         self.assertIn("debug_get_emergency_epoch", protocol)
         self.assertIn("ControlParams_CancelPendingApply", protocol)
+        self.assertIn("M6Rpc_CancelPendingApply", protocol)
+        self.assertIn("Diagnostics_SetLegacyTextEnabled(false)", protocol)
+        self.assertIn("AppRemote_SetLegacyTextEnabled(false)", protocol)
+        diagnostics = (ROOT / "System" / "diagnostics.c").read_text(
+            encoding="utf-8"
+        )
+        remote = (ROOT / "App" / "app_remote.c").read_text(encoding="utf-8")
+        self.assertIn("diagnostics_100ms_read = diagnostics_100ms_write", diagnostics)
+        self.assertIn("Diagnostics_Get100msDropped", diagnostics)
+        self.assertIn("line_trace_report_pending = false", diagnostics)
+        self.assertIn("remote_notice_flags = 0U", remote)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@
 #include "led.h"
 #include "motor.h"
 #include "m6_telemetry.h"
+#include "m6_rpc.h"
 #include "oled.h"
 #include "parameter_store.h"
 #include "reset_diag.h"
@@ -226,6 +227,7 @@ int main(void)
             AppLine_Task20ms(started);
             ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TELEMETRY);
             M6Telemetry_Capture20ms(started);
+            M6Rpc_Telemetry20ms(started);
             Main_CompleteTask(SCHEDULER_TASK_20MS, started,
                               TASK_20MS_PERIOD_MS);
             if (Scheduler_ConsumeHealthyWindow()) {

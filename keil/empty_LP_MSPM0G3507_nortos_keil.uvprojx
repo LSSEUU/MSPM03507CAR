@@ -535,6 +535,26 @@
               <FilePath>../System/control_protocol.c</FilePath>
             </File>
             <File>
+              <FileName>m6_wire.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/m6_wire.c</FilePath>
+            </File>
+            <File>
+              <FileName>m6_link.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/m6_link.c</FilePath>
+            </File>
+            <File>
+              <FileName>m6_rpc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/m6_rpc.c</FilePath>
+            </File>
+            <File>
+              <FileName>m6_action_validate.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/m6_action_validate.c</FilePath>
+            </File>
+            <File>
               <FileName>control_runtime.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/control_runtime.c</FilePath>

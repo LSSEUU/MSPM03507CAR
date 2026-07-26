@@ -50,6 +50,7 @@ void AppRemote_GetConfig(AppRemoteConfig_t *config);
 bool AppRemote_ApplyConfig(const AppRemoteConfig_t *config);
 void AppRemote_Poll(void);
 void AppRemote_Task20ms(uint32_t now_ms);
+void AppRemote_SetLegacyTextEnabled(bool enabled);
 bool AppRemote_StartCapture(uint32_t now_ms);
 bool AppRemote_NormalStop(uint32_t now_ms);
 void AppRemote_GetSnapshot(AppRemoteSnapshot_t *snapshot);

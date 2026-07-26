@@ -156,7 +156,7 @@ class M2SystemTests(unittest.TestCase):
         self.assertNotIn("fault_injection_flash.log", script)
         self.assertNotIn("'-f'", script)
         self.assertIn("#ifdef M2_FAULT_INJECTION_TEST", protocol)
-        self.assertIn('"M6-runtime-20260726-r13-fi"', protocol)
+        self.assertIn('"M6-runtime-20260726-r14-fi"', protocol)
 
     def test_fault_injection_reset_is_zero_pwm_and_test_only(self):
         diagnostics = (ROOT / "System" / "diagnostics.c").read_text(

@@ -10,7 +10,7 @@
 - 当前入口：`Source/main.c`；`Source/ti_msp_dl_config.c/.h` 是受回归测试保护的唯一冻结板级配置，修订号 `20260725`，不得用旧 `.syscfg` 覆盖。
 - 里程碑：M0–M5 已完成；PB11 红外遥控阶段一完成，阶段二已完成全部架空路径和 100 mm/s 落地前进/制动，用户自行测试按键功能无异常，正式落地后退/左右转延后到算法定型后；M6 软件基础设施、架空轮速矩阵和 100 mm/s 落地直行/制动/航向筛选已取证，巡线分级、220 mm/s×5 圈和掉电保持验收尚未完成；M7 尚未开始。
 - 当前运行镜像：`M6-runtime-20260726-r12`，已在误选根目录旧 M5 工程后重新手动下载精确 `.worktrees\m6-runtime-tuning` 正式工程，并经 COM10 确认 schema/revision 1、source `defaults`、generation 0；帮助中不存在 `TEST ONLY`/`FAULT INJECTION`。短按复位报告 raw `0x0C external_boot`、boot 5、coarse 恢复有效；Safety `IDLE`，故障/PWM/目标、四级任务漏期、UART/遥测丢包和格式错误均为 0。
-- 当前验证基线：V2 `m6-v2-wire-v1` registry revision 1 与 C/Python golden vectors 已按 registry/schema canonical SHA-256 `23fbd056db28c1fedc7987a34d0893594fddb417f34058851667ffc2d5dca0a2` / `95191cda4ea5ed0691126af1fa027ff37b3dd6f920ede9c099cad0b16fce7ede` 冻结，104 项主机测试通过。该切片只改文档、JSON、测试和检查脚本，未改目标源码/工程，故最近目标构建仍是待上板 `M6-runtime-20260726-r13` 的 Keil ARMCLANG 6.22 Rebuild 0 error、0 warning，`Code=43868, RO-data=9612, RW-data=8, ZI-data=26184`，最高普通镜像字节 `0x0000D0EF`，低于参数区 `0x0001F800`；专用 256 B `UNINIT` 区仍位于 `0x20207F00`。当前 MCU 仍运行已核对的正式 r12，r13 尚未下载或上板；硬件已验证的 power、短/长 NRST、受控 SYSRST 和 WWDT 分类/保持边界仍属于 r12/r12-fi 证据。真实 HardFault 异常入口、r13 日志负载和长期运行仍待上板验证。
+- 当前验证基线：待上板 `M6-runtime-20260726-r14` 已合并 r13 热路径清理与冻结的 V2 revision 1，完成 C codec/session/window=1 重放、P0–P3 单帧仲裁/背压、V1 resync、参数事务、四路 telemetry/snapshot、fault clear、两阶段轮速/航向动作、航向校准和 ±360° 可配置相对转向；未发布 line action、trace/bulk、灰度批采、motor self-test 或 heading-rate。共享 `m6link`、薄 `m6_tune.py` 和 capability-aware Tk GUI 已完成。全量 137 项主机测试、C golden harness 和冻结 registry checker 通过；Keil ARMCLANG 6.22 Rebuild 0 error、0 warning，`Code=60836, RO-data=9720, RW-data=12, ZI-data=28972`，最高普通镜像字节 `0x000113AF`，低于参数区 `0x0001F800`；专用 256 B `RW_NOINIT` 仍位于 `0x20207F00`。生产 AXF 只含正式 r14 身份，无 `r14-fi`/`TEST ONLY`/`FAULT INJECTION`。当前 MCU 仍运行已核对的正式 r12，r14 尚未下载或上板；真实 V2、日志压力、动作、高速、保存/断电和长期运行仍待硬件验证，已有 reset 分类/保持证据仍只属于 r12/r12-fi。
 - PB11 阶段二进行中：架空的三档、100/220 mm/s 四方向、251 ms 失联制动、`OK`/`0`、直行/±90°/巡线门控均通过；落地以 100 mm/s 完成遥控前进、航向保持和松键制动，用户确认车辆前进且停车正常，并自行确认其余按键功能无异常。正式落地后退/左右转仍保留为 PB11 最终验收项，但按用户决定不再阻塞使用串口急停与物理中止保护的 M6 算法调试。
 - 开始任何工作前先执行 `git status --short`，保留所有不属于当前任务的改动。需要细节时按第 9 节只读取对应文档，不要一次加载全部验证记录或 PDF。
 
@@ -21,12 +21,12 @@
 当前优先目标依次为高速直线、平滑左右弧线、高速陀螺仪角度/角速度控制和系统长期无复位。后续顺序固定为：
 
 1. `r12` 的 power、短/长 NRST 与 `r12-fi` 的受控 SYSRST/WWDT 矩阵均已取证；正式 r12 已恢复，并以精确身份及帮助中无 `TEST ONLY` 双重核对测试入口移除。不得延长、禁用或旁路 WWDT，也不得把合成 scratch 写成真实 HardFault 异常入口通过。
-2. 现有 UART 热路径诊断与 R2 清理已在待上板 r13 源码完成，精确 V2 wire registry、消息字段和 C/Python golden vectors 也已冻结；下一步实现 R3 C/Python codec、分帧、CRC、序号和单帧优先 TX，再接优先队列与背压。UART RX ISR 的 `S`/空格急停必须独立保留。
+2. r13 UART 热路径清理已并入待上板 r14；冻结 V2 的 C codec、HELLO/session、window=1 序号/去重/重放、超时/resync、静态 P0–P3 队列、单帧物理完成仲裁、背压和诊断均已实现。V2 内部必须转义 `S`/空格；RX ISR 在任意 parser 状态先消费裸字节并立即触发 Safety 急停，主循环随后清 pending apply 与 P2/P3，保留 fault/session。下一入口不再是协议编码，而是一次 r14 下载后的完整硬件验收矩阵。
 3. Python `m6link` 已抽包：只有 `Session` 负责 pyserial 创建和串口读写，后台线程统一仲裁 V1/V2、RPC 与最高优先级裸 `S`；默认探测 V2，V1 必须显式 legacy。连接会先等待冻结的 100 ms resync 静默窗并以 transaction 1 精确查询 `meta.capabilities`，再读 identity，因此能从设备 V2 teardown 的 `V1_RESYNC` 恢复；显式 legacy 对不支持该 key 的旧 M6 安全回退。公共模型、查询、参数事务、telemetry、事件、录制/回放/评分、独立航向校准及两阶段动作接口已实现，RPC 不做盲重试，已发送但无确定结果时阻断后续事务。`arm_action()` 只返回 token/10 s 有效期，任何库/CLI/GUI 路径都不会自动 Confirm；航向校准使用独立 RPC，不复用动作 Arm/Confirm。冻结 JSON/schema 随 wheel 打包并在安装态重新校验 SHA；旧 `m6_tune.py` 已成为薄壳，旧参数、CSV/JSON 与评分兼容，旧灰度校准采集器也已改由显式 V1 `Session` 访问 UART，不再直接导入 pyserial。当前 `m6link` 聚焦验证为 28 passed、10 subtests passed，灰度适配与链路交叉测试 14 项通过；尚未连接真实 r14。
 4. 最小桌面 GUI 已实现：默认要求 V2、V1 仅能显式选择；提供 identity/reset/任务/UART/link 诊断、轮速/航向/八路灰度与质心曲线、参数事务、独立 Arm/Confirm/Cancel、能力门控的航向校准、常驻急停、录制/回放/评分和逐步重新 Arm 的测试向导。校准在存在待确认动作租约时拒绝执行；未发布 capability 对应的页签、按钮和动作组会隐藏。当前 16 项 headless/fake Session 测试通过，但尚未连接真实 r14 串口或完成 GUI 长时运行。
-5. GUI/统一链路具备可观测性后，验证日志关闭/开启及不同频率下均无复位、漏期和异常丢包。
+5. r14 上板身份/V1 fallback/V2 HELLO/Safety/reset 核对后，依次运行日志关闭、10、25、50 Hz 各 60 s；要求 boot ID 不变、任务漏期和正常负载丢包为 0，再在 V1 半帧与 V2 背压下分别验证裸 `S`/空格急停。
 6. 完成架空轮速复核后，落地按 `160→180→200→220→250 mm/s` 依次验证直线与左右弧线；任一级出现故障、复位、持续饱和、漏期或明显振荡立即回退。
-7. 随后验证高速直线保持和可配置角度/角速度动作；赛题/赛道公布前不继续试未知直角弯的纯巡线搜索参数。
+7. 随后验证航向保持和 ±45°、±90°、可配置角度动作；`HEADING_RATE_ACTION` 未在 r14 发布，先取得真实角速度响应后再单独设计 r15，赛题/赛道公布前不继续试未知直角弯的纯巡线搜索参数。
 8. 最后才做参数保存、复位/断电保持和 PB11 整体回归。
 
 遥控与串口从 `WheelSpeed_SetTarget` 之后共享轮速 PI、Safety 仲裁和电机输出。赛题/赛道公布前，保留 r11 飞行记录器供未来取证，但不再把未知直角弯的纯巡线搜索调参列为当前入口。证据入口见 `docs/2026-07-26-M6-V2通信与复位可观测性验证记录.md`，当前架构和 R0–R7 切片见 `docs/2026-07-26-M6-V2通信架构设计与实施计划.md`，V2 数值合同见 `docs/2026-07-26-M6-V2-wire-registry-v1.md` 及其指向的机器 JSON；历史 M6 证据仍见 `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md`。同一问题两次有依据的修复仍失败时停止试验并总结证据边界。
@@ -44,10 +44,11 @@
 - 本次手动下载 `r11` 后，工作树工程的 IROM 显示 Size 再次漂移到 `0x20000`，但 OCR 区与实际 scatter 文件仍为 `0x1F800`，既有 r11 MAP/HEX 边界证据不受影响；已在下一次构建前只恢复该安全值，保留工程文件的其他既存改动。
 - 修复后的 `.uvoptx` 配置与脚本防护已经完成两次正式自动下载闭环：`r2` 首次命令成功；`r3` 首次失败后仅原样重试一次并成功，均得到 `Verify OK` 且经 COM10 核对精确身份。日志为未纳入版本控制的 `keil/flash-20260725-140338.log` 和 `keil/flash-20260725-140947.log`。这证明所选工程和 Debug 配置正确，但历史偶发 SWD 故障仍要求每个新下载周期遵守一次原样重试上限。
 - 无线 UART ROM BSL 的手动 BSL+RST 握手已验证，自动 Invoke/Reset 未验证且暂缓。完整证据见 `docs/2026-07-24-下载链路诊断记录.md`。
+- r14 构建后的 `scripts/flash.ps1 -PreflightOnly` 因未枚举到 Horco CMSIS-DAP 序列号 `4041840e` 在擦写前停止，并明确没有发出下载命令；这不消耗正式下载的一次原样重试额度。下一步需用户接通探针、车辆供电并架空车轮后重新预检。
 
 ### 后续里程碑
 
-- M6：运行期参数模型、V1 文本事务、A/B Flash 保存、50 Hz 文本遥测、主机评分/保守轮速搜索和正式下载脚本均已实现；r12 reset diagnostics 已完成 power、外部 BOOTRST/POR、受控 SYSRST/WWDT 上板矩阵并恢复正式镜像。待上板 r13 已完成 R2 周期热路径清理，V2 wire registry/golden vectors 已冻结；下一入口是 R3 C/Python codec 与单帧优先 TX，然后依次进入共享 `m6link`、GUI 和日志负载矩阵。尚不能记为 r13/V2 上板、高速或长期运行硬件完成。
+- M6：待上板 r14 软件候选、共享 `m6link`、薄 CLI 和统一 GUI 已完成主机/目标构建；下一入口是只生成并下载该一个集成候选，再依次完成身份与 V1/V2、日志压力、急停、架空、160–250 mm/s 落地、航向、30 分钟 GUI、保存/复位/断电与 PB11 回归。尚不能记为 r14/V2 上板、高速或长期运行硬件完成。
 - M7：至少 30 分钟连续运行、低电压、急停物理响应、编码器断开、人为堵转、传感器/通信中断和任务超期验收，并形成可复查记录。
 
 ## 3. 已实现主流程与安全边界
@@ -100,9 +101,10 @@ PA23/VREF+ 与 PA21/VREF− 通过 C44（1 µF）耦合，因此两者必须保�
 | `Hardware/` | 电机、编码器、JY61P、模拟灰度 ADC/地址扫描、OLED、UART0、WWDT0、NEC 解码和红外事件队列 |
 | `Control/` | 无硬件依赖的 PI、滤波、轮速、航向与巡线数值控制 |
 | `App/` | 巡线生命周期和红外人工驾驶/演示动作，不直接控制 PWM |
-| `System/` | 时间、调度、状态机、安全仲裁、reset diagnostics、参数模型/协议/持久化、M6 遥测、巡线飞行记录、诊断和健康模型 |
-| `Tests/` | 板级不变量、可移植性、HEX/MAP、M2–M6、NEC、遥控和主机工具回归 |
-| `scripts/` | 主机回归/Keil 构建、M6 参数事务/记录/评分/保守轮速搜索、CMSIS-DAP 下载和镜像边界检查 |
+| `System/` | 时间、调度、状态机、安全仲裁、reset diagnostics、参数/持久化、V1/V2 codec/session/RPC/优先队列/遥测、巡线飞行记录和诊断 |
+| `python/src/m6link` / `python/src/m6gui` | 单串口 Session、公共模型/记录/评分和 capability-aware Tk GUI；GUI/CLI 不直接访问 pyserial |
+| `Tests/` | 板级不变量、可移植性、HEX/MAP、M2–M6、V2 C/Python 合同、GUI、NEC、遥控和主机工具回归 |
+| `scripts/` | 主机回归/Keil 构建、统一 GUI/薄 CLI、CMSIS-DAP 下载、冻结 registry 和镜像边界检查 |
 
 | 能力 | 当前参数/行为 |
 |---|---|
@@ -130,9 +132,9 @@ PA23/VREF+ 与 PA21/VREF− 通过 C44（1 µF）耦合，因此两者必须保�
 | 故障控制 | `S`/空格、`x` | ISR 级急停并进入 `FAULT`；清锁存故障且只回 `IDLE` |
 | M6 参数事务 | `:<id>,get/set/apply/revert/load/defaults/save/log,...` | 小写、无空格、CR/LF 结尾；正文最多 58 字节，回复固定为 `ok,<id>,...` 或 `err,<id>,...`；`S`/空格在任何解析状态仍由 ISR 抢占 |
 
-`s`/`v` 使用冻结快照并每 100 ms 最多输出一行，`v` 在动作 CSV 期间延后，M5 运行中的 `r` 只返回短提示；r11 的既有分时路径已上板复测无 WWDT 复位。r12 为 `v` 增加 `RESET/RESETCTX/RESETIO` 三行并把它们放到所有周期任务之后的后台。待上板 r13 进一步把 M3/M4/M5 与红外通知移出 100/20 ms 周期任务，以三槽紧凑事件队列和固定通知标志交给后台；动作 CSV 连续性优先于旧文本报告，普通/self-test 后续行在动作期间可延后，最长受 300000 ms 动作超时限制。队满累计 `diag100_drop`，V1 TX 拥塞仍由 `tx_drop` 暴露；当前尚无 r13 日志压力下的无复位证据。
+`s`/`v` 使用冻结快照并每 100 ms 最多输出一行，`v` 在动作 CSV 期间延后，M5 运行中的 `r` 只返回短提示；r12 的既有分时/reset 路径已上板复测。r14 继承 r13 的 256 B RX 环、每轮 32 B 预算和后台文本格式化；协商 V2 后冻结旧文本生产者，使用独立 224 B 单帧 TX，只有物理发送完成才重新仲裁。V2 返回 identity/status/reset/task/UART/link、参数、订阅与 snapshot，并发布四路二进制遥测；队列 drop/high-water 均可查询。当前尚无 r14 日志压力或真实串口证据。
 
-`M2_FAULT_INJECTION_TEST` 当前源码使用独立身份 `M6-runtime-20260726-r13-fi`；已完成的硬件复位矩阵使用历史 `r12-fi`。只有测试构建开放大写 `Z`（合成 HardFault scratch 后请求 SYSRST）和大写 `W`（停止喂狗并持续 Safety 制动等待 WWDT）。两者仅在 IDLE、无故障、无活动动作且尚未停喂狗时接受，并先经 Safety 直接制动；`W` 接受后不再返回主循环或处理动作命令，UART ISR 的 `S`/空格仍可抢占。正式 r12/r13 均不含这些入口。`Z` 传入空栈帧，PC/LR/xPSR 预期为 0，只能验证 SYSRST 保持和 scratch 恢复，不能宣称真实 HardFault 向量/栈捕获通过。
+`M2_FAULT_INJECTION_TEST` 当前源码使用独立身份 `M6-runtime-20260726-r14-fi`；已完成的硬件复位矩阵使用历史 `r12-fi`。只有测试构建开放大写 `Z`（合成 HardFault scratch 后请求 SYSRST）和大写 `W`（停止喂狗并持续 Safety 制动等待 WWDT）。两者仅在 IDLE、无故障、无活动动作且尚未停喂狗时接受，并先经 Safety 直接制动；`W` 接受后不再返回主循环或处理动作命令，UART ISR 的 `S`/空格仍可抢占。正式 r12/r14 均不含这些入口。`Z` 传入空栈帧，PC/LR/xPSR 预期为 0，只能验证 SYSRST 保持和 scratch 恢复，不能宣称真实 HardFault 向量/栈捕获通过。
 
 ## 7. 功能与验证结论
 
@@ -145,8 +147,8 @@ PA23/VREF+ 与 PA21/VREF− 通过 C44（1 µF）耦合，因此两者必须保�
 | M5 巡线 | 新感为模拟模块已完成 PB1 接线、64 帧白/黑标定、解锁构建/下载、全黑/全白和八探头静态复核；方向、架空动作、1500 ms 失线与落地圈数仍需在 M6 组合镜像上复验 | `docs/2026-07-25-感为模拟灰度模块恢复记录.md` |
 | PB11 红外阶段一 | 完成；17 个 NEC 键实测唯一且反码正确，键表冻结；连续长按和运行期 `s` 复位缺陷已关闭 | `docs/2026-07-24-PB11红外遥控接入验证记录.md` |
 | PB11 红外阶段二 | 进行中；架空的 100/220 mm/s 四方向、三档/长按、`OK`/`0`、251 ms 失联停车和演示门控通过；落地 100 mm/s 遥控前进/航向保持/松键制动通过，仍缺落地后退/左右转 | 同上 |
-| M6 软件基础设施 | 运行期参数、V1 文本事务、A/B Flash、50 Hz 文本遥测、连续模拟位置、弯道方向锁存和有界失线飞行记录均已实现；100 mm/s 连续模拟位置已实车显著改善。r12 reset diagnostics 已通过主机模型、目标构建，以及 power、短按 NRST/BOOTRST、长按 NRST/POR、受控 SYSRST/WWDT 上板验证。待上板 r13 已完成 R2：周期任务只采集紧凑事件/通知，RX 扩至 256 B、每轮预算 32 字节且最多完成一个事务/旧命令，RX 积压时不 WFI。V2 codec/优先 TX、`m6link`、GUI、真实 HardFault、r13 日志压力与高速长期运行仍未实现/验证 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md`、`docs/2026-07-26-M6-V2通信与复位可观测性验证记录.md` |
-| 当前组合构建/上板证据 | 当前 r13 源树 98 项主机回归通过；正式 r13 Rebuild 为 `Code=43868, RO-data=9612, RW-data=8, ZI-data=26184`，0 error、0 warning，最高普通字节 `0xD0EF`，低于 `0x1F800`，`RW_NOINIT` 仍为 `0x20207F00`/256 B。正式 r12 已验证 raw `0x01` power、`0x0C` external BOOTRST 与 `0x02` external POR；历史测试镜像 r12-fi 已验证 raw `0x1B` SYSRST 恢复 coarse/detail/合成 scratch，以及 raw `0x0E` WWDT 仅恢复 coarse并锁存 Safety `0x20`。当前 MCU 仍是正式 r12，最终快照为 Safety IDLE、PWM/目标/任务 miss/UART/遥测 drop 0；r13 尚未下载，尚未做其运动、日志压力或长期运行验证 | 同上 |
+| M6 软件基础设施 | r14 已合并 r13 热路径、冻结 V2 codec/session/优先队列/RPC/遥测/两阶段动作、共享 `m6link`、薄 CLI 和统一 GUI；r12 reset diagnostics 的 256 B `.noinit` 格式、Safety 唯一电机所有权与 WWDT 门控未改。未发布 line/trace/bulk/灰度批采/self-test/heading-rate。真实 HardFault、r14 链路压力、动作、高速和长期运行仍未验证 | `docs/2026-07-25-M6在线调参与行驶姿态优化验证记录.md`、`docs/2026-07-26-M6-V2通信与复位可观测性验证记录.md` |
+| 当前组合构建/上板证据 | r14 源树全量 137 项回归、C golden harness、registry checker 与 Keil Rebuild 均通过；正式构建为 `Code=60836, RO-data=9720, RW-data=12, ZI-data=28972`，0 error、0 warning，最高普通字节 `0x113AF`，`RW_NOINIT=0x20207F00`/256 B。正式 r12/r12-fi 的 reset 上板证据继续有效；当前 MCU 仍是正式 r12，r14 尚未下载，尚未做 V2、运动、日志压力、保存/断电或长期运行验证 | 同上 |
 
 这些是已有证据的摘要。只有实际重新运行主机测试、Keil 构建或硬件测试后，才能更新相应证据；源代码检查不能写成目标编译或上板验证。
 
@@ -163,7 +165,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 - Keil 工程：`keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx`。
 - 新克隆先运行 `scripts/setup_git_hooks.ps1`；pre-commit 要求工程状态变化同步 `STATE.md`。
 - 本仓库不使用 OpenSpec；不得创建或调用 `openspec/`、`.openspec.yaml`、OpenSpec CLI 或项目级 OpenSpec 技能。设计、实施计划和日期证据统一保存在 `docs/`。
-- `scripts/build_fault_injection.ps1` 是纯构建脚本，不提供下载开关；它只在临时测试工程加入 `M2_FAULT_INJECTION_TEST`，并在本机存在正式 `.uvoptx` 时生成同名测试 options，复用正式下载脚本的完整断言核对 current target、Use Target、CMSIS-AGDI、Horco 序列号、Flash sequence/算法、SWD 协议与 1 MHz。正式 target 不含故障注入入口；既有命令行下载周期已经耗尽，本轮没有为 r13 发起新的命令行下载，只允许用户手动下载精确生成工程。
+- `scripts/build_fault_injection.ps1` 是纯构建脚本，不提供下载开关；它只在临时测试工程加入 `M2_FAULT_INJECTION_TEST`，并在本机存在正式 `.uvoptx` 时生成同名测试 options，复用正式下载脚本的完整断言核对 current target、Use Target、CMSIS-AGDI、Horco 序列号、Flash sequence/算法、SWD 协议与 1 MHz。正式 target 不含故障注入入口；本次 r14 尚未发起正式下载。
 - `keil/Objects`、`keil/ObjectsFaultInjection`、临时工程、构建/下载日志不纳入版本控制。
 - 命令行固件下载必须遵守第 2 节 P1 的一次原样重试上限。
 
@@ -186,7 +188,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 
 1. 新模拟灰度的编译期标定只适用于当前模块、供电、安装高度和赛道材料；任一条件变化后必须重新确认 OUT≤3.3 V、采集 64 帧白/黑数据、更新常量并重新构建。当前几何为离地约 25 mm、传感器行到轮轴约 240 mm、黑线宽约 17 mm；r12 已核对身份/空闲状态，尚未运动验证。
 2. JY61P 接近竖直时会因 pitch≈±90° 产生欧拉角失真；当前必须平放。磁场变化和 30 分钟温漂尚未量化。
-3. OLED 尚未实现总线恢复和时钟拉伸超时；UART 缓冲满会丢数据并计数，运行期不得恢复长同步报告。r13 的诊断事件队满由 `diag100_drop` 计数，但旧 V1 `debug_printf()` 在 TX 拥塞时仍可能形成残行并只体现为 `tx_drop`；这要由后续单帧 TX 仲裁/V2 关闭。
+3. OLED 尚未实现总线恢复和时钟拉伸超时；UART 缓冲满会丢数据并计数，运行期不得恢复长同步报告。r14 在 V2 中使用独立单帧 TX 并冻结旧文本生产者，但旧 V1 `debug_printf()` 拥塞时仍可能形成残行并只体现为 `tx_drop`；V2 队列/drop 语义目前只有主机与目标构建证据，仍需 0/10/25/50 Hz 上板压力验证。
 4. 急停到实际 PWM 引脚归零尚缺示波器/逻辑分析仪测量；编码器断开、人为堵转和保护阈值仍需 M7 架空实测。
 5. M5 没有起终点标志识别，圈数由现场人工判断；现有赛道验收不能外推到不同材料或安装条件。
 6. PB11 与编码器按压开关不可共用。阶段二正式验收仍缺 100 mm/s 落地后退/左右转，但已按用户决定延后且不阻塞串口控制的 M6 算法调试。本轮落地长按中累计 `timing=81`且出现多次心跳正常制动，说明遥控验收时必须保持接收器视距，不能用加长心跳超时换取连续性。
@@ -255,3 +257,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 2026-07-26：冻结 V2 `m6-v2-wire-v1` registry revision 1、JSON schema、C/Python golden vectors 和只读一致性检查器，registry/schema canonical SHA-256 分别为 `23fbd056db28c1fedc7987a34d0893594fddb417f34058851667ffc2d5dca0a2` / `95191cda4ea5ed0691126af1fa027ff37b3dd6f920ede9c099cad0b16fce7ede`；覆盖 CRC 3、escape 1、session 2、legacy ASCII 1、resync 1、frame 10、stream 22 组向量。终审补齐 HELLO 固定 required/required-optional 重叠拒绝、未知 wire version 的 ARMED/ESTABLISHED 分支及普通 async `0xFFFFFFFD`/专用 terminal `0xFFFFFFFE` 边界。检查器、6 项聚焦测试和全量 104 项主机测试均通过，`git diff --check` 无错误；冻结守卫会拒绝 schema/registry 摘要漂移、duplicate key、非有限数、布局/枚举/语义漂移和试图用 `--write-inc` 为 revision 1 重新背书。本切片仅改文档、JSON、测试和工程检查脚本，没有改目标源码、Keil 工程或硬件结论，因此没有重新构建、下载、运动或执行硬件动作；待上板 r13 的既有 Keil 证据不变，当前 MCU 仍为正式 r12。Safety、电机唯一所有者、ISR 裸 `S`/空格急停、WWDT 健康门控和参数事务边界没有功能变化；下一入口为 R3 C/Python codec 与单帧优先 TX。
 
 2026-07-26：完成赛前工作区合并。整理前在仓库外 `Archive/2026-07-26-pre-merge` 保存全引用 bundle、全部分支 HEAD、HC04 独有提交补丁、用户文件 SHA-256、大小写工程差异备份和清单；`git bundle verify` 通过且 `git fsck --full --strict` 无损坏对象。`main` 仅以 fast-forward 前进到 `bd701e5`，随后将 `codex/m6-runtime-tuning` 切换到唯一活动目录；analog、HC04 和旧 M6 三个附加 worktree 已移除，HC04 历史分支保留，两个已完全合并的冗余分支已删除。两份相同灰度例程 ZIP 经 SHA-256 `08E49D34AAAE0BA82827AFF2942716BD42DB51CF9780D421FBD6015B52A17EB2` 复核后只保留一份到仓库外 `References`，重复副本进入回收站且从未暂存；KEIL、Seekfree/红外/DAP 及灰度厂商资料保持目录完整移入 `References`。精确删除既有 88 个只读 `tmp_obj_*`（4,715,270,144 B，约 4.39 GiB）和可重建 `.codex-tmp`；本轮中新出现的第 89 个 `tmp_obj_NGS0DB`（55,566,336 B）不属于该冻结集合，已保留。未执行广域 `git clean`、prune 或 aggressive gc。当前目录结构只剩 `User_Project/MSPM03507CAR`、`References` 和 `Archive`；本次无固件、工程配置或硬件功能变化，未重新运行主机测试、Keil 构建、下载或上车验证。
+
+2026-07-26：形成唯一待上板 `M6-runtime-20260726-r14` 软件候选。固件合并 r13 热路径并实现冻结 V2 codec/session/window=1 重放、V1 resync、静态 P0–P3 单帧仲裁、参数/RPC、四路 telemetry 与 snapshot、fault clear、两阶段独立轮速/航向动作、校准及 ±360° 转向；共享 `m6link`、薄 CLI 和 capability-aware Tk GUI 已接通。最终 137 项主机测试、C golden harness、registry checker 和 Keil 6.22 Rebuild 通过，目标构建 0 error/0 warning，`Code=60836, RO-data=9720, RW-data=12, ZI-data=28972`，最高普通字节 `0x113AF`，256 B `RW_NOINIT` 仍在 `0x20207F00`。生产 AXF 仅含正式 r14 身份且无测试入口。只读下载预检因 Horco `4041840e` 未枚举在擦写前停止，未发出下载命令；当前 MCU 仍为已核对正式 r12，未连接真实 V2、未运动/改参/save，所有 r14 硬件验收项保持未完成。

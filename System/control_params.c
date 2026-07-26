@@ -168,6 +168,7 @@ static bool s_pending_valid;
 static ControlParams_t s_pending;
 static ControlParamsSource_t s_pending_source;
 static uint32_t s_pending_change_mask;
+static uint32_t s_stage_revision;
 
 static const ActiveSlot_t *active_slot(void)
 {
@@ -300,6 +301,7 @@ static void commit_snapshot(const ControlParams_t *params,
     s_staged = *params;
     s_staged_source = source;
     s_dirty = false;
+    s_stage_revision++;
     fill_commit(commit, next, change_mask, diagnostic_boundary);
 }
 
@@ -317,6 +319,7 @@ void ControlParams_Init(void)
     memset(&s_pending, 0, sizeof(s_pending));
     s_pending_source = CONTROL_PARAMS_SOURCE_DEFAULT;
     s_pending_change_mask = CONTROL_PARAMS_CHANGE_NONE;
+    s_stage_revision = 1U;
 }
 
 const ControlParams_t *ControlParams_Active(void)
@@ -339,9 +342,19 @@ uint32_t ControlParams_Revision(void)
     return active_slot()->revision;
 }
 
+uint32_t ControlParams_StageRevision(void)
+{
+    return s_stage_revision;
+}
+
 ControlParamsSource_t ControlParams_Source(void)
 {
     return active_slot()->source;
+}
+
+ControlParamsSource_t ControlParams_StagedSource(void)
+{
+    return s_staged_source;
 }
 
 const char *ControlParams_SourceName(ControlParamsSource_t source)
@@ -373,6 +386,20 @@ const ControlParamDescriptor_t *ControlParams_DescriptorAt(size_t index)
     if (index >= ControlParams_DescriptorCount())
         return NULL;
     return &k_descriptors[index].public_descriptor;
+}
+
+bool ControlParams_ReadValueAt(size_t index, const ControlParams_t *params,
+                               ControlParamScalar_t *value)
+{
+    float raw;
+    if ((index >= ControlParams_DescriptorCount()) || (params == NULL) ||
+        (value == NULL)) return false;
+    raw = read_value(params, &k_descriptors[index]);
+    if (k_descriptors[index].storage == PARAM_STORAGE_BOOL32)
+        value->unsigned_value = (uint32_t)raw;
+    else
+        value->real = raw;
+    return true;
 }
 
 ControlParamsResult_t ControlParams_Get(const char *key,
@@ -450,6 +477,7 @@ ControlParamsResult_t ControlParams_Set(const char *key, float value)
     write_value(&s_staged, descriptor, value);
     s_staged_source = CONTROL_PARAMS_SOURCE_RUNTIME;
     refresh_dirty(true);
+    s_stage_revision++;
     return CONTROL_PARAMS_OK;
 }
 
@@ -489,6 +517,7 @@ ControlParamsResult_t ControlParams_StageDefaults(void)
     s_staged = k_defaults;
     s_staged_source = CONTROL_PARAMS_SOURCE_DEFAULT;
     refresh_dirty(false);
+    s_stage_revision++;
     return CONTROL_PARAMS_OK;
 }
 
@@ -502,6 +531,7 @@ ControlParamsResult_t ControlParams_Revert(void)
     s_staged = slot->params;
     s_staged_source = slot->source;
     s_dirty = false;
+    s_stage_revision++;
     return CONTROL_PARAMS_OK;
 }
 
@@ -523,6 +553,7 @@ ControlParamsResult_t ControlParams_StageExternal(
     s_staged = *params;
     s_staged_source = source;
     refresh_dirty(false);
+    s_stage_revision++;
     return CONTROL_PARAMS_OK;
 }
 
@@ -548,6 +579,7 @@ ControlParamsResult_t ControlParams_BootRestore(
     s_staged_source = source;
     s_dirty = false;
     s_pending_valid = false;
+    s_stage_revision = 1U;
     return CONTROL_PARAMS_OK;
 }
 

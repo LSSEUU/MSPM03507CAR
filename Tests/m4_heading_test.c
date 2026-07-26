@@ -101,6 +101,35 @@ static void test_turn_rate_damping(void)
            HEADING_TURN_MAX_SPEED_MM_S);
 }
 
+static void test_configurable_turns_cross_wrap_continuously(void)
+{
+    HeadingSnapshot_t snapshot;
+    uint32_t frame = HEADING_CALIBRATION_SAMPLES;
+    calibrate_at(0.0f);
+    assert(Heading_StartTurn(360.0f));
+    Heading_Update(90.0f, ++frame, 500U);
+    Heading_Update(179.0f, ++frame, 520U);
+    Heading_Update(-91.0f, ++frame, 540U);
+    Heading_Update(0.0f, ++frame, 560U);
+    Heading_Update(0.0f, ++frame, 580U);
+    Heading_Update(0.0f, ++frame, 600U);
+    Heading_GetSnapshot(&snapshot);
+    assert(snapshot.complete);
+    assert(close_to(snapshot.error_deg, 0.0f, 0.01f));
+
+    Heading_Stop();
+    assert(Heading_StartTurn(-210.0f));
+    Heading_Update(-90.0f, ++frame, 620U);
+    Heading_Update(-179.0f, ++frame, 640U);
+    Heading_Update(150.0f, ++frame, 660U);
+    Heading_Update(150.0f, ++frame, 680U);
+    Heading_Update(150.0f, ++frame, 700U);
+    Heading_GetSnapshot(&snapshot);
+    assert(snapshot.complete);
+    assert(close_to(snapshot.target_deg, 150.0f, 0.01f));
+    assert(close_to(snapshot.error_deg, 0.0f, 0.01f));
+}
+
 static void test_direct_rate_preferred_then_stale_fallback(void)
 {
     HeadingSnapshot_t snapshot;
@@ -185,6 +214,7 @@ int main(void)
     test_heading_hold_correction();
     test_nonblocking_turn_and_wrap();
     test_turn_rate_damping();
+    test_configurable_turns_cross_wrap_continuously();
     test_direct_rate_preferred_then_stale_fallback();
     test_calibration_dispersion_gate();
     test_calibration_rate_gate();

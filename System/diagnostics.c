@@ -148,6 +148,7 @@ static Diagnostics100msEvent_t
 static uint8_t diagnostics_100ms_read;
 static uint8_t diagnostics_100ms_write;
 static uint32_t diagnostics_100ms_dropped;
+static bool legacy_text_enabled;
 
 #ifdef M2_FAULT_INJECTION_TEST
 static bool fault_injection_stop_watchdog;
@@ -1086,14 +1087,58 @@ void Diagnostics_Init(void)
     heading_diag_hold_speed_mm_s = HEADING_STRAIGHT_TEST_SPEED_MM_S;
     heading_diag_hold_duration_ms = HEADING_STRAIGHT_TEST_DURATION_MS;
     line_previous_state = APP_LINE_IDLE;
+    line_trace_report_pending = false;
+    line_trace_report_header_pending = false;
+    line_trace_report_index = 0U;
     memset(diagnostics_100ms_queue, 0, sizeof(diagnostics_100ms_queue));
     diagnostics_100ms_read = diagnostics_100ms_write = 0U;
     diagnostics_100ms_dropped = 0U;
+    legacy_text_enabled = true;
     Diagnostics_ResetSpeedMetrics();
 #ifdef M2_FAULT_INJECTION_TEST
     fault_injection_stop_watchdog = false;
 #endif
     Safety_StopMotor();
+}
+
+void Diagnostics_SetLegacyTextEnabled(bool enabled)
+{
+    uint32_t cancelled = (diagnostics_100ms_write >= diagnostics_100ms_read) ?
+        (uint32_t)(diagnostics_100ms_write - diagnostics_100ms_read) :
+        (uint32_t)(DIAGNOSTICS_100MS_QUEUE_SIZE - diagnostics_100ms_read +
+                   diagnostics_100ms_write);
+    cancelled += gray_print_pending ? 1U : 0U;
+    cancelled += gray_report_pending ? 1U : 0U;
+    cancelled += report_pending ? 1U : 0U;
+    cancelled += infrared_report_pending ? 1U : 0U;
+    cancelled += safety_report_pending ? 1U : 0U;
+    cancelled += line_calibration_report_pending ? 1U : 0U;
+    cancelled += line_trace_report_pending ? 1U : 0U;
+    diagnostics_100ms_dropped += cancelled;
+    /* Cancel every not-yet-started text producer both on freeze and thaw.
+     * This prevents V2 background formatting and stale text after resync. */
+    gray_print_pending = false;
+    gray_report_pending = false;
+    gray_report_phase = 0U;
+    report_pending = false;
+    report_line = 0U;
+    infrared_report_pending = false;
+    infrared_report_line = 0U;
+    safety_report_pending = false;
+    safety_report_line = 0U;
+    safety_report_next_line_ms = 0U;
+    line_calibration_report_pending = false;
+    line_calibration_report_line = 0U;
+    line_trace_report_pending = false;
+    line_trace_report_header_pending = false;
+    line_trace_report_index = 0U;
+    diagnostics_100ms_read = diagnostics_100ms_write;
+    legacy_text_enabled = enabled;
+}
+
+uint32_t Diagnostics_Get100msDropped(void)
+{
+    return diagnostics_100ms_dropped;
 }
 
 void Diagnostics_RunBootSelfTest(void)
@@ -1117,6 +1162,7 @@ void Diagnostics_RunBootSelfTest(void)
 
 void Diagnostics_PrintHelp(void)
 {
+    if (!legacy_text_enabled) return;
     debug_println("Commands: h=help s=status d=all e=encoder y=gyro q=grayscale t=IR capture");
     debug_println("          o=OLED pattern p/f=confirm l=LED c=comm m=motor A=arm");
     debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
@@ -1167,6 +1213,7 @@ static void Diagnostics_StartZeroPwmFaultTest(uint32_t now_ms,
 
 void Diagnostics_PrintReport(void)
 {
+    if (!legacy_text_enabled) return;
     if (report_pending) {
         debug_println("Status report already queued.");
         return;
@@ -1207,6 +1254,10 @@ static void Diagnostics_ServiceLineEvents(void)
 {
     AppLineSnapshot_t app;
     AppLine_GetSnapshot(&app);
+    if (!legacy_text_enabled) {
+        line_previous_state = app.state;
+        return;
+    }
     if ((line_previous_state == APP_LINE_RUNNING) &&
                (app.state == APP_LINE_IDLE)) {
         debug_printf("M5 RESULT elapsed=%lu state=%s valid=%u pos_x1000=%ld conf_x1000=%lu\r\n",
@@ -1387,7 +1438,7 @@ void Diagnostics_Poll(void)
     Diagnostics_ServiceLineEvents();
     ControlProtocol_Service();
 
-    if (gray_print_pending) {
+    if (legacy_text_enabled && gray_print_pending) {
         Grayscale_GetSnapshot(&gray);
         if (gray.scan_count != gray_requested_scan_count) {
             gray_print_pending = false;
@@ -1612,6 +1663,10 @@ static void Diagnostics_Service100ms(const Diagnostics100msEvent_t *event);
 void Diagnostics_ServiceBackground(void)
 {
     uint32_t now_ms = SystemTime_Now();
+    if (!legacy_text_enabled) {
+        diagnostics_100ms_read = diagnostics_100ms_write;
+        return;
+    }
     if (safety_report_pending &&
         SystemTime_Reached(now_ms, safety_report_next_line_ms) &&
         !Diagnostics_ActionTelemetryActive()) {
@@ -1662,6 +1717,17 @@ void Diagnostics_Task100ms(void)
         }
     }
 
+    if (!legacy_text_enabled) {
+        if (!boot_reported &&
+            ((uint32_t)(now_ms - boot_started_ms) >=
+             BOOT_SELF_TEST_SETTLE_MS)) {
+            boot_reported = true;
+            if (safety.fault_bits == 0U)
+                (void)SystemState_CompleteSelfTest(true);
+        }
+        return;
+    }
+
     next = Diagnostics_100msNext(diagnostics_100ms_write);
     if (next == diagnostics_100ms_read) {
         diagnostics_100ms_dropped++;
@@ -1703,6 +1769,7 @@ static void Diagnostics_Service100ms(const Diagnostics100msEvent_t *event)
 {
     uint32_t now_ms = event->now_ms;
     bool legacy_csv_enabled = event->legacy_csv_enabled;
+    if (!legacy_text_enabled) return;
     if (!boot_reported &&
         ((uint32_t)(now_ms - boot_started_ms) >= BOOT_SELF_TEST_SETTLE_MS)) {
         boot_reported = true;

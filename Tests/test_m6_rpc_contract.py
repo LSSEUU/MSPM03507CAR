@@ -1,0 +1,74 @@
+import pathlib
+import unittest
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+class M6RpcContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.source = (ROOT / "System" / "m6_rpc.c").read_text(encoding="utf-8")
+
+    def _opcode_block(self, opcode: str, next_opcode: str) -> str:
+        start = self.source.index(f"if (opcode == M6_RPC_{opcode})")
+        end = self.source.index(f"if (opcode == M6_RPC_{next_opcode})", start)
+        return self.source[start:end]
+
+    def test_session_close_length_precedes_state(self):
+        block = self._opcode_block("SESSION_CLOSE", "FAULT_CLEAR")
+        self.assertLess(block.index("length != 0U"), block.index("action_base_safe()"))
+        self.assertIn("M6_RESULT_BAD_LENGTH", block)
+
+    def test_param_defaults_distinguishes_stale_stage(self):
+        block = self._opcode_block("PARAM_DEFAULTS", "PARAM_LOAD")
+        self.assertIn("if (length != 4U) return M6_RESULT_BAD_LENGTH", block)
+        self.assertIn("*detail = ControlParams_StageRevision()", block)
+        self.assertIn("M6_RESULT_STALE_STAGE_REVISION", block)
+
+    def test_heading_calibrate_length_precedes_boot_validation(self):
+        start = self.source.index("if (opcode == M6_RPC_HEADING_CALIBRATE)")
+        block = self.source[start:self.source.index("return M6_RESULT_UNSUPPORTED_OPCODE", start)]
+        self.assertLess(block.index("length != 4U"), block.index("u32(body) != s_boot_id"))
+        self.assertIn("M6_RESULT_BAD_LENGTH", block)
+
+    def test_parameter_reads_distinguish_length_from_reserved_bytes(self):
+        for opcode, next_opcode in (
+            ("PARAM_VALUE_GET", "PARAM_DESCRIPTOR_GET"),
+            ("PARAM_DESCRIPTOR_GET", "SESSION_CLOSE"),
+        ):
+            block = self._opcode_block(opcode, next_opcode)
+            length = block.index("length != 4U")
+            reserved = block.index("body[1] | body[2] | body[3]")
+            self.assertLess(length, reserved)
+            self.assertIn("M6_RESULT_BAD_LENGTH", block[:reserved])
+            self.assertIn("M6_RESULT_MALFORMED", block[reserved:])
+
+    def test_snapshot_uses_shared_body_without_consuming_sample_id(self):
+        block = self._opcode_block("SNAPSHOT_GET", "IDENTITY_GET")
+        self.assertIn("fill_telemetry_payload", block)
+        self.assertIn("telemetry_length - 8U", block)
+        self.assertNotIn("s_next_sample_id", block)
+        telemetry = self.source[self.source.index("static bool fill_telemetry_payload"):
+                                self.source.index("void M6Rpc_Telemetry20ms")]
+        for length in (40, 60, 56, 72):
+            self.assertIn(f"*payload_length = {length}U", telemetry)
+
+    def test_stale_results_report_device_current_value(self):
+        for result in (
+            "M6_RESULT_STALE_ACTIVE_REVISION",
+            "M6_RESULT_STALE_STAGE_REVISION",
+            "M6_RESULT_STALE_GENERATION",
+        ):
+            cursor = 0
+            while True:
+                index = self.source.find(f"return {result};", cursor)
+                if index < 0:
+                    break
+                prefix = self.source[max(0, index - 120):index]
+                self.assertIn("*detail =", prefix, f"missing detail before {result}")
+                cursor = index + 1
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -2,8 +2,11 @@
 
 #include "app_remote.h"
 #include "m6_telemetry.h"
+#include "m6_link.h"
+#include "m6_rpc.h"
 #include "motor.h"
 #include "parameter_store.h"
+#include "reset_diag.h"
 #include "safety.h"
 #include "system_state.h"
 #include "uart_debug.h"
@@ -26,6 +29,7 @@ static bool logging_enabled;
 static uint16_t logging_period;
 static uint32_t callback_count;
 static ControlParamsCommit_t last_commit;
+static M6LinkMode_t link_mode = M6_LINK_V1;
 
 int debug_try_write(const char *data, size_t length)
 {
@@ -36,11 +40,120 @@ int debug_try_write(const char *data, size_t length)
     return 1;
 }
 
+int debug_try_write_control(const char *data, size_t length)
+{
+    return debug_try_write(data, length);
+}
+
+int debug_try_write_v2(const uint8_t *data, size_t length)
+{
+    (void)data;
+    (void)length;
+    return 1;
+}
+
+int debug_tx_idle(void) { return 1; }
+void debug_begin_v2_drain(void) {}
+void debug_enter_v2_binary(void) {}
+void debug_leave_v2(void) { link_mode = M6_LINK_V1; }
+
 uint32_t debug_get_emergency_epoch(void) { return emergency_epoch; }
+uint8_t debug_get_emergency_source(void) { return 0U; }
 void debug_get_stats(DebugStats_t *stats) { *stats = debug_stats; }
+
+uint32_t SystemTime_Now(void) { return 100U; }
+
+void ResetDiag_GetSnapshot(ResetDiagSnapshot_t *snapshot)
+{
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->boot_id = 7U;
+}
+
+void M6Rpc_Init(ControlProtocolCommitCallback_t commit_callback)
+{
+    (void)commit_callback;
+}
+
+M6Result_t M6Rpc_Execute(uint16_t opcode, const uint8_t *body,
+                         uint16_t body_length, uint8_t *success_body,
+                         uint16_t *success_length, uint32_t *detail,
+                         void *context)
+{
+    (void)opcode;
+    (void)body;
+    (void)body_length;
+    (void)success_body;
+    (void)success_length;
+    (void)detail;
+    (void)context;
+    return M6_RESULT_UNSUPPORTED_OPCODE;
+}
+
+void M6Rpc_Service(uint32_t now_ms) { (void)now_ms; }
+void M6Rpc_Telemetry20ms(uint32_t now_ms) { (void)now_ms; }
+void M6Rpc_ParameterBoundaryCompleted(ControlParamsResult_t result,
+                                      const ControlParamsCommit_t *commit)
+{
+    (void)result;
+    (void)commit;
+}
+void M6Rpc_CancelPendingApply(M6Result_t result, uint32_t detail)
+{
+    (void)result;
+    (void)detail;
+}
+
+void M6Link_Init(const M6LinkConfig_t *config, M6RpcExecutor_t executor,
+                 M6LinkWrite_t write, M6LinkTxIdle_t tx_idle, void *context,
+                 uint32_t initial_emergency_epoch,
+                 uint32_t overflow_epoch)
+{
+    (void)config;
+    (void)executor;
+    (void)write;
+    (void)tx_idle;
+    (void)context;
+    (void)initial_emergency_epoch;
+    (void)overflow_epoch;
+    link_mode = M6_LINK_V1;
+}
+
+M6LinkMode_t M6Link_Mode(void) { return link_mode; }
+uint64_t M6Link_Capabilities(void) { return M6_DEVICE_CAPABILITIES; }
+uint64_t M6Link_EnabledCapabilities(void) { return M6_DEVICE_CAPABILITIES; }
+bool M6Link_BeginV2(uint64_t challenge, uint32_t now_ms)
+{
+    (void)challenge;
+    (void)now_ms;
+    link_mode = M6_LINK_V2_DRAIN;
+    return true;
+}
+bool M6Link_DrainFailed(void) { return false; }
+void M6Link_NotifyV1ReadyComplete(uint32_t now_ms)
+{
+    (void)now_ms;
+    link_mode = M6_LINK_V2_ARMED;
+}
+void M6Link_ProcessByte(uint8_t byte, uint32_t now_ms,
+                        uint32_t current_emergency_epoch,
+                        uint32_t overflow_epoch)
+{
+    (void)byte;
+    (void)now_ms;
+    (void)current_emergency_epoch;
+    (void)overflow_epoch;
+}
+void M6Link_Service(uint32_t now_ms, uint32_t current_emergency_epoch,
+                    uint32_t overflow_epoch)
+{
+    (void)now_ms;
+    (void)current_emergency_epoch;
+    (void)overflow_epoch;
+}
 
 bool Diagnostics_WheelSpeedDiagnosticActive(void) { return diagnostic_active; }
 bool Diagnostics_ActionIsIdle(void) { return actions_idle; }
+void Diagnostics_SetLegacyTextEnabled(bool enabled) { (void)enabled; }
 
 void M6Telemetry_SetLogging(bool enabled, uint16_t period_ms)
 {
@@ -53,6 +166,7 @@ void AppRemote_GetSnapshot(AppRemoteSnapshot_t *snapshot)
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->state = APP_REMOTE_IDLE;
 }
+void AppRemote_SetLegacyTextEnabled(bool enabled) { (void)enabled; }
 
 void WheelSpeed_GetSnapshot(WheelSpeedSnapshot_t *snapshot)
 {
