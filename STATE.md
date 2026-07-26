@@ -44,7 +44,7 @@
 - 本次手动下载 `r11` 后，工作树工程的 IROM 显示 Size 再次漂移到 `0x20000`，但 OCR 区与实际 scatter 文件仍为 `0x1F800`，既有 r11 MAP/HEX 边界证据不受影响；已在下一次构建前只恢复该安全值，保留工程文件的其他既存改动。
 - 修复后的 `.uvoptx` 配置与脚本防护已经完成两次正式自动下载闭环：`r2` 首次命令成功；`r3` 首次失败后仅原样重试一次并成功，均得到 `Verify OK` 且经 COM10 核对精确身份。日志为未纳入版本控制的 `keil/flash-20260725-140338.log` 和 `keil/flash-20260725-140947.log`。这证明所选工程和 Debug 配置正确，但历史偶发 SWD 故障仍要求每个新下载周期遵守一次原样重试上限。
 - 无线 UART ROM BSL 的手动 BSL+RST 握手已验证，自动 Invoke/Reset 未验证且暂缓。完整证据见 `docs/2026-07-24-下载链路诊断记录.md`。
-- r14 构建后的 `scripts/flash.ps1 -PreflightOnly` 因未枚举到 Horco CMSIS-DAP 序列号 `4041840e` 在擦写前停止，并明确没有发出下载命令；这不消耗正式下载的一次原样重试额度。下一步需用户接通探针、车辆供电并架空车轮后重新预检。
+- r14 首次只读预检因 Horco `4041840e` 未连接在擦写前停止；用户接通后，同一预检确认 Keil 6.22、正式工程、Use Target/CMSIS-AGDI、Horco 序列号、SWD 1 MHz、Flash 算法和 r14 AXF 全部匹配。随后一次正式脚本调用自动执行允许的两次完全相同下载命令，两次均在 TI pack `DebugPortStart` 报 `E310 Debug access failed`、无法写 AP `0x00000001` 的寄存器 `0x0C`、`Cannot access Memory` 和 Target DLL 取消，均无 `Verify OK`；日志显示失败发生在 erase/program 前。已按上限停止，不得发第三次命令或切换自动化方法；下一步由用户在 Keil 中手动下载当前唯一正式工程。
 
 ### 后续里程碑
 
@@ -259,3 +259,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_fault_injectio
 2026-07-26：完成赛前工作区合并。整理前在仓库外 `Archive/2026-07-26-pre-merge` 保存全引用 bundle、全部分支 HEAD、HC04 独有提交补丁、用户文件 SHA-256、大小写工程差异备份和清单；`git bundle verify` 通过且 `git fsck --full --strict` 无损坏对象。`main` 仅以 fast-forward 前进到 `bd701e5`，随后将 `codex/m6-runtime-tuning` 切换到唯一活动目录；analog、HC04 和旧 M6 三个附加 worktree 已移除，HC04 历史分支保留，两个已完全合并的冗余分支已删除。两份相同灰度例程 ZIP 经 SHA-256 `08E49D34AAAE0BA82827AFF2942716BD42DB51CF9780D421FBD6015B52A17EB2` 复核后只保留一份到仓库外 `References`，重复副本进入回收站且从未暂存；KEIL、Seekfree/红外/DAP 及灰度厂商资料保持目录完整移入 `References`。精确删除既有 88 个只读 `tmp_obj_*`（4,715,270,144 B，约 4.39 GiB）和可重建 `.codex-tmp`；本轮中新出现的第 89 个 `tmp_obj_NGS0DB`（55,566,336 B）不属于该冻结集合，已保留。未执行广域 `git clean`、prune 或 aggressive gc。当前目录结构只剩 `User_Project/MSPM03507CAR`、`References` 和 `Archive`；本次无固件、工程配置或硬件功能变化，未重新运行主机测试、Keil 构建、下载或上车验证。
 
 2026-07-26：形成唯一待上板 `M6-runtime-20260726-r14` 软件候选。固件合并 r13 热路径并实现冻结 V2 codec/session/window=1 重放、V1 resync、静态 P0–P3 单帧仲裁、参数/RPC、四路 telemetry 与 snapshot、fault clear、两阶段独立轮速/航向动作、校准及 ±360° 转向；共享 `m6link`、薄 CLI 和 capability-aware Tk GUI 已接通。最终 137 项主机测试、C golden harness、registry checker 和 Keil 6.22 Rebuild 通过，目标构建 0 error/0 warning，`Code=60836, RO-data=9720, RW-data=12, ZI-data=28972`，最高普通字节 `0x113AF`，256 B `RW_NOINIT` 仍在 `0x20207F00`。生产 AXF 仅含正式 r14 身份且无测试入口。只读下载预检因 Horco `4041840e` 未枚举在擦写前停止，未发出下载命令；当前 MCU 仍为已核对正式 r12，未连接真实 V2、未运动/改参/save，所有 r14 硬件验收项保持未完成。
+
+2026-07-26：用户接通 Horco 后，r14 只读下载预检通过；正式脚本按规则执行两次完全相同命令，两次均在 TI pack `DebugPortStart` 以 `E310 Debug access failed`/`Cannot access Memory`/Target DLL 取消失败，没有 `Verify OK`，当前日志 `keil/flash-20260726-205356.log` 显示未进入 erase/program。已按两次上限停止，没有第三次命令、BSL 或 GUI 自动化；r14 仍无实际运行证据，当前最后确认的 MCU 身份仍是正式 r12。下一步必须由用户手动下载当前唯一主目录的正式 Keil 工程，再通过串口精确核对 r14。
