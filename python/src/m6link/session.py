@@ -179,6 +179,7 @@ class Session:
         self._subscriptions: dict[TelemetryStream, int] = {}
         self._recording_thread: threading.Thread | None = None
         self._recording_stop: threading.Event | None = None
+        self._recording_ready: threading.Event | None = None
         self._recording_result: object | None = None
         self._recording_error: BaseException | None = None
         self._last_async_sequence = 0
@@ -1131,7 +1132,9 @@ class Session:
         from .recording import Recorder
 
         stop = threading.Event()
+        ready = threading.Event()
         self._recording_stop = stop
+        self._recording_ready = ready
         self._recording_result = None
         self._recording_error = None
 
@@ -1146,6 +1149,7 @@ class Session:
                     identity=self.identity,
                     parameters=parameters,
                     stop_event=stop,
+                    ready_event=ready,
                 )
             except BaseException as exc:
                 self._recording_error = exc
@@ -1153,6 +1157,19 @@ class Session:
         thread = threading.Thread(target=run, name=f"m6link-recorder:{self.port}", daemon=True)
         self._recording_thread = thread
         thread.start()
+        ready_deadline = time.monotonic() + max(2.0, self.timeout * 5.0)
+        while not ready.wait(timeout=0.02):
+            if not thread.is_alive():
+                error = self._recording_error
+                self._recording_thread = None
+                self._recording_ready = None
+                if error is not None:
+                    self._recording_error = None
+                    raise error
+                raise RuntimeError("recording stopped before becoming ready")
+            if time.monotonic() >= ready_deadline:
+                stop.set()
+                raise TimeoutError("recording did not become ready before timeout")
         return thread
 
     def stop_recording(self, *, timeout: float = 5.0) -> object | None:
@@ -1165,6 +1182,7 @@ class Session:
         if thread.is_alive():
             raise TimeoutError("recording did not stop before timeout")
         self._recording_thread = None
+        self._recording_ready = None
         if self._recording_error is not None:
             error = self._recording_error
             self._recording_error = None

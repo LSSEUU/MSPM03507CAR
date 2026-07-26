@@ -176,6 +176,7 @@ class ControllerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fake.json"
             self.controller.start_recording(path)
+            self.assertTrue(self.controller._diagnostics_suspended)
             pump(self.controller, lambda: self.controller.state.recording)
             for _ in range(3):
                 time.sleep(0.045)
@@ -183,6 +184,7 @@ class ControllerTest(unittest.TestCase):
                 pump(self.controller)
             self.controller.stop_recording()
             pump(self.controller, lambda: not self.controller.state.recording)
+            self.assertFalse(self.controller._diagnostics_suspended)
             self.assertTrue(path.exists())
             self.controller.replay(path)
             pump(self.controller, lambda: self.controller.state.replay_result is not None)

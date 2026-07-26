@@ -406,6 +406,7 @@ class Controller:
         self._pending: set[str] = set()
         self._pending_lock = threading.Lock()
         self._last_diag_refresh = -math.inf
+        self._diagnostics_suspended = False
         self._closed = False
 
     @property
@@ -520,7 +521,10 @@ class Controller:
             or self._session is None
         ):
             return
-        include_diagnostics = self.clock() - self._last_diag_refresh >= 1.0
+        include_diagnostics = (
+            not self._diagnostics_suspended
+            and self.clock() - self._last_diag_refresh >= 1.0
+        )
         session = self._session
         self._submit(
             "refresh",
@@ -609,6 +613,7 @@ class Controller:
             self.state.status_text = f"正在录制：{self.state.recording_path}"
         elif operation == "record_stop":
             self.state.recording = False
+            self._diagnostics_suspended = False
             self.state.status_text = "录制已停止"
         elif operation == "replay":
             summary, samples = normalize_replay(result)
@@ -633,6 +638,7 @@ class Controller:
             self.state.phase = "error"
         elif operation == "record_start":
             self.state.recording = False
+            self._diagnostics_suspended = False
         self.state.last_error = f"{operation}: {exc}"
         self.state.status_text = f"操作失败：{exc}"
         self.state.generation += 1
@@ -644,6 +650,7 @@ class Controller:
         self.state.capabilities = frozenset()
         self.state.armed = None
         self.state.recording = False
+        self._diagnostics_suspended = False
         self.state.status_text = "未连接"
         self.state.generation += 1
 
@@ -924,10 +931,14 @@ class Controller:
             return False
         self.state.recording_path = str(path)
         session = self._session
-        return self._submit(
+        self._diagnostics_suspended = True
+        submitted = self._submit(
             "record_start",
             lambda: self._call(session, ("start_recording",), str(path)),
         )
+        if not submitted:
+            self._diagnostics_suspended = False
+        return submitted
 
     def stop_recording(self) -> bool:
         if self._session is None:
@@ -979,6 +990,7 @@ class Controller:
         if self._closed:
             return
         self._closed = True
+        self._diagnostics_suspended = False
         session, self._session = self._session, None
         if session is not None:
             try:

@@ -291,13 +291,16 @@ class M6LinkSessionTests(unittest.TestCase):
         session = Session(transport=fake, timeout=0.5)
         session.connect()
         with tempfile.TemporaryDirectory() as directory:
-            session.start_recording(
+            thread = session.start_recording(
                 Path(directory) / "manual",
                 duration_s=None,
                 period_ms=20,
                 test_mode="wheel",
                 requested_speed=160,
             )
+            self.assertTrue(thread.is_alive())
+            self.assertIsNotNone(session._recording_ready)
+            self.assertTrue(session._recording_ready.is_set())
             time.sleep(0.05)
             result = session.stop_recording()
             self.assertIsNotNone(result)

@@ -148,6 +148,7 @@ class Recorder:
         identity: Identity | Mapping[str, Any] | None = None,
         parameters: Mapping[str, Any] | None = None,
         stop_event: threading.Event | None = None,
+        ready_event: threading.Event | None = None,
     ) -> RecordingResult:
         if duration_s is not None and duration_s <= 0:
             raise ValueError("recording duration must be positive")
@@ -184,6 +185,8 @@ class Recorder:
                 # clear, so earlier bench/estop history is not mis-scored as a
                 # drop during this recording.
                 _seed_diagnostic_counters(self.session, state)
+                if ready_event is not None:
+                    ready_event.set()
                 try:
                     while time.monotonic() < deadline and not (stop_event and stop_event.is_set()):
                         wait = 0.2 if deadline == float("inf") else min(0.2, max(0.0, deadline - time.monotonic()))
