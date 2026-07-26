@@ -14,9 +14,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python" / "src"))
 
-from m6link import ActionKind, ActionSpec, Session  # noqa: E402
+from m6link import ActionKind, ActionSpec, Session, TelemetrySample  # noqa: E402
 from m6link.protocol.framing import Frame, FrameDecoder, encode_frame  # noqa: E402
-from m6link.registry import CAPABILITY_MASKS, FrameType, RpcOpcode  # noqa: E402
+from m6link.recording import _consume_transition_sample, _recording_subscriptions  # noqa: E402
+from m6link.registry import CAPABILITY_MASKS, FrameType, REGISTRY, RpcOpcode, TelemetryStream  # noqa: E402
 
 
 class V2FakeSerial:
@@ -129,6 +130,17 @@ class V2FakeSerial:
             success = struct.pack("<IIIBBH", 9, 100, 1600, 2, 1, 0)
         elif opcode == int(RpcOpcode.HEADING_CALIBRATE):
             success = struct.pack("<II", 321, 20)
+        elif opcode == int(RpcOpcode.TASK_STATS_GET):
+            success = bytearray(64)
+            success[0] = 4
+        elif opcode == int(RpcOpcode.UART_STATS_GET):
+            success = bytes(32)
+        elif opcode == int(RpcOpcode.LINK_STATS_GET):
+            success = bytearray(76)
+            success[0] = 3
+            success[1] = 1
+            struct.pack_into("<I", success, 4, self.session_id)
+            struct.pack_into("<I", success, 60, 5)
         elif opcode == int(RpcOpcode.SUBSCRIPTION_SET):
             count = request_body[1]
             entries = request_body[4 : 4 + count * 4]
@@ -176,6 +188,36 @@ class M6LinkCodecTests(unittest.TestCase):
 
 
 class M6LinkSessionTests(unittest.TestCase):
+    def test_default_recording_profile_is_50_hz_and_within_admission_budget(self):
+        subscriptions = _recording_subscriptions(20)
+        self.assertEqual(
+            subscriptions,
+            {
+                TelemetryStream.CORE: 20,
+                TelemetryStream.WHEEL: 40,
+                TelemetryStream.LINE: 60,
+                TelemetryStream.HEALTH: 1000,
+            },
+        )
+        rules = {item["value"]: item for item in REGISTRY["telemetry"]["streams"]}
+        estimated = sum(
+            ((1000 + period - 1) // period)
+            * (17 + int(rules[int(stream)]["payload_size"]))
+            for stream, period in subscriptions.items()
+        )
+        self.assertEqual(estimated, 6105)
+        with self.assertRaises(ValueError):
+            _recording_subscriptions(25)
+
+    def test_recording_consumes_only_the_first_transition_sample_per_stream(self):
+        unsettled = {TelemetryStream.CORE, TelemetryStream.WHEEL}
+        core = TelemetrySample(TelemetryStream.CORE, 1, 10, {}, gap_before=True)
+        wheel = TelemetrySample(TelemetryStream.WHEEL, 1, 10, {}, gap_before=True)
+        self.assertTrue(_consume_transition_sample(core, unsettled))
+        self.assertFalse(_consume_transition_sample(core, unsettled))
+        self.assertTrue(_consume_transition_sample(wheel, unsettled))
+        self.assertEqual(unsettled, set())
+
     def test_event_tap_fans_out_without_consuming_controller_queue(self):
         session = Session()
         marker = object()
@@ -255,6 +297,9 @@ class M6LinkSessionTests(unittest.TestCase):
             self.assertTrue(result.csv_path.exists())
             self.assertTrue(result.json_path.exists())
         self.assertEqual(fake.opcodes.count(int(RpcOpcode.SUBSCRIPTION_SET)), 2)
+        self.assertEqual(fake.opcodes.count(int(RpcOpcode.TASK_STATS_GET)), 1)
+        self.assertEqual(fake.opcodes.count(int(RpcOpcode.UART_STATS_GET)), 1)
+        self.assertEqual(fake.opcodes.count(int(RpcOpcode.LINK_STATS_GET)), 1)
         session.close()
 
 

@@ -21,6 +21,18 @@ import time
 from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
 
 
+# Full-coverage live profile with headroom below the frozen 7000 B/s ceiling:
+# CORE 50 Hz + WHEEL 25 Hz + LINE 16.7 Hz + HEALTH 1 Hz = 6105 B/s.
+# Names are resolved through m6link.TelemetryStream at connection time so the
+# GUI never duplicates wire IDs.
+DEFAULT_TELEMETRY_PERIODS = {
+    "CORE": 20,
+    "WHEEL": 40,
+    "LINE": 60,
+    "HEALTH": 1000,
+}
+
+
 class GuiInputError(ValueError):
     """A user-editable value is outside the frozen r14 safety contract."""
 
@@ -704,22 +716,17 @@ class Controller:
     def _subscribe(cls, session: Any) -> None:
         method = getattr(session, "subscribe", None)
         if callable(method):
-            # CORE/WHEEL at 50 Hz, LINE at 25 Hz, HEALTH at 5 Hz.
             try:
                 module = importlib.import_module(session.__class__.__module__.split(".")[0])
                 stream_type = getattr(module, "TelemetryStream")
-                method(
-                    {
-                        stream_type.CORE: 20,
-                        stream_type.WHEEL: 20,
-                        stream_type.LINE: 40,
-                        stream_type.HEALTH: 200,
-                    }
-                )
+                method({
+                    getattr(stream_type, name): period
+                    for name, period in DEFAULT_TELEMETRY_PERIODS.items()
+                })
             except (AttributeError, ImportError):
                 # Duck-compatible fake implementations may accept symbolic
                 # names; no numeric stream IDs are duplicated here.
-                method({"CORE": 20, "WHEEL": 20, "LINE": 40, "HEALTH": 200})
+                method(dict(DEFAULT_TELEMETRY_PERIODS))
             return
         method = getattr(session, "subscribe_telemetry", None)
         if callable(method):

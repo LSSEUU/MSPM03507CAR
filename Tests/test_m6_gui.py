@@ -16,6 +16,7 @@ if str(PYTHON_SRC) not in sys.path:
     sys.path.insert(0, str(PYTHON_SRC))
 
 from m6gui.controller import (  # noqa: E402
+    DEFAULT_TELEMETRY_PERIODS,
     Controller,
     GuiInputError,
     arc_action,
@@ -68,6 +69,7 @@ class ControllerTest(unittest.TestCase):
         )
         self.assertIn("breadcrumb", self.controller.state.diagnostics["reset"])
         self.assertTrue(self.controller.has_capability("PRIORITY_TX", "RAW_ESTOP_S_SPACE"))
+        self.assertIn(("subscribe", dict(DEFAULT_TELEMETRY_PERIODS)), session.calls)
 
     def test_explicit_legacy_is_allowed_but_never_defaulted(self) -> None:
         session = self.connect(legacy=True)
@@ -193,6 +195,21 @@ class ControllerTest(unittest.TestCase):
 
 
 class PureModelTest(unittest.TestCase):
+    def test_default_full_stream_profile_stays_under_frozen_budget(self) -> None:
+        from m6link.registry import REGISTRY
+
+        rules = {item["name"]: item for item in REGISTRY["telemetry"]["streams"]}
+        estimated = sum(
+            math.ceil(1000 / period) * (17 + int(rules[name]["payload_size"]))
+            for name, period in DEFAULT_TELEMETRY_PERIODS.items()
+        )
+        self.assertEqual(estimated, 6105)
+        self.assertLessEqual(
+            estimated,
+            int(REGISTRY["telemetry"]["admission_estimator"]["max_bytes_per_second"]),
+        )
+        self.assertEqual(DEFAULT_TELEMETRY_PERIODS["CORE"], 20)
+
     def test_registry_names_come_from_intflag_not_gui_numbers(self) -> None:
         names = normalize_capabilities(
             Capability.ACTION_TWO_PHASE | Capability.WHEEL_DIAG_ACTION

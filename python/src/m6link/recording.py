@@ -29,6 +29,50 @@ def _empty_legacy_row() -> dict[str, int]:
     return {key: 0 for key in TELEMETRY_FIELDS}
 
 
+def _recording_subscriptions(period_ms: int) -> dict[TelemetryStream, int]:
+    """Return a full-stream profile within the frozen r14 admission budget."""
+
+    period_ms = int(period_ms)
+    if period_ms < 20 or period_ms > 1000 or period_ms % 20:
+        raise ValueError("recording period must be 20..1000 ms in 20 ms steps")
+    # At the default 20 ms row cadence this is 6105 B/s: CORE remains 50 Hz,
+    # WHEEL runs at 25 Hz, LINE at 16.7 Hz, and HEALTH at 1 Hz.  The margin is
+    # reserved for actual escape expansion; slower cadences only reduce load.
+    return {
+        TelemetryStream.CORE: period_ms,
+        TelemetryStream.WHEEL: max(40, period_ms),
+        TelemetryStream.LINE: max(60, period_ms),
+        TelemetryStream.HEALTH: max(1000, period_ms),
+    }
+
+
+def _consume_transition_sample(
+    sample: TelemetrySample, unsettled_streams: set[TelemetryStream]
+) -> bool:
+    """Consume one baseline sample per changed stream after subscription replace."""
+
+    try:
+        stream = TelemetryStream(int(sample.stream))
+    except (TypeError, ValueError):
+        return False
+    if stream not in unsettled_streams:
+        return False
+    unsettled_streams.remove(stream)
+    return True
+
+
+def _seed_diagnostic_counters(session: Session, state: dict[str, int]) -> None:
+    """Seed cumulative counters so pre-record history is not scored as a delta."""
+
+    task = session.get_task_stats()
+    uart = session.get_uart_stats()
+    link = session.get_link_stats()
+    state["missed_tasks"] = sum(int(value) for value in task.miss_count)
+    state["rx_dropped"] = int(uart.rx_drop)
+    state["tx_dropped"] = int(uart.tx_drop)
+    state["telemetry_dropped"] = int(link.drops[2])
+
+
 def _merge_v2_sample(row: dict[str, int], sample: TelemetrySample) -> bool:
     values = sample.values
     stream = int(sample.stream)
@@ -105,13 +149,10 @@ class Recorder:
             output_base = output_base.with_suffix("")
         output_base.parent.mkdir(parents=True, exist_ok=True)
         csv_path, json_path = output_base.with_suffix(".csv"), output_base.with_suffix(".json")
-        subscriptions = {
-            TelemetryStream.CORE: period_ms,
-            TelemetryStream.WHEEL: period_ms,
-            TelemetryStream.LINE: max(40, period_ms),
-            TelemetryStream.HEALTH: max(200, ((period_ms + 99) // 100) * 100),
-        }
+        subscriptions = _recording_subscriptions(period_ms)
         previous_subscriptions = dict(self.session._subscriptions)
+        subscription_changed = previous_subscriptions != subscriptions
+        unsettled_streams = set(subscriptions) if subscription_changed else set()
         rows: list[dict[str, int]] = []
         event_records: list[dict[str, Any]] = []
         state = _empty_legacy_row()
@@ -122,7 +163,13 @@ class Recorder:
         capture_error: BaseException | None = None
         try:
             with self.session.event_tap() as event_tap:
-                self.session.subscribe(subscriptions)
+                if subscription_changed:
+                    self.session.subscribe(subscriptions)
+                # HEALTH carries cumulative counters.  Start rows from the
+                # current values, after any intentional subscription-boundary
+                # clear, so earlier bench/estop history is not mis-scored as a
+                # drop during this recording.
+                _seed_diagnostic_counters(self.session, state)
                 try:
                     while time.monotonic() < deadline and not (stop_event and stop_event.is_set()):
                         wait = 0.2 if deadline == float("inf") else min(0.2, max(0.0, deadline - time.monotonic()))
@@ -133,6 +180,13 @@ class Recorder:
                         if event is None:
                             continue
                         if isinstance(event, TelemetrySample):
+                            # Replacing subscriptions may intentionally clear an
+                            # affected queued P2 frame and mark the next sample
+                            # GAP_BEFORE.  The first sample of each changed
+                            # stream establishes the new recording boundary;
+                            # every later gap remains a hard failure.
+                            if _consume_transition_sample(event, unsettled_streams):
+                                continue
                             if event.gap_before:
                                 abort_reason = "telemetry_gap"
                                 raise SafetyTrip(0x010A, 0, name="TELEMETRY_GAP")
@@ -151,11 +205,12 @@ class Recorder:
                                 abort_reason = "telemetry_gap"
                                 raise SafetyTrip(0x010A, 0, name="TELEMETRY_GAP")
                 finally:
-                    try:
-                        self.session.subscribe(previous_subscriptions)
-                    except Exception:
-                        if abort_reason is None:
-                            abort_reason = "log_stop_unconfirmed"
+                    if subscription_changed:
+                        try:
+                            self.session.subscribe(previous_subscriptions)
+                        except Exception:
+                            if abort_reason is None:
+                                abort_reason = "log_stop_unconfirmed"
         except BaseException as exc:
             capture_error = exc
         linked = identity or self.session.identity
