@@ -1,0 +1,41 @@
+"""M6 Tk desktop GUI with a headless-testable controller."""
+
+from .controller import (
+    ActionDraft,
+    ArmedLease,
+    Controller,
+    GuiActionSpec,
+    GuiInputError,
+    ParameterRow,
+    TelemetryPoint,
+    UiState,
+    arc_action,
+    feature_visibility,
+    heading_hold_action,
+    is_emergency_key,
+    normalize_capabilities,
+    straight_action,
+    turn_action,
+    wheel_action,
+    wizard_drafts,
+)
+
+__all__ = [
+    "ActionDraft",
+    "ArmedLease",
+    "Controller",
+    "GuiActionSpec",
+    "GuiInputError",
+    "ParameterRow",
+    "TelemetryPoint",
+    "UiState",
+    "arc_action",
+    "feature_visibility",
+    "heading_hold_action",
+    "is_emergency_key",
+    "normalize_capabilities",
+    "straight_action",
+    "turn_action",
+    "wheel_action",
+    "wizard_drafts",
+]
