@@ -32,6 +32,24 @@ class M6RpcContractTests(unittest.TestCase):
         self.assertLess(block.index("length != 4U"), block.index("u32(body) != s_boot_id"))
         self.assertIn("M6_RESULT_BAD_LENGTH", block)
 
+    def test_heading_rate_action_preserves_and_starts_rate_target(self):
+        arm = self._opcode_block("ACTION_ARM", "ACTION_CONFIRM")
+        confirm = self._opcode_block("ACTION_CONFIRM", "ACTION_CANCEL")
+        self.assertIn("s_action.yaw_rate_mdeg_s = i32(&body[12])", arm)
+        self.assertIn("M6_ACTION_KIND_HEADING_RATE", confirm)
+        self.assertIn("Heading_StartRate", confirm)
+
+    def test_line_action_uses_app_lifecycle_and_timed_stop(self):
+        confirm = self._opcode_block("ACTION_CONFIRM", "ACTION_CANCEL")
+        service = self.source[self.source.index("void M6Rpc_Service"):]
+        stop = self.source[self.source.index("static void stop_action"):
+                           self.source.index("void M6Rpc_Init")]
+        self.assertIn("AppLine_StartTimed(now, s_action.duration_ms)", confirm)
+        self.assertIn("M6_ACTION_KIND_LINE_FOLLOW", stop)
+        self.assertIn("AppLine_Stop(now_ms)", stop)
+        self.assertIn("line.state != APP_LINE_RUNNING", service)
+        self.assertIn("s_action.duration_ms != M6_LINE_ACTION_CONTINUOUS_DURATION_MS", service)
+
     def test_parameter_reads_distinguish_length_from_reserved_bytes(self):
         for opcode, next_opcode in (
             ("PARAM_VALUE_GET", "PARAM_DESCRIPTOR_GET"),

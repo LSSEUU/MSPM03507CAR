@@ -323,6 +323,7 @@ static const char *Diagnostics_HeadingModeName(HeadingMode_t mode)
 {
     if (mode == HEADING_MODE_HOLD) return "HOLD";
     if (mode == HEADING_MODE_TURN) return "TURN";
+    if (mode == HEADING_MODE_RATE) return "RATE";
     return "IDLE";
 }
 

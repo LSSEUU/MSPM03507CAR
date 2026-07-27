@@ -70,6 +70,8 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         expected = [
             "GPIO_UART_0_TX_PIN                                        DL_GPIO_PIN_10",
             "GPIO_UART_0_RX_PIN                                        DL_GPIO_PIN_11",
+            "GPIO_UART_1_TX_PIN                                         DL_GPIO_PIN_6",
+            "GPIO_UART_1_RX_PIN                                         DL_GPIO_PIN_7",
             "GPIO_UART_2_TX_PIN                                        DL_GPIO_PIN_21",
             "GPIO_UART_2_RX_PIN                                        DL_GPIO_PIN_22",
             "ENC_A_E1A_PIN                                            (DL_GPIO_PIN_8)",
@@ -143,6 +145,8 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("../System/m6_rpc.c", paths)
         self.assertIn("../System/m6_action_validate.c", paths)
         self.assertIn("../Hardware/watchdog.c", paths)
+        self.assertIn("../Hardware/vision_uart.c", paths)
+        self.assertIn("../App/app_manual_drive.c", paths)
         self.assertIn("../Control/pid.c", paths)
         self.assertIn("../Control/filter.c", paths)
         self.assertIn("../Control/wheel_speed.c", paths)
@@ -151,6 +155,19 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertNotIn("../Source/empty.c", paths)
         self.assertFalse((ROOT / "Source" / "empty.c").exists())
         self.assertEqual(root.findtext(".//pCCUsed"), "6220000::V6.22::ARMCLANG")
+
+    def test_uart1_is_reserved_for_camera_transport_only(self):
+        header = HEADER.read_text(encoding="utf-8")
+        config = CONFIG_SOURCE.read_text(encoding="utf-8")
+        driver = (ROOT / "Hardware" / "vision_uart.c").read_text(encoding="utf-8")
+        self.assertIn("IOMUX_PINCM23_PF_UART1_TX", header)
+        self.assertIn("IOMUX_PINCM24_PF_UART1_RX", header)
+        self.assertIn("UART_1_BAUD_RATE", header)
+        self.assertIn("DL_UART_MAIN_DIRECTION_TX_RX", config)
+        self.assertIn("void UART1_IRQHandler(void)", driver)
+        self.assertIn("VISION_UART_RX_BUFFER_SIZE 256U", driver)
+        self.assertIn("VISION_UART_TX_BUFFER_SIZE 256U", driver)
+        self.assertNotIn("AppManualDrive", driver)
 
     def test_grayscale_api_exposes_adc_scans_without_stale_line_state(self):
         header = (ROOT / "Hardware" / "grayscale.h").read_text(encoding="utf-8")

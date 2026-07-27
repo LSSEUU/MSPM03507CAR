@@ -2,6 +2,7 @@
 
 #include "control_config.h"
 #include "line_trace.h"
+#include "m6_wire.h"
 #include "safety.h"
 #include "system_state.h"
 #include "system_time.h"
@@ -25,6 +26,32 @@ static void AppLine_ReturnIdle(void)
 {
     app_line.state = APP_LINE_IDLE;
     app_line.deadline_ms = 0U;
+}
+
+static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms)
+{
+    LineFollowSnapshot_t snapshot;
+    LineFollow_GetSnapshot(&snapshot);
+    if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
+        !snapshot.calibration.valid || !snapshot.line_valid)
+        return false;
+    if (!SystemState_RequestRun()) return false;
+    if (!LineFollow_Start(now_ms)) {
+        (void)SystemState_RequestIdle();
+        return false;
+    }
+    if (duration_ms == M6_LINE_ACTION_CONTINUOUS_DURATION_MS)
+        Safety_BeginContinuousAction(now_ms,
+            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE));
+    else
+        Safety_BeginAction(now_ms, duration_ms,
+            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE));
+    WheelSpeed_Enable();
+    app_line.state = APP_LINE_RUNNING;
+    app_line.started_ms = now_ms;
+    app_line.deadline_ms = now_ms + duration_ms;
+    LineTrace_Start();
+    return true;
 }
 
 void AppLine_Init(void)
@@ -54,23 +81,14 @@ bool AppLine_ConfirmStart(uint32_t now_ms)
         AppLine_ReturnIdle();
         return false;
     }
-    if (!SystemState_RequestRun()) {
-        AppLine_ReturnIdle();
-        return false;
-    }
-    if (!LineFollow_Start(now_ms)) {
-        (void)SystemState_RequestIdle();
-        AppLine_ReturnIdle();
-        return false;
-    }
-    Safety_BeginAction(now_ms, LINE_FOLLOW_ACTION_TIMEOUT_MS,
-        SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE));
-    WheelSpeed_Enable();
-    app_line.state = APP_LINE_RUNNING;
-    app_line.started_ms = now_ms;
-    app_line.deadline_ms = now_ms + LINE_FOLLOW_ACTION_TIMEOUT_MS;
-    LineTrace_Start();
-    return true;
+    AppLine_ReturnIdle();
+    return AppLine_StartRunning(now_ms, LINE_FOLLOW_ACTION_TIMEOUT_MS);
+}
+
+bool AppLine_StartTimed(uint32_t now_ms, uint32_t duration_ms)
+{
+    if (app_line.state != APP_LINE_IDLE) return false;
+    return AppLine_StartRunning(now_ms, duration_ms);
 }
 
 bool AppLine_Stop(uint32_t now_ms)

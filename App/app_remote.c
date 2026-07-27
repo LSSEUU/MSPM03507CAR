@@ -1,5 +1,6 @@
 #include "app_remote.h"
 
+#include "app_manual_drive.h"
 #include "diagnostics.h"
 #include "heading.h"
 #include "ir_receiver.h"
@@ -52,6 +53,7 @@ void AppRemote_GetConfig(AppRemoteConfig_t *config)
 bool AppRemote_ApplyConfig(const AppRemoteConfig_t *config)
 {
     if ((config == NULL) || (remote.state != APP_REMOTE_IDLE) ||
+        !AppManualDrive_IsIdle() ||
         !AppRemote_IsFinite(config->speed_low_mm_s) ||
         !AppRemote_IsFinite(config->speed_medium_mm_s) ||
         !AppRemote_IsFinite(config->speed_high_mm_s) ||
@@ -94,12 +96,11 @@ static void AppRemote_Targets(AppRemoteDirection_t direction,
     }
 }
 
-static void AppRemote_StopManual(void)
+static void AppRemote_StopManual(uint32_t now_ms)
 {
     if (remote.heading_hold_active) Heading_Stop();
-    WheelSpeed_Disable();
-    Safety_EndAction();
-    (void)SystemState_RequestIdle();
+    (void)AppManualDrive_Stop(APP_MANUAL_SOURCE_IR,
+                              APP_MANUAL_STOP_RELEASE, now_ms);
     remote.state = APP_REMOTE_IDLE;
     remote.direction = APP_REMOTE_DIRECTION_NONE;
     remote.heading_hold_active = false;
@@ -109,26 +110,29 @@ static bool AppRemote_Drive(AppRemoteDirection_t direction, uint32_t now_ms)
 {
     float left;
     float right;
+    AppManualDriveSnapshot_t manual;
     if (remote.state == APP_REMOTE_PENDING_DEMO) {
         (void)Diagnostics_ActionCancel(now_ms);
         remote.state = APP_REMOTE_IDLE;
     }
     if (remote.state == APP_REMOTE_IDLE) {
-        if (Safety_HasFault() ||
-            (SystemState_Get() != SYSTEM_STATE_IDLE) ||
-            !Diagnostics_ActionIsIdle() || !SystemState_RequestRun()) {
+        if (Safety_HasFault()) {
             remote.action_rejects++;
             return false;
         }
-        Safety_BeginAction(now_ms, IR_REMOTE_SAFETY_DEADLINE_MS, 0U);
-        WheelSpeed_Enable();
-        remote.state = APP_REMOTE_MANUAL;
     } else if (remote.state != APP_REMOTE_MANUAL) {
         remote.action_rejects++;
         return false;
     }
 
     AppRemote_Targets(direction, &left, &right);
+    if (!AppManualDrive_Submit(APP_MANUAL_SOURCE_IR,
+            (int16_t)left, (int16_t)right, IR_REMOTE_HEARTBEAT_MS, 0U,
+            0U, now_ms)) {
+        remote.action_rejects++;
+        return false;
+    }
+    remote.state = APP_REMOTE_MANUAL;
     if (remote.heading_hold_enabled &&
         ((direction == APP_REMOTE_DIRECTION_FORWARD) ||
          (direction == APP_REMOTE_DIRECTION_REVERSE))) {
@@ -154,10 +158,19 @@ static bool AppRemote_Drive(AppRemoteDirection_t direction, uint32_t now_ms)
         Heading_Stop();
         remote.heading_hold_active = false;
     }
-    WheelSpeed_SetTarget(left, right);
-    Safety_BeginAction(now_ms, IR_REMOTE_SAFETY_DEADLINE_MS,
-        remote.heading_hold_active ?
-            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO) : 0U);
+    if (!AppManualDrive_Submit(APP_MANUAL_SOURCE_IR,
+            (int16_t)left, (int16_t)right, IR_REMOTE_HEARTBEAT_MS,
+            remote.heading_hold_active ?
+                SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO) : 0U,
+            0U, now_ms)) {
+        AppManualDrive_GetSnapshot(&manual);
+        if (!manual.active || (manual.source != APP_MANUAL_SOURCE_IR)) {
+            remote.state = APP_REMOTE_IDLE;
+            remote.heading_hold_active = false;
+        }
+        remote.action_rejects++;
+        return false;
+    }
     remote.direction = direction;
     remote.last_drive_event_ms = now_ms;
     return true;
@@ -166,6 +179,7 @@ static bool AppRemote_Drive(AppRemoteDirection_t direction, uint32_t now_ms)
 static void AppRemote_AdjustSpeed(bool increase)
 {
     if ((remote.state != APP_REMOTE_IDLE) || Safety_HasFault() ||
+        !AppManualDrive_IsIdle() ||
         (SystemState_Get() != SYSTEM_STATE_IDLE) ||
         !Diagnostics_ActionIsIdle()) {
         remote.action_rejects++;
@@ -215,7 +229,7 @@ bool AppRemote_NormalStop(uint32_t now_ms)
     bool stopped = false;
     if (Safety_HasFault()) return false;
     if (remote.state == APP_REMOTE_MANUAL) {
-        AppRemote_StopManual();
+        AppRemote_StopManual(now_ms);
         stopped = true;
     }
     if (Diagnostics_ActionCancel(now_ms)) stopped = true;
@@ -348,11 +362,20 @@ void AppRemote_Poll(void)
 
 void AppRemote_Task20ms(uint32_t now_ms)
 {
+    AppManualDriveSnapshot_t manual;
     IrReceiver_Service(now_ms);
+    AppManualDrive_GetSnapshot(&manual);
+    if ((remote.state == APP_REMOTE_MANUAL) &&
+        (!manual.active || (manual.source != APP_MANUAL_SOURCE_IR))) {
+        if (remote.heading_hold_active) Heading_Stop();
+        remote.state = APP_REMOTE_IDLE;
+        remote.direction = APP_REMOTE_DIRECTION_NONE;
+        remote.heading_hold_active = false;
+    }
     if ((remote.state == APP_REMOTE_MANUAL) &&
         ((uint32_t)(now_ms - remote.last_drive_event_ms) >=
             IR_REMOTE_HEARTBEAT_MS)) {
-        AppRemote_StopManual();
+        AppRemote_StopManual(now_ms);
         remote.heartbeat_stops++;
         if (legacy_text_enabled)
             remote_notice_flags |= APP_REMOTE_NOTICE_HEARTBEAT_STOP;
@@ -383,6 +406,7 @@ void AppRemote_Task20ms(uint32_t now_ms)
 bool AppRemote_StartCapture(uint32_t now_ms)
 {
     if ((remote.state != APP_REMOTE_IDLE) || Safety_HasFault() ||
+        !AppManualDrive_IsIdle() ||
         (SystemState_Get() != SYSTEM_STATE_IDLE) ||
         !Diagnostics_ActionIsIdle()) return false;
     remote.state = APP_REMOTE_CAPTURE;

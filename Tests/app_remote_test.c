@@ -1,4 +1,5 @@
 #include "app_remote.h"
+#include "app_manual_drive.h"
 #include "diagnostics.h"
 #include "heading.h"
 #include "ir_receiver.h"
@@ -64,6 +65,7 @@ static void reset_fixture(void)
     memset(&test_heading, 0, sizeof(test_heading));
     test_heading_start_calls = 0U;
     test_heading_stop_calls = 0U;
+    AppManualDrive_Init();
     AppRemote_Init();
 }
 

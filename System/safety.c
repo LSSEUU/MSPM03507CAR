@@ -21,6 +21,7 @@ typedef struct {
 static SafetySnapshot_t safety;
 static SensorHealth_t sensors[SAFETY_SENSOR_COUNT];
 static uint32_t sensor_requirement_started_ms;
+static bool action_deadline_enabled;
 
 static uint32_t Safety_EnterCritical(void)
 {
@@ -62,6 +63,7 @@ void Safety_Init(uint32_t now_ms)
     memset(&safety, 0, sizeof(safety));
     memset(sensors, 0, sizeof(sensors));
     sensor_requirement_started_ms = now_ms;
+    action_deadline_enabled = false;
     Motor_Stop();
 }
 
@@ -80,6 +82,19 @@ void Safety_BeginAction(uint32_t now_ms, uint32_t timeout_ms,
     safety.action_deadline_ms = now_ms + timeout_ms;
     safety.required_sensor_mask = required_sensor_mask;
     sensor_requirement_started_ms = now_ms;
+    action_deadline_enabled = true;
+    Safety_ExitCritical(key);
+}
+
+void Safety_BeginContinuousAction(uint32_t now_ms,
+                                  uint32_t required_sensor_mask)
+{
+    uint32_t key = Safety_EnterCritical();
+    safety.action_active = true;
+    safety.action_deadline_ms = 0U;
+    safety.required_sensor_mask = required_sensor_mask;
+    sensor_requirement_started_ms = now_ms;
+    action_deadline_enabled = false;
     Safety_ExitCritical(key);
 }
 
@@ -89,6 +104,7 @@ void Safety_EndAction(void)
     safety.action_active = false;
     safety.action_deadline_ms = 0U;
     safety.required_sensor_mask = 0U;
+    action_deadline_enabled = false;
 }
 
 void Safety_RaiseFault(uint32_t fault_bits, uint32_t now_ms)
@@ -102,6 +118,7 @@ void Safety_RaiseFault(uint32_t fault_bits, uint32_t now_ms)
     safety.fault_count++;
     safety.action_active = false;
     safety.required_sensor_mask = 0U;
+    action_deadline_enabled = false;
     SystemState_EnterFault();
     Safety_StopMotor();
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_SAFETY_FAULT);
@@ -133,7 +150,7 @@ void Safety_Evaluate(uint32_t now_ms)
         return;
     }
 
-    if (safety.action_active &&
+    if (safety.action_active && action_deadline_enabled &&
         SystemTime_Reached(now_ms, safety.action_deadline_ms)) {
         Safety_RaiseFault(SAFETY_FAULT_ACTION_TIMEOUT, now_ms);
         return;
@@ -165,6 +182,7 @@ bool Safety_ClearFaults(uint32_t now_ms)
     Motor_Stop();
     memset(&safety, 0, sizeof(safety));
     sensor_requirement_started_ms = now_ms;
+    action_deadline_enabled = false;
     bool cleared = SystemState_ClearFault();
     Safety_ExitCritical(key);
     return cleared;

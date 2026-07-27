@@ -3,6 +3,7 @@
 #include "safety.h"
 #include "scheduler.h"
 #include "system_state.h"
+#include "vehicle_config.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -132,12 +133,35 @@ static void test_sensor_timeout_and_emergency_stop(void)
     assert(motor_a == 0 && motor_b == 0);
 }
 
+static void test_continuous_action_keeps_sensor_watchdog(void)
+{
+    SafetySnapshot_t snapshot;
+    enter_idle();
+    Safety_Init(0U);
+    assert(SystemState_RequestRun());
+    Safety_BeginContinuousAction(1000U,
+        SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE));
+    Safety_NotifySensor(SAFETY_SENSOR_GRAYSCALE, 1000U);
+    Safety_Evaluate(1299U);
+    Safety_GetSnapshot(&snapshot);
+    assert(snapshot.action_active);
+    assert(snapshot.action_deadline_ms == 0U);
+    assert(!Safety_HasFault());
+    Safety_NotifySensor(SAFETY_SENSOR_GRAYSCALE, 100000U);
+    Safety_Evaluate(100000U);
+    assert(!Safety_HasFault());
+    Safety_Evaluate(100000U + GRAYSCALE_TIMEOUT_MS);
+    Safety_GetSnapshot(&snapshot);
+    assert((snapshot.fault_bits & SAFETY_FAULT_GRAYSCALE_TIMEOUT) != 0U);
+}
+
 int main(void)
 {
     test_state_machine();
     test_scheduler();
     test_action_timeout_and_motor_veto();
     test_sensor_timeout_and_emergency_stop();
+    test_continuous_action_keeps_sensor_watchdog();
     assert(motor_stop_count > 0U);
     return 0;
 }

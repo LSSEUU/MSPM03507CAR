@@ -9,7 +9,7 @@
  * Do not overwrite it from an unrelated LaunchPad .syscfg file.  Pin and
  * peripheral invariants are guarded by Tests/test_board_configuration.py.
  */
-#define FROZEN_BOARD_CONFIG_REVISION                         (20260725U)
+#define FROZEN_BOARD_CONFIG_REVISION                         (20260727U)
 
 #define CONFIG_LP_MSPM0G3507
 #define CONFIG_MSPM0G3507
@@ -49,6 +49,23 @@ extern "C" {
 #define UART_0_BAUD_RATE                                                (115200)
 #define UART_0_IBRD_32_MHZ_115200_BAUD                                      (17)
 #define UART_0_FBRD_32_MHZ_115200_BAUD                                      (23)
+
+/* Dedicated camera/vision link: PB6 MCU_TX, PB7 MCU_RX, 115200 8N1. */
+#define UART_1_INST                                                        UART1
+#define UART_1_INST_FREQUENCY                                           32000000
+#define UART_1_INST_IRQHandler                                  UART1_IRQHandler
+#define UART_1_INST_INT_IRQN                                      UART1_INT_IRQn
+#define GPIO_UART_1_TX_PORT                                                GPIOB
+#define GPIO_UART_1_TX_PIN                                         DL_GPIO_PIN_6
+#define GPIO_UART_1_TX_IOMUX                                      (IOMUX_PINCM23)
+#define GPIO_UART_1_TX_IOMUX_FUNC                      IOMUX_PINCM23_PF_UART1_TX
+#define GPIO_UART_1_RX_PORT                                                GPIOB
+#define GPIO_UART_1_RX_PIN                                         DL_GPIO_PIN_7
+#define GPIO_UART_1_RX_IOMUX                                      (IOMUX_PINCM24)
+#define GPIO_UART_1_RX_IOMUX_FUNC                      IOMUX_PINCM24_PF_UART1_RX
+#define UART_1_BAUD_RATE                                                (115200)
+#define UART_1_IBRD_32_MHZ_115200_BAUD                                      (17)
+#define UART_1_FBRD_32_MHZ_115200_BAUD                                      (23)
 
 /* ── UART2 (JY61P 陀螺仪) ── */
 #define UART_2_INST                                                        UART2
@@ -157,6 +174,7 @@ void SYSCFG_DL_initPower(void);
 void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
 void SYSCFG_DL_UART_0_init(void);
+void SYSCFG_DL_UART_1_init(void);
 void SYSCFG_DL_UART_2_init(void);
 void SYSCFG_DL_GRAY_ADC_init(void);
 void SYSCFG_DL_PWM_0_init(void);

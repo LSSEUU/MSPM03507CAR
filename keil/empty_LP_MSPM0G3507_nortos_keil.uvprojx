@@ -189,13 +189,13 @@
             <nBranchProt>0</nBranchProt>
             <hadIRAM2>1</hadIRAM2>
             <hadIROM2>1</hadIROM2>
-            <StupSel>0</StupSel>
+            <StupSel>8</StupSel>
             <useUlib>1</useUlib>
             <EndSel>0</EndSel>
             <uLtcg>0</uLtcg>
             <nSecure>0</nSecure>
-            <RoSelD>0</RoSelD>
-            <RwSelD>5</RwSelD>
+            <RoSelD>3</RoSelD>
+            <RwSelD>3</RwSelD>
             <CodeSel>0</CodeSel>
             <OptFeed>0</OptFeed>
             <NoZi1>0</NoZi1>
@@ -211,7 +211,7 @@
             <Ra1Chk>0</Ra1Chk>
             <Ra2Chk>0</Ra2Chk>
             <Ra3Chk>0</Ra3Chk>
-            <Im1Chk>0</Im1Chk>
+            <Im1Chk>1</Im1Chk>
             <Im2Chk>0</Im2Chk>
             <OnChipMemories>
               <Ocm1>
@@ -252,7 +252,7 @@
               <IROM>
                 <Type>1</Type>
                 <StartAddress>0x0</StartAddress>
-                <Size>0x1F800</Size>
+                <Size>0x20000</Size>
               </IROM>
               <XRAM>
                 <Type>1</Type>
@@ -277,7 +277,7 @@
               <OCR_RVCT4>
                 <Type>1</Type>
                 <StartAddress>0x0</StartAddress>
-                <Size>0x1F800</Size>
+                <Size>0x1f800</Size>
               </OCR_RVCT4>
               <OCR_RVCT5>
                 <Type>1</Type>
@@ -428,6 +428,11 @@
               <FileName>uart_debug.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Hardware/uart_debug.c</FilePath>
+            </File>
+            <File>
+              <FileName>vision_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/vision_uart.c</FilePath>
             </File>
             <File>
               <FileName>led.c</FileName>
@@ -613,6 +618,11 @@
               <FileName>app_remote.c</FileName>
               <FileType>1</FileType>
               <FilePath>../App/app_remote.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_manual_drive.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/app_manual_drive.c</FilePath>
             </File>
           </Files>
         </Group>

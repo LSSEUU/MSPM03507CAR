@@ -25,8 +25,8 @@ DEFAULT_REGISTRY = ROOT / "Tests" / "vectors" / "m6_v2_wire_v1.json"
 DEFAULT_SCHEMA = ROOT / "Tests" / "vectors" / "m6_v2_wire.schema.json"
 DEFAULT_INC = ROOT / "Tests" / "generated" / "m6_v2_wire_vectors.inc"
 DEFAULT_C_WIRE = ROOT / "System" / "m6_wire.h"
-FROZEN_REGISTRY_SHA256 = "23fbd056db28c1fedc7987a34d0893594fddb417f34058851667ffc2d5dca0a2"
-FROZEN_SCHEMA_SHA256 = "95191cda4ea5ed0691126af1fa027ff37b3dd6f920ede9c099cad0b16fce7ede"
+FROZEN_REGISTRY_SHA256 = "8f47a5525b9fc7ef348c070d359c07ccf59c366d7703174af05274f6632dec67"
+FROZEN_SCHEMA_SHA256 = "aa657ad8f2f34c7c5dd55764e1c6dc77661d264b52129f14e478f619c83f217a"
 
 
 class RegistryError(ValueError):
@@ -415,6 +415,7 @@ def _validate_rpc_contract(registry: dict[str, Any]) -> None:
         "ACTION_GET": 0x0008,
         "SUBSCRIPTION_GET": 0x0009,
         "SNAPSHOT_GET": 0x000A,
+        "MANUAL_DRIVE_GET": 0x000B,
         "PARAM_SUMMARY_GET": 0x0100,
         "PARAM_DESCRIPTOR_GET": 0x0101,
         "PARAM_VALUE_GET": 0x0102,
@@ -434,6 +435,7 @@ def _validate_rpc_contract(registry: dict[str, Any]) -> None:
         "ACTION_CANCEL": 0x8302,
         "HEADING_CALIBRATE": 0x8303,
         "GRAYSCALE_CAPTURE_START": 0x8304,
+        "MANUAL_DRIVE_SET": 0x8305,
     }
     opcodes = registry["registries"]["rpc_opcodes"]
     if [entry["name"] for entry in opcodes] != list(expected_values):
@@ -854,11 +856,11 @@ def _validate_registry_invariants(registry: dict[str, Any]) -> None:
     if registries["frame_types"] != expected_frame_types:
         raise RegistryError("wire-v1 frame type/direction/flag registry changed")
     capabilities = registries["capabilities"]
-    if len(capabilities) != 25:
-        raise RegistryError("wire-v1 requires capability bits 0..24")
+    if len(capabilities) != 26:
+        raise RegistryError("wire-v1 requires capability bits 0..25")
     for expected_bit, entry in enumerate(capabilities):
         if entry.get("bit") != expected_bit or entry["value"] != 1 << expected_bit:
-            raise RegistryError("capability bits must be contiguous 0..24")
+            raise RegistryError("capability bits must be contiguous 0..25")
     mask_entries = registries["capability_masks"]
     mask_names = [entry["name"] for entry in mask_entries]
     mask_hex = [entry["value_hex"] for entry in mask_entries]
@@ -870,8 +872,8 @@ def _validate_registry_invariants(registry: dict[str, Any]) -> None:
         all_defined |= entry["value"]
     if masks != {
         "HANDSHAKE_REQUIRED": 0x000000000000600F,
-        "HELLO_OPTIONAL": 0x0000000001FF9FF0,
-        "ALL_DEFINED": 0x0000000001FFFFFF,
+        "HELLO_OPTIONAL": 0x0000000003FF9FF0,
+        "ALL_DEFINED": 0x0000000003FFFFFF,
     }:
         raise RegistryError("wire-v1 capability aggregate masks changed")
     if masks["ALL_DEFINED"] != all_defined:
@@ -884,6 +886,9 @@ def _validate_registry_invariants(registry: dict[str, Any]) -> None:
     opcode_values = {item["name"]: item["value"] for item in registries["rpc_opcodes"]}
     if opcode_values.get("GRAYSCALE_CAPTURE_START") != 0x8304:
         raise RegistryError("GRAYSCALE_CAPTURE_START must remain 0x8304")
+    if opcode_values.get("MANUAL_DRIVE_GET") != 0x000B or \
+       opcode_values.get("MANUAL_DRIVE_SET") != 0x8305:
+        raise RegistryError("manual-drive opcodes must remain 0x000B/0x8305")
     results = {item["name"]: item["value"] for item in registries["rpc_results"]}
     expected_results = {
         "OK": 0, "MALFORMED": 1, "BAD_FLAGS": 2, "BAD_LENGTH": 3,
@@ -957,6 +962,9 @@ def _validate_registry_invariants(registry: dict[str, Any]) -> None:
             "FLASH": 5, "ACTION": 6, "TX_DRAIN": 7, "ASYNC_EVENT": 8,
         },
         "action_sources": {"NONE": 0, "V1_UART": 1, "V2_RPC": 2, "PB11_IR": 3, "BOOT_SELF_TEST": 4, "INTERNAL": 5},
+        "manual_drive_sources": {"NONE": 0, "PB11_IR": 1, "UART1_VISION": 2, "HOST_RPC": 3},
+        "manual_drive_stop_reasons": {"NONE": 0, "RELEASE": 1, "LEASE_EXPIRED": 2, "PREEMPTED": 3, "FAULT": 4, "ACTION_TAKEOVER": 5},
+        "manual_drive_flags": {"TAKEOVER": 1, "RELEASE": 2},
         "action_kinds": {"NONE": 0, "WHEEL_SPEED_TEST": 1, "HEADING_HOLD": 2, "HEADING_TURN": 3, "HEADING_RATE": 4, "LINE_FOLLOW": 5, "MOTOR_SELF_TEST": 6},
         "action_states": {"IDLE": 0, "ARMED": 1, "RUNNING": 2, "RAMP_DOWN": 3, "COMPLETE": 4, "REJECTED": 5, "FAULT": 6},
         "emergency_sources": {"UNKNOWN": 0, "UART_S": 1, "UART_SPACE": 2, "INTERNAL": 3},

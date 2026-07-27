@@ -9,7 +9,9 @@ import sys
 from typing import Any, Mapping, Sequence
 
 from . import compat
+from .dashboard import run_dashboard
 from .errors import M6Error
+from .monitor import run_monitor
 from .recording import Recorder, load_recording
 from .scoring import candidate_accepted, evidence_compatible, score_samples
 from .session import BAUD_RATE, DEFAULT_FIRMWARE_PREFIX, PARAMETER_SCHEMA, Session
@@ -22,6 +24,44 @@ def _create_parser() -> argparse.ArgumentParser:
         "--legacy",
         action="store_true",
         help="explicitly remain in V1 text mode; V2 is required by default",
+    )
+    subparsers = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    monitor = subparsers.add_parser(
+        "monitor", help="display read-only V2 telemetry in real time"
+    )
+    monitor.add_argument("--refresh-hz", type=float, default=10.0)
+    monitor.add_argument(
+        "--trend-seconds",
+        type=float,
+        default=6.0,
+        help="rolling trend window; zero disables trends",
+    )
+    monitor.add_argument("--duration", type=float)
+    monitor.add_argument(
+        "--jsonl", action="store_true", help="write snapshots as JSON Lines"
+    )
+    monitor.add_argument(
+        "--output", type=Path, help="also save snapshots as JSON Lines"
+    )
+    dashboard = subparsers.add_parser(
+        "dashboard", help="open the live telemetry, control, and parameter dashboard"
+    )
+    dashboard.add_argument(
+        "--http-port", type=int, default=8765, help="local dashboard port (default: 8765)"
+    )
+    dashboard.add_argument(
+        "--no-open", action="store_true", help="do not open the default browser"
+    )
+    dashboard.add_argument("--duration", type=float)
+    dashboard.add_argument(
+        "--recordings-dir",
+        type=Path,
+        default=Path("recordings"),
+        help="dashboard recording library directory (default: ./recordings)",
     )
     return parser
 
@@ -112,6 +152,26 @@ def _v2_main(session: Session, identity: Any, args: argparse.Namespace) -> int:
             parameters=parameters,
         )
         print(result.json_path)
+    elif args.command == "monitor":
+        return run_monitor(
+            session,
+            identity,
+            refresh_hz=args.refresh_hz,
+            trend_seconds=args.trend_seconds,
+            duration_s=args.duration,
+            jsonl=args.jsonl,
+            output=args.output,
+        )
+    elif args.command == "dashboard":
+        return run_dashboard(
+            session,
+            identity,
+            port_name=identity.port or args.port or "",
+            http_port=args.http_port,
+            duration_s=args.duration,
+            open_browser=not args.no_open,
+            recordings_dir=args.recordings_dir,
+        )
     elif args.command == "tune-wheel":
         raise M6Error(
             "V2 tune-wheel requires an explicit human-controlled Arm/Confirm client; "
@@ -124,6 +184,8 @@ def _v2_main(session: Session, identity: Any, args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _create_parser()
     args = parser.parse_args(argv)
+    if args.command in ("monitor", "dashboard") and args.legacy:
+        parser.error(f"{args.command} requires the V2 link; remove --legacy")
     if args.command == "score":
         try:
             samples, metadata = load_recording(args.recording)

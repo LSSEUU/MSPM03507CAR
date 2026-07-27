@@ -18,6 +18,9 @@ packages = ["src/m6link"]
 [tool.hatch.build.targets.wheel.force-include]
 "../Tests/vectors/m6_v2_wire_v1.json" = "m6link/data/m6_v2_wire_v1.json"
 "../Tests/vectors/m6_v2_wire.schema.json" = "m6link/data/m6_v2_wire.schema.json"
+"src/m6link/web/dashboard.html" = "m6link/web/dashboard.html"
+"src/m6link/web/dashboard.css" = "m6link/web/dashboard.css"
+"src/m6link/web/dashboard.js" = "m6link/web/dashboard.js"
 
 [tool.pytest.ini_options]
 testpaths = ["../Tests"]

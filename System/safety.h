@@ -47,6 +47,8 @@ void Safety_Init(uint32_t now_ms);
 void Safety_NotifySensor(SafetySensor_t sensor, uint32_t now_ms);
 void Safety_BeginAction(uint32_t now_ms, uint32_t timeout_ms,
                         uint32_t required_sensor_mask);
+void Safety_BeginContinuousAction(uint32_t now_ms,
+                                  uint32_t required_sensor_mask);
 void Safety_EndAction(void);
 void Safety_Evaluate(uint32_t now_ms);
 void Safety_RaiseFault(uint32_t fault_bits, uint32_t now_ms);

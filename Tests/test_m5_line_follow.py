@@ -67,6 +67,7 @@ class M5LineFollowTests(unittest.TestCase):
         self.assertIn("AppLine_Task20ms(started)", main)
         self.assertIn("Grayscale_Task(SystemTime_Now())", main)
         self.assertIn("WheelSpeed_SetTarget", app)
+        self.assertIn("AppLine_StartTimed", app)
         self.assertIn("SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE)", app)
         self.assertIn("SAFETY_FAULT_LINE_LOST", app)
         self.assertIn("SAFETY_FAULT_LINE_LOST", safety)

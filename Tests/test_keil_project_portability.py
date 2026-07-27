@@ -28,10 +28,14 @@ class KeilProjectPortabilityTests(unittest.TestCase):
         self.assertIn("LR_IROM1 0x00000000 0x0001F800", scatter)
         self.assertIn("ER_IROM1 0x00000000 ALIGNALL 8 0x0001F800", scatter)
 
-    def test_project_reserves_the_two_parameter_sectors(self):
+    def test_project_describes_flash_and_reserves_parameter_sectors(self):
         root = ET.fromstring(PROJECT_FILE.read_text(encoding="utf-8"))
+
+        # Keil refreshes the physical device memory from the installed DFP.
+        # Keep the full 128 KiB here; OCR_RVCT4 and the scatter file define
+        # the smaller application link region that excludes the final 2 KiB.
         self.assertEqual(
-            int(root.findtext(".//OnChipMemories/IROM/Size"), 0), 0x1F800
+            int(root.findtext(".//OnChipMemories/IROM/Size"), 0), 0x20000
         )
         self.assertEqual(
             int(root.findtext(".//OnChipMemories/OCR_RVCT4/Size"), 0), 0x1F800

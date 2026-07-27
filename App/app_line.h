@@ -23,6 +23,7 @@ typedef struct {
 void AppLine_Init(void);
 bool AppLine_Arm(uint32_t now_ms);
 bool AppLine_ConfirmStart(uint32_t now_ms);
+bool AppLine_StartTimed(uint32_t now_ms, uint32_t duration_ms);
 bool AppLine_Stop(uint32_t now_ms);
 void AppLine_ProcessGrayscale(const GrayscaleSnapshot_t *gray);
 void AppLine_Task20ms(uint32_t now_ms);

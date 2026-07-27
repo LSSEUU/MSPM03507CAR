@@ -29,6 +29,7 @@ class AppRemoteTests(unittest.TestCase):
                     "-I", str(ROOT / "Config"),
                     str(ROOT / "Tests" / "app_remote_test.c"),
                     str(ROOT / "App" / "app_remote.c"),
+                    str(ROOT / "App" / "app_manual_drive.c"),
                     "-o", str(executable),
                 ]
                 compiled = subprocess.run(command, capture_output=True, text=True)
@@ -38,8 +39,9 @@ class AppRemoteTests(unittest.TestCase):
 
     def test_remote_never_writes_pwm_directly(self):
         app = (ROOT / "App" / "app_remote.c").read_text(encoding="utf-8")
-        self.assertIn("WheelSpeed_SetTarget", app)
-        self.assertIn("Safety_BeginAction", app)
+        self.assertIn("AppManualDrive_Submit", app)
+        self.assertNotIn("WheelSpeed_SetTarget", app)
+        self.assertNotIn("Safety_BeginAction", app)
         self.assertNotIn("Motor_SetPWM", app)
 
 

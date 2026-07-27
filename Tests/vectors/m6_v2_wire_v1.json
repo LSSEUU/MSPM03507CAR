@@ -404,12 +404,13 @@
       {"name": "GRAYSCALE_CAPTURE", "value": 2097152, "bit": 21},
       {"name": "CONFIGURABLE_TURN", "value": 4194304, "bit": 22},
       {"name": "BULK_TRANSFER", "value": 8388608, "bit": 23},
-      {"name": "HEADING_RATE_ACTION", "value": 16777216, "bit": 24}
+      {"name": "HEADING_RATE_ACTION", "value": 16777216, "bit": 24},
+      {"name": "MANUAL_DRIVE", "value": 33554432, "bit": 25}
     ],
     "capability_masks": [
       {"name": "HANDSHAKE_REQUIRED", "value_hex": "000000000000600f"},
-      {"name": "HELLO_OPTIONAL", "value_hex": "0000000001ff9ff0"},
-      {"name": "ALL_DEFINED", "value_hex": "0000000001ffffff"}
+      {"name": "HELLO_OPTIONAL", "value_hex": "0000000003ff9ff0"},
+      {"name": "ALL_DEFINED", "value_hex": "0000000003ffffff"}
     ],
     "rpc_opcodes": [
       {"name": "PING", "value": 1, "mutating": false, "request_body_layout": "rpc_ping_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_ping_success_body_v1", "success_body_min": 12, "success_body_max": 12},
@@ -422,6 +423,7 @@
       {"name": "ACTION_GET", "value": 8, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "event_action_state_body_v1", "success_body_min": 28, "success_body_max": 28},
       {"name": "SUBSCRIPTION_GET", "value": 9, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "rpc_subscription_get_success_body_v1", "success_body_min": 8, "success_body_max": 24},
       {"name": "SNAPSHOT_GET", "value": 10, "mutating": false, "request_body_layout": "rpc_snapshot_get_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_snapshot_get_success_body_v1", "success_body_min": 36, "success_body_max": 68},
+      {"name": "MANUAL_DRIVE_GET", "value": 11, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "manual_drive_snapshot_v1", "success_body_min": 16, "success_body_max": 16},
       {"name": "PARAM_SUMMARY_GET", "value": 256, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "rpc_param_summary_get_success_body_v1", "success_body_min": 24, "success_body_max": 24},
       {"name": "PARAM_DESCRIPTOR_GET", "value": 257, "mutating": false, "request_body_layout": "rpc_parameter_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_param_descriptor_get_success_body_v1", "success_body_min": 20, "success_body_max": 51},
       {"name": "PARAM_VALUE_GET", "value": 258, "mutating": false, "request_body_layout": "rpc_parameter_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_param_value_get_success_body_v1", "success_body_min": 28, "success_body_max": 28},
@@ -440,7 +442,8 @@
       {"name": "ACTION_CONFIRM", "value": 33537, "mutating": true, "request_body_layout": "rpc_action_confirm_request_body_v1", "request_body_min": 8, "request_body_max": 8, "success_body_layout": "rpc_action_confirm_success_body_v1", "success_body_min": 16, "success_body_max": 16},
       {"name": "ACTION_CANCEL", "value": 33538, "mutating": true, "request_body_layout": "rpc_action_cancel_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_action_cancel_success_body_v1", "success_body_min": 12, "success_body_max": 12},
       {"name": "HEADING_CALIBRATE", "value": 33539, "mutating": true, "request_body_layout": "rpc_boot_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_heading_calibrate_success_body_v1", "success_body_min": 8, "success_body_max": 8},
-      {"name": "GRAYSCALE_CAPTURE_START", "value": 33540, "mutating": true, "request_body_layout": "rpc_boot_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_grayscale_capture_start_success_body_v1", "success_body_min": 8, "success_body_max": 8}
+      {"name": "GRAYSCALE_CAPTURE_START", "value": 33540, "mutating": true, "request_body_layout": "rpc_boot_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_grayscale_capture_start_success_body_v1", "success_body_min": 8, "success_body_max": 8},
+      {"name": "MANUAL_DRIVE_SET", "value": 33541, "mutating": true, "request_body_layout": "rpc_manual_drive_set_request_body_v1", "request_body_min": 16, "request_body_max": 16, "success_body_layout": "manual_drive_snapshot_v1", "success_body_min": 16, "success_body_max": 16}
     ],
     "rpc_results": [
       {"name": "OK", "value": 0},
@@ -622,6 +625,24 @@
       {"name": "BOOT_SELF_TEST", "value": 4},
       {"name": "INTERNAL", "value": 5}
     ],
+    "manual_drive_sources": [
+      {"name": "NONE", "value": 0},
+      {"name": "PB11_IR", "value": 1},
+      {"name": "UART1_VISION", "value": 2},
+      {"name": "HOST_RPC", "value": 3}
+    ],
+    "manual_drive_stop_reasons": [
+      {"name": "NONE", "value": 0},
+      {"name": "RELEASE", "value": 1},
+      {"name": "LEASE_EXPIRED", "value": 2},
+      {"name": "PREEMPTED", "value": 3},
+      {"name": "FAULT", "value": 4},
+      {"name": "ACTION_TAKEOVER", "value": 5}
+    ],
+    "manual_drive_flags": [
+      {"name": "TAKEOVER", "value": 1, "bit": 0},
+      {"name": "RELEASE", "value": 2, "bit": 1}
+    ],
     "emergency_sources": [
       {"name": "UNKNOWN", "value": 0},
       {"name": "UART_S", "value": 1},
@@ -661,7 +682,8 @@
       {"name": "TELEMETRY_GAP", "value": 6, "schema": 1, "priority": "P1", "body_size": 12, "body_layout": "event_telemetry_gap_body_v1"},
       {"name": "STORAGE_FAULT", "value": 7, "schema": 1, "priority": "P1", "body_size": 12, "body_layout": "event_storage_fault_body_v1"},
       {"name": "LINK_STATE", "value": 8, "schema": 1, "priority": "P1", "body_size": 16, "body_layout": "event_link_state_body_v1"},
-      {"name": "GRAYSCALE_READY", "value": 9, "schema": 1, "priority": "P1", "body_size": 40, "body_layout": "event_grayscale_ready_body_v1"}
+      {"name": "GRAYSCALE_READY", "value": 9, "schema": 1, "priority": "P1", "body_size": 40, "body_layout": "event_grayscale_ready_body_v1"},
+      {"name": "MANUAL_DRIVE_STATE", "value": 10, "schema": 1, "priority": "P1", "body_size": 16, "body_layout": "manual_drive_snapshot_v1"}
     ],
     "severities": [
       {"name": "INFO", "value": 0},
@@ -1186,6 +1208,24 @@
       {"name": "request_id", "offset": 0, "size": 4, "kind": "u32"},
       {"name": "accepted_ms", "offset": 4, "size": 4, "kind": "u32"}
     ]},
+    {"name": "rpc_manual_drive_set_request_body_v1", "size": 16, "fields": [
+      {"name": "boot_id", "offset": 0, "size": 4, "kind": "u32"},
+      {"name": "command_id", "offset": 4, "size": 4, "kind": "u32"},
+      {"name": "target_l_mm_s", "offset": 8, "size": 2, "kind": "i16"},
+      {"name": "target_r_mm_s", "offset": 10, "size": 2, "kind": "i16"},
+      {"name": "lease_ms", "offset": 12, "size": 2, "kind": "u16"},
+      {"name": "flags", "offset": 14, "size": 2, "kind": "u16", "registry": "manual_drive_flags"}
+    ]},
+    {"name": "manual_drive_snapshot_v1", "size": 16, "fields": [
+      {"name": "command_id", "offset": 0, "size": 4, "kind": "u32"},
+      {"name": "lease_deadline_ms", "offset": 4, "size": 4, "kind": "u32"},
+      {"name": "target_l_mm_s", "offset": 8, "size": 2, "kind": "i16"},
+      {"name": "target_r_mm_s", "offset": 10, "size": 2, "kind": "i16"},
+      {"name": "source", "offset": 12, "size": 1, "kind": "u8", "registry": "manual_drive_sources"},
+      {"name": "active", "offset": 13, "size": 1, "kind": "u8", "registry": "boolean_values"},
+      {"name": "stop_reason", "offset": 14, "size": 1, "kind": "u8", "registry": "manual_drive_stop_reasons"},
+      {"name": "reserved", "offset": 15, "size": 1, "kind": "u8", "reserved": true}
+    ]},
     {"name": "protocol_error_v1", "size": 8, "fields": [
       {"name": "result", "offset": 0, "size": 2, "kind": "u16", "registry": "protocol_errors"},
       {"name": "offending_type", "offset": 2, "size": 1, "kind": "u8"},
@@ -1559,12 +1599,12 @@
       {"id": "mode_v2_ready_sample", "transaction_id": 42, "challenge_hex": "0123456789abcdef", "mode_ascii": ":42,mode,v2,0123456789abcdef\r\n", "mode_hex": "3a 34 32 2c 6d 6f 64 65 2c 76 32 2c 30 31 32 33 34 35 36 37 38 39 61 62 63 64 65 66 0d 0a", "ready_ascii": "ok,42,v2-ready,0123456789abcdef,2,1,96,32,1\r\n", "ready_hex": "6f 6b 2c 34 32 2c 76 32 2d 72 65 61 64 79 2c 30 31 32 33 34 35 36 37 38 39 61 62 63 64 65 66 2c 32 2c 31 2c 39 36 2c 33 32 2c 31 0d 0a"}
     ],
     "resync": [
-      {"id": "capability_probe_reply", "transaction_id": 1, "probe_ascii": ":1,get,meta.capabilities\r\n", "probe_hex": "3a 31 2c 67 65 74 2c 6d 65 74 61 2e 63 61 70 61 62 69 6c 69 74 69 65 73 0d 0a", "reply_ascii": "ok,1,meta.capabilities,0000000001ffffff\r\n", "reply_hex": "6f 6b 2c 31 2c 6d 65 74 61 2e 63 61 70 61 62 69 6c 69 74 69 65 73 2c 30 30 30 30 30 30 30 30 30 31 66 66 66 66 66 66 0d 0a"}
+      {"id": "capability_probe_reply", "transaction_id": 1, "probe_ascii": ":1,get,meta.capabilities\r\n", "probe_hex": "3a 31 2c 67 65 74 2c 6d 65 74 61 2e 63 61 70 61 62 69 6c 69 74 69 65 73 0d 0a", "reply_ascii": "ok,1,meta.capabilities,0000000003ffffff\r\n", "reply_hex": "6f 6b 2c 31 2c 6d 65 74 61 2e 63 61 70 61 62 69 6c 69 74 69 65 73 2c 30 30 30 30 30 30 30 30 30 33 66 66 66 66 66 66 0d 0a"}
     ],
     "frames": [
-      {"id": "hello_request", "type": "HELLO", "flags": 0, "session": 0, "sequence": 0, "payload_hex": "4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 01 00 00 00 00 60 00 20 00 01 00 00 00", "expected": {"crc_input_hex": "02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 01 00 00 00 00 60 00 20 00 01 00 00 00", "crc16": 18595, "crc_le_hex": "a3 48", "decoded_hex": "02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 01 00 00 00 00 60 00 20 00 01 00 00 00 a3 48", "wire_hex": "7e 02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 01 00 00 00 00 60 00 7d 00 00 01 00 00 00 a3 48 7e", "decoded_length": 55, "wire_length": 58}},
-      {"id": "ready", "type": "READY", "flags": 0, "session": 0, "sequence": 0, "payload_hex": "52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 01 00 00 00 00 ff ff ff 01 00 00 00 00 60 00 20 00 01 00 00 00", "expected": {"crc_input_hex": "02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 01 00 00 00 00 ff ff ff 01 00 00 00 00 60 00 20 00 01 00 00 00", "crc16": 48829, "crc_le_hex": "bd be", "decoded_hex": "02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 01 00 00 00 00 ff ff ff 01 00 00 00 00 60 00 20 00 01 00 00 00 bd be", "wire_hex": "7e 02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 7d 00 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 01 00 00 00 00 ff ff ff 01 00 00 00 00 60 00 7d 00 00 01 00 00 00 bd be 7e", "decoded_length": 79, "wire_length": 83}},
-      {"id": "ready_bad_host_payload_64", "type": "READY", "flags": 0, "session": 0, "sequence": 0, "payload_hex": "52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "expected": {"crc_input_hex": "02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00", "crc16": 20639, "crc_le_hex": "9f 50", "decoded_hex": "02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 9f 50", "wire_hex": "7e 02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 7d 00 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 9f 50 7e", "decoded_length": 79, "wire_length": 82}},
+      {"id":"hello_request","type":"HELLO","flags":0,"session":0,"sequence":0,"payload_hex":"4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 03 00 00 00 00 60 00 20 00 01 00 00 00","expected":{"crc_input_hex":"02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 03 00 00 00 00 60 00 20 00 01 00 00 00","crc16":49765,"crc_le_hex":"65 c2","decoded_hex":"02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 03 00 00 00 00 60 00 20 00 01 00 00 00 65 c2","wire_hex":"7e 02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 03 00 00 00 00 60 00 7d 00 00 01 00 00 00 65 c2 7e","decoded_length":55,"wire_length":58}},
+      {"id":"ready","type":"READY","flags":0,"session":0,"sequence":0,"payload_hex":"52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 ff ff ff 03 00 00 00 00 60 00 20 00 01 00 00 00","expected":{"crc_input_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 ff ff ff 03 00 00 00 00 60 00 20 00 01 00 00 00","crc16":36790,"crc_le_hex":"b6 8f","decoded_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 ff ff ff 03 00 00 00 00 60 00 20 00 01 00 00 00 b6 8f","wire_hex":"7e 02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 7d 00 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 ff ff ff 03 00 00 00 00 60 00 7d 00 00 01 00 00 00 b6 8f 7e","decoded_length":79,"wire_length":83}},
+      {"id":"ready_bad_host_payload_64","type":"READY","flags":0,"session":0,"sequence":0,"payload_hex":"52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00","expected":{"crc_input_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00","crc16":60242,"crc_le_hex":"52 eb","decoded_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 52 eb","wire_hex":"7e 02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 7d 00 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 52 eb 7e","decoded_length":79,"wire_length":82}},
       {"id": "ping_request", "type": "RPC_REQUEST", "flags": 0, "session": 337408518, "sequence": 1, "payload_hex": "01 00 7e 20 53 7d", "expected": {"crc_input_hex": "02 10 00 06 72 1c 14 01 00 00 00 06 00 01 00 7e 20 53 7d", "crc16": 3701, "crc_le_hex": "75 0e", "decoded_hex": "02 10 00 06 72 1c 14 01 00 00 00 06 00 01 00 7e 20 53 7d 75 0e", "wire_hex": "7e 02 10 00 06 72 1c 14 01 00 00 00 06 00 01 00 7d 5e 7d 00 7d 73 7d 5d 75 0e 7e", "decoded_length": 21, "wire_length": 27}},
       {"id": "ping_response", "type": "RPC_RESPONSE", "flags": 0, "session": 337408518, "sequence": 1, "payload_hex": "01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10", "expected": {"crc_input_hex": "02 11 00 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10", "crc16": 46612, "crc_le_hex": "14 b6", "decoded_hex": "02 11 00 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10 14 b6", "wire_hex": "7e 02 11 00 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7d 5e 7d 00 7d 73 7d 5d 7d 5e 7d 5d 7d 73 7d 00 40 30 7d 00 10 14 b6 7e", "decoded_length": 35, "wire_length": 46}},
       {"id": "ping_response_replay", "type": "RPC_RESPONSE", "flags": 1, "session": 337408518, "sequence": 1, "payload_hex": "01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10", "expected": {"crc_input_hex": "02 11 01 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10", "crc16": 14397, "crc_le_hex": "3d 38", "decoded_hex": "02 11 01 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10 3d 38", "wire_hex": "7e 02 11 01 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7d 5e 7d 00 7d 73 7d 5d 7d 5e 7d 5d 7d 73 7d 00 40 30 7d 00 10 3d 38 7e", "decoded_length": 35, "wire_length": 46}},

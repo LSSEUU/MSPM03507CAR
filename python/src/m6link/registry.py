@@ -20,8 +20,8 @@ from typing import Any, Iterable
 from .errors import IntegrityError
 
 
-REGISTRY_SHA256 = "23fbd056db28c1fedc7987a34d0893594fddb417f34058851667ffc2d5dca0a2"
-SCHEMA_SHA256 = "95191cda4ea5ed0691126af1fa027ff37b3dd6f920ede9c099cad0b16fce7ede"
+REGISTRY_SHA256 = "8f47a5525b9fc7ef348c070d359c07ccf59c366d7703174af05274f6632dec67"
+SCHEMA_SHA256 = "aa657ad8f2f34c7c5dd55764e1c6dc77661d264b52129f14e478f619c83f217a"
 
 
 def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -122,6 +122,9 @@ ActionKind = enum("ActionKind", "action_kinds")
 ActionState = enum("ActionState", "action_states")
 ActionReason = enum("ActionReason", "action_reasons")
 EventCode = enum("EventCode", "event_codes")
+ManualDriveSource = enum("ManualDriveSource", "manual_drive_sources")
+ManualDriveStopReason = enum("ManualDriveStopReason", "manual_drive_stop_reasons")
+ManualDriveFlag = enum("ManualDriveFlag", "manual_drive_flags", flag=True)
 Severity = enum("Severity", "severities")
 TelemetryStream = enum("TelemetryStream", "telemetry_streams")
 

@@ -1,0 +1,32 @@
+import pathlib
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+class AppManualDriveTests(unittest.TestCase):
+    def test_manual_drive_core(self):
+        compiler = shutil.which("gcc") or shutil.which("clang")
+        self.assertIsNotNone(compiler, "A host C compiler is required")
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = pathlib.Path(temporary) / "app_manual_drive.exe"
+            command = [
+                compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                "-I", str(ROOT / "App"), "-I", str(ROOT / "System"),
+                "-I", str(ROOT / "Control"),
+                str(ROOT / "Tests" / "app_manual_drive_test.c"),
+                str(ROOT / "App" / "app_manual_drive.c"),
+                "-o", str(executable),
+            ]
+            compiled = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            run = subprocess.run([str(executable)], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

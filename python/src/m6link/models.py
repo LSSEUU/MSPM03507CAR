@@ -12,6 +12,8 @@ from .registry import (
     ActionReason,
     ActionState,
     Capability,
+    ManualDriveSource,
+    ManualDriveStopReason,
     ParameterSource,
     ParameterType,
     TelemetryStream,
@@ -82,6 +84,16 @@ class Status:
     stage_revision: int
     source: ParameterSource | int
     flags: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ManualDriveSnapshot:
+    command_id: int
+    lease_deadline_ms: int
+    target_mm_s: tuple[int, int]
+    source: ManualDriveSource | int
+    active: bool
+    stop_reason: ManualDriveStopReason | int
 
 
 @dataclass(frozen=True, slots=True)

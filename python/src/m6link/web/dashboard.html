@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M6 实时遥测</title>
+  <link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">MSPM03507CAR · SAFETY GATED CONTROL</p>
+      <h1>M6 实时遥测</h1>
+    </div>
+    <div class="connection">
+      <span id="connectionDot" class="status-dot waiting" aria-hidden="true"></span>
+      <div><strong id="connectionText">等待数据</strong><small id="deviceText">正在连接本地服务…</small></div>
+    </div>
+  </header>
+
+  <main>
+    <nav class="section-nav" aria-label="仪表盘区域">
+      <div class="section-links">
+        <a href="#telemetry">实时数据</a>
+        <a href="#vehicleControl">运动控制</a>
+        <button id="openParametersButton" class="nav-button" type="button">参数调节</button>
+      </div>
+      <div class="recording-tools" aria-label="遥测录制">
+        <span id="recordingStatus" class="recording-status" hidden><i aria-hidden="true"></i><strong id="recordingElapsed">00:00</strong><small id="recordingSize">0 B</small></span>
+        <button id="startRecordingButton" class="record-button" type="button">开始录制</button>
+        <button id="addMarkerButton" class="secondary" type="button" hidden>添加标记</button>
+        <button id="stopRecordingButton" class="record-stop" type="button" hidden>停止</button>
+        <button id="recordingLibraryButton" class="nav-button" type="button">录制库</button>
+      </div>
+      <div class="layout-switch" role="group" aria-label="显示布局">
+        <span>显示方案</span>
+        <button id="layoutScrollButton" class="layout-button" type="button" aria-pressed="true">滚动总览</button>
+        <button id="layoutCockpitButton" class="layout-button" type="button" aria-pressed="false">固定驾驶舱</button>
+      </div>
+    </nav>
+    <section id="liveToolbar" class="toolbar" aria-label="波形控制">
+      <div class="toolbar-status">
+        <span><small>接收帧</small><strong id="sampleCount">0</strong></span>
+        <span><small>帧间断</small><strong id="gapCount">0</strong></span>
+        <span><small>显示刷新</small><strong>≤ 60 fps</strong></span>
+        <span><small>原始采样</small><strong>50 / 25 / 25 Hz</strong></span>
+      </div>
+      <div class="toolbar-actions">
+        <label for="windowSelect">时间窗口</label>
+        <select id="windowSelect">
+          <option value="5">5 秒</option>
+          <option value="10" selected>10 秒</option>
+          <option value="30">30 秒</option>
+        </select>
+        <button id="pauseButton" type="button">暂停</button>
+        <button id="clearButton" class="secondary" type="button">清空</button>
+      </div>
+    </section>
+
+    <section id="playbackBar" class="playback-bar" aria-label="历史回放控制" hidden>
+      <div class="playback-identity"><span class="playback-badge">历史回放 · 只读</span><strong id="playbackName">—</strong></div>
+      <div class="playback-controls">
+        <button id="playbackBackButton" class="secondary" type="button" aria-label="后退五秒">−5 s</button>
+        <button id="playbackPlayButton" type="button" aria-label="播放回放">播放</button>
+        <button id="playbackForwardButton" class="secondary" type="button" aria-label="前进五秒">+5 s</button>
+        <label class="playback-progress" for="playbackProgress"><span class="sr-only">回放进度</span><input id="playbackProgress" type="range" min="0" max="0" value="0" step="10"></label>
+        <output id="playbackTime" for="playbackProgress">00:00.000 / 00:00.000</output>
+        <label for="playbackSpeed">倍速</label>
+        <select id="playbackSpeed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+        <button id="exitPlaybackButton" class="warning" type="button">退出回放</button>
+      </div>
+    </section>
+
+    <section id="telemetry" class="kpi-grid" aria-label="实时关键数据">
+      <article class="kpi"><span>左轮速度</span><strong id="speedL">—</strong><small>mm/s</small></article>
+      <article class="kpi"><span>右轮速度</span><strong id="speedR">—</strong><small>mm/s</small></article>
+      <article class="kpi"><span>循迹位置</span><strong id="linePosition">—</strong><small>normalized</small></article>
+      <article class="kpi"><span>循迹置信度</span><strong id="lineConfidence">—</strong><small>0–1</small></article>
+      <article class="kpi"><span>偏航角</span><strong id="yaw">—</strong><small>deg</small></article>
+      <article class="kpi"><span>故障位</span><strong id="faultBits">—</strong><small>hex</small></article>
+    </section>
+
+    <section class="chart-grid">
+      <article class="panel chart-panel wide">
+        <div class="panel-heading"><div><h2>轮速跟随</h2><p>目标与实测 · CORE 50 Hz</p></div><div class="legend"><span class="cyan">左实测</span><span class="orange">右实测</span><span class="blue dash">左目标</span><span class="amber dash">右目标</span></div></div>
+        <canvas id="speedChart" role="img" aria-label="左右轮目标和实测速度实时曲线"></canvas>
+      </article>
+      <article class="panel chart-panel">
+        <div class="panel-heading"><div><h2>电机输出</h2><p>PWM 与速度误差 · 25–50 Hz</p></div><div class="legend"><span class="cyan">PWM L</span><span class="orange">PWM R</span><span class="violet dash">Error L</span><span class="pink dash">Error R</span></div></div>
+        <canvas id="motorChart" role="img" aria-label="左右轮 PWM 和误差实时曲线"></canvas>
+      </article>
+      <article class="panel chart-panel visual-panel">
+        <div class="panel-heading"><div><h2>循迹横截面</h2><p>车身相对轨迹的位置、置信度与 5 秒微趋势</p></div><div class="legend"><span class="green">滤波位置</span><span class="teal dash">原始位置</span><span class="yellow">置信度</span></div></div>
+        <canvas id="lineChart" role="img" aria-label="车辆相对循迹中心的位置、置信度和五秒位置微趋势"></canvas>
+      </article>
+      <article class="panel chart-panel visual-panel wide">
+        <div class="panel-heading"><div><h2>陀螺仪姿态</h2><p>航向罗盘、角速度与 5 秒微趋势 · CORE 50 Hz</p></div><div class="legend"><span class="violet">偏航角</span><span class="pink">角速度</span></div></div>
+        <canvas id="gyroChart" role="img" aria-label="车辆偏航罗盘、实时角速度和五秒角速度微趋势"></canvas>
+      </article>
+    </section>
+
+    <section class="lower-grid">
+      <article class="panel sensors-panel">
+        <div class="panel-heading"><div><h2>八路灰度</h2><p>ADC 顺序为通道 0 → 7；亮起表示 active mask 对应位为 1</p></div><strong id="maskText">mask —</strong></div>
+        <div id="sensorBars" class="sensor-bars" aria-label="八路灰度 ADC 柱状图"></div>
+      </article>
+      <article class="panel health-panel">
+        <div class="panel-heading"><div><h2>链路与健康</h2><p>停机和调参前先确认此处无异常</p></div><span id="healthBadge" class="badge waiting">等待 HEALTH</span></div>
+        <dl class="health-list">
+          <div><dt>系统状态</dt><dd id="systemState">—</dd></div>
+          <div><dt>任务 missed</dt><dd id="taskMiss">—</dd></div>
+          <div><dt>UART 丢弃 TX / RX</dt><dd id="uartDrop">—</dd></div>
+          <div><dt>遥测丢弃 P2 / P3</dt><dd id="telemetryDrop">—</dd></div>
+          <div><dt>遥测队列</dt><dd id="telemetryQueue">—</dd></div>
+          <div><dt>数据年龄 CORE / WHEEL / LINE</dt><dd id="dataAge">—</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section id="vehicleControl" class="workspace-section control-section" aria-labelledby="controlTitle">
+      <div id="playbackReadonlyNotice" class="readonly-notice" role="status" hidden>当前为历史回放：车辆急停、运动控制、清故障和参数写入均已禁用。退出回放后恢复实时控制。</div>
+      <div class="workspace-heading">
+        <div><p class="section-kicker">CONTROL · TWO-PHASE</p><h2 id="controlTitle">小车运动控制</h2><p>每次运动都必须先 Arm，再在 10 秒内 Confirm。参数不合法或 Safety 有故障时，固件仍会拒绝动作。</p></div>
+        <button id="estopButton" class="danger estop" type="button">立即急停</button>
+      </div>
+      <div class="control-grid">
+        <article class="panel action-panel">
+          <div class="panel-heading action-heading"><div><h2>驾驶方式</h2><p>动作测试使用两阶段确认；键盘遥控启用后直接接管</p></div><span id="actionAvailability" class="badge waiting">读取能力中</span></div>
+          <div class="mode-tabs" role="tablist" aria-label="驾驶方式">
+            <button id="actionModeButton" class="mode-tab active" type="button" role="tab" aria-selected="true" aria-controls="actionModePanel">动作测试</button>
+            <button id="manualModeButton" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="manualDrivePanel">WASD 遥控</button>
+          </div>
+          <div id="actionModePanel" role="tabpanel" aria-labelledby="actionModeButton">
+          <form id="actionForm" class="action-form">
+            <label class="form-field full" for="actionKind"><span>动作类型</span><select id="actionKind" required><option value="">读取固件能力中…</option></select><small id="actionHint">选择动作后显示对应参数</small></label>
+            <label class="form-field action-input" data-kinds="WHEEL_SPEED_TEST" for="wheelMask"><span>车轮</span><select id="wheelMask"><option value="3">左右轮</option><option value="1">仅左轮</option><option value="2">仅右轮</option></select></label>
+            <label class="form-field action-input" data-kinds="WHEEL_SPEED_TEST" for="targetL"><span>左轮目标</span><input id="targetL" type="number" min="-400" max="400" step="1" value="120"><small>选中车轮要求绝对值 50–400 mm/s</small></label>
+            <label class="form-field action-input" data-kinds="WHEEL_SPEED_TEST" for="targetR"><span>右轮目标</span><input id="targetR" type="number" min="-400" max="400" step="1" value="120"><small>未选中车轮自动发送 0</small></label>
+            <label class="form-field action-input" data-kinds="HEADING_HOLD" for="holdSpeed"><span>直行速度</span><input id="holdSpeed" type="number" min="-400" max="400" step="1" value="120"><small>绝对值 50–400 mm/s</small></label>
+            <label class="form-field action-input" data-kinds="HEADING_TURN" for="turnAngle"><span>转向角度</span><input id="turnAngle" type="number" min="-360" max="360" step="1" value="90"><small>正负表示方向，单位 deg</small></label>
+            <label class="form-field action-input" data-kinds="HEADING_RATE" for="yawRate"><span>目标角速度</span><input id="yawRate" type="number" min="-360" max="360" step="1" value="45"><small>绝对值 1–360 deg/s</small></label>
+            <label class="form-field" for="actionDuration"><span>持续时间</span><input id="actionDuration" type="number" min="100" max="10000" step="100" value="1500"><small>100–10000 ms；转角动作至少 500 ms</small></label>
+            <label id="lineContinuousOption" class="safety-check full action-input continuous-option" data-kinds="LINE_FOLLOW" for="lineContinuous"><input id="lineContinuous" type="checkbox"><span><strong>持续循迹，直到手动取消、急停或故障</strong><small>关闭网页不会自动停止小车；灰度看门狗和丢线保护仍然有效。</small></span></label>
+            <label class="safety-check full"><input id="safetyAck" type="checkbox"><span><strong>我已确认测试区域清空，并能随时按下急停</strong><small>每次动作完成或取消后都需要重新确认。</small></span></label>
+            <div class="form-actions full"><button id="armButton" type="submit" disabled>Arm 动作</button><button id="cancelActionButton" class="secondary" type="button">取消当前动作</button></div>
+          </form>
+          <div id="confirmActionBar" class="confirm-action" hidden>
+            <div><strong>动作已 Arm，尚未运动</strong><small id="armSummary">请核对参数</small></div>
+            <span id="armCountdown" class="countdown">10.0 s</span>
+            <button id="confirmActionButton" type="button">Confirm 开始运动</button>
+          </div>
+          </div>
+          <section id="manualDrivePanel" class="manual-drive-panel" role="tabpanel" aria-labelledby="manualModeButton" hidden>
+            <div class="manual-toolbar">
+              <div><strong>实时键盘驾驶</strong><small>按键变化立即发送，按住时每 100 ms 续租；松键普通停车</small></div>
+              <span id="manualCapabilityBadge" class="badge waiting">读取能力中</span>
+              <button id="manualEnableButton" type="button">启用键盘遥控</button>
+            </div>
+            <div class="manual-layout">
+              <div class="wasd-keys" aria-label="WASD 按键状态">
+                <span></span><kbd id="manualKeyW" data-manual-key="w">W<small>前进</small></kbd><span></span>
+                <kbd id="manualKeyA" data-manual-key="a">A<small>左转</small></kbd><kbd id="manualKeyS" data-manual-key="s">S<small>后退</small></kbd><kbd id="manualKeyD" data-manual-key="d">D<small>右转</small></kbd>
+              </div>
+              <div class="manual-settings">
+                <label for="manualMaxSpeed"><span>最高速度 <output id="manualMaxSpeedValue">160 mm/s</output></span><input id="manualMaxSpeed" type="range" min="50" max="400" step="10" value="160"></label>
+                <label for="manualSteering"><span>转向力度 <output id="manualSteeringValue">65%</output></span><input id="manualSteering" type="range" min="10" max="100" step="5" value="65"></label>
+              </div>
+              <dl class="manual-status">
+                <div><dt>轮速目标 L / R</dt><dd id="manualTargets">0 / 0 mm/s</dd></div>
+                <div><dt>控制来源</dt><dd id="manualSource">NONE</dd></div>
+                <div><dt>指令应答</dt><dd id="manualAck">—</dd></div>
+                <div><dt>连接状态</dt><dd id="manualConnection">未启用</dd></div>
+              </dl>
+            </div>
+            <p class="manual-hint">W/S 控制前后，A/D 控制转向，可组合成弧线。输入框或弹窗聚焦时不会捕获按键。</p>
+          </section>
+        </article>
+        <article class="panel control-status-panel">
+          <div class="panel-heading"><div><h2>控制状态</h2><p>状态文字与颜色同时提示</p></div><span id="controlBadge" class="badge waiting">等待状态</span></div>
+          <dl class="health-list">
+            <div><dt>动作状态</dt><dd id="controlActionState">—</dd></div>
+            <div><dt>动作类型</dt><dd id="controlActionKind">—</dd></div>
+            <div><dt>目标速度 L / R</dt><dd id="controlTargets">—</dd></div>
+            <div><dt>实测速度 L / R</dt><dd id="controlMeasured">—</dd></div>
+            <div><dt>Safety 故障</dt><dd id="controlFaults">—</dd></div>
+            <div><dt>参数版本 active / stage</dt><dd id="controlRevisions">—</dd></div>
+          </dl>
+          <section id="faultPanel" class="fault-panel" aria-labelledby="faultPanelTitle" aria-live="polite" hidden>
+            <div class="fault-panel-heading">
+              <div><strong id="faultPanelTitle">Safety 故障原因</strong><small>清故障只解除锁存，不会恢复或重启动作。</small></div>
+              <button id="clearFaultButton" class="warning" type="button">确认后清故障</button>
+            </div>
+            <div id="faultList" class="fault-list"></div>
+          </section>
+          <div class="safety-note"><strong>急停路径</strong><p>“立即急停”直接进入串口高优先级队列，不等待普通 RPC 完成。它只负责停机，不会清除 Safety 故障。</p></div>
+        </article>
+      </div>
+    </section>
+
+    <dialog id="recordingDialog" class="utility-dialog" aria-labelledby="recordingDialogTitle">
+      <form id="recordingForm" class="utility-form">
+        <div class="dialog-heading"><div><p class="section-kicker">CAPTURE · JSONL</p><h2 id="recordingDialogTitle">开始遥测录制</h2><p>手动录制不限时长；动作联动会自动包含 Confirm 前 5 秒和动作结束后 2 秒。</p></div><button id="closeRecordingDialogButton" class="icon-close secondary" type="button" aria-label="关闭录制设置">关闭</button></div>
+        <label class="form-field" for="recordingName"><span>会话名称</span><input id="recordingName" maxlength="120" placeholder="例如：循迹参数 A 实车测试"></label>
+        <label class="form-field" for="recordingNotes"><span>备注</span><textarea id="recordingNotes" maxlength="4000" rows="4" placeholder="路面、轮胎、电池状态、测试目的等，便于后续 AI 分析"></textarea></label>
+        <label class="switch-row" for="autoRecording"><input id="autoRecording" type="checkbox"><span><strong>动作 Confirm 时自动录制</strong><small>设置会保存在本浏览器；动作结束后自动停止。</small></span></label>
+        <div class="dialog-footer"><small>开始前要求车辆在线且录制盘剩余至少 512 MB。</small><button id="beginManualRecordingButton" type="submit">开始手动录制</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="markerDialog" class="utility-dialog compact" aria-labelledby="markerDialogTitle">
+      <form id="markerForm" class="utility-form">
+        <div class="dialog-heading"><div><p class="section-kicker">TIMELINE MARKER</p><h2 id="markerDialogTitle">添加时间点标记</h2></div></div>
+        <label class="form-field" for="markerLabel"><span>说明</span><input id="markerLabel" maxlength="500" required placeholder="例如：进入弯道、出现轻微振荡"></label>
+        <div class="dialog-footer"><button id="cancelMarkerButton" class="secondary" type="button">取消</button><button type="submit">保存标记</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="recordingLibraryDialog" class="library-dialog" aria-labelledby="recordingLibraryTitle">
+      <section class="library-shell">
+        <div class="dialog-heading"><div><p class="section-kicker">SESSION LIBRARY</p><h2 id="recordingLibraryTitle">遥测录制库</h2><p>回放会复用当前全部仪表组件；下载为适合归档和 AI 分析的 ZIP。</p></div><div class="dialog-actions"><button id="refreshRecordingLibraryButton" class="secondary" type="button">刷新</button><button id="closeRecordingLibraryButton" class="secondary" type="button">关闭</button></div></div>
+        <div id="recordingLibraryList" class="recording-library-list"><p class="empty-library">正在读取会话…</p></div>
+      </section>
+    </dialog>
+
+    <dialog id="parameterDialog" class="parameter-dialog" aria-labelledby="parameterTitle">
+    <section id="parameterTuning" class="workspace-section parameter-section" aria-labelledby="parameterTitle">
+      <div class="workspace-heading">
+        <div><p class="section-kicker">PARAMETERS · STAGE / APPLY / SAVE</p><h2 id="parameterTitle">参数调节</h2><p>单行“暂存”不会立即改变控制；“应用暂存值”才切换运行参数；“保存到 Flash”才跨重启保留。</p></div>
+        <div class="dialog-actions"><button id="loadParametersButton" type="button">加载参数</button><button id="closeParametersButton" class="secondary" type="button">关闭</button></div>
+      </div>
+      <article id="parameterPanel" class="panel parameter-panel" hidden>
+        <div class="parameter-toolbar">
+          <div class="parameter-summary"><span>Active <strong id="activeRevision">—</strong></span><span>Stage <strong id="stageRevision">—</strong></span><span>Generation <strong id="generation">—</strong></span><span id="dirtyState" class="badge waiting">读取中</span></div>
+          <div class="parameter-actions">
+            <button id="refreshParametersButton" class="secondary" type="button">刷新</button>
+            <button id="revertParametersButton" class="secondary" type="button">撤销暂存</button>
+            <button id="loadFlashButton" class="secondary" type="button">从 Flash 载入到暂存</button>
+            <button id="defaultsButton" class="secondary warning" type="button">默认值载入到暂存</button>
+            <button id="applyParametersButton" type="button">应用暂存值</button>
+            <button id="saveParametersButton" class="warning" type="button">保存到 Flash</button>
+          </div>
+        </div>
+        <div class="parameter-filter">
+          <label for="parameterGroup">分组</label><select id="parameterGroup"><option value="all">全部</option><option value="wheel">wheel</option><option value="heading">heading</option><option value="line">line</option><option value="remote">remote</option></select>
+          <label for="parameterSearch">搜索</label><input id="parameterSearch" type="search" placeholder="例如 kp、speed、alpha">
+        </div>
+        <div class="parameter-table-wrap">
+          <table class="parameter-table">
+            <thead><tr><th>参数</th><th>当前值</th><th>暂存值</th><th>范围 / 单位</th><th>操作</th></tr></thead>
+            <tbody id="parameterRows"><tr><td colspan="5" class="empty-cell">正在读取参数…</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+    </dialog>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <footer>本机控制面板 · 运动必须经过 Arm / Confirm · Ctrl+C 停止串口服务</footer>
+  <script src="/dashboard.js"></script>
+</body>
+</html>

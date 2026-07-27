@@ -50,3 +50,6 @@ __pycache__/
 
 # Codex isolated implementation worktrees
 /.worktrees/
+
+# Local dashboard telemetry sessions
+recordings/

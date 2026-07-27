@@ -1,5 +1,6 @@
 #include "m6_rpc.h"
 
+#include "app_manual_drive.h"
 #include "app_remote.h"
 #include "app_line.h"
 #include "control_params.h"
@@ -34,6 +35,7 @@ typedef struct {
     int16_t left;
     int16_t right;
     int32_t angle_mdeg;
+    int32_t yaw_rate_mdeg_s;
     uint32_t duration_ms;
     uint32_t armed_revision;
     uint32_t armed_session;
@@ -56,6 +58,7 @@ static uint32_t s_boot_id;
 static uint32_t s_event_session;
 static uint32_t s_last_emergency_epoch;
 static uint32_t s_last_fault_bits;
+static uint32_t s_last_manual_transition;
 static uint32_t s_pending_apply_sequence;
 static bool fill_telemetry_payload(uint8_t stream, uint32_t now_ms,
                                    uint8_t *payload,
@@ -150,7 +153,21 @@ static bool remote_idle(void)
 {
     AppRemoteSnapshot_t remote;
     AppRemote_GetSnapshot(&remote);
-    return remote.state == APP_REMOTE_IDLE;
+    return (remote.state == APP_REMOTE_IDLE) && AppManualDrive_IsIdle();
+}
+
+static void fill_manual_drive(uint8_t *out)
+{
+    AppManualDriveSnapshot_t snapshot;
+    AppManualDrive_GetSnapshot(&snapshot);
+    memset(out, 0, 16U);
+    p32(&out[0], snapshot.command_id);
+    p32(&out[4], snapshot.lease_deadline_ms);
+    p16(&out[8], (uint16_t)snapshot.left_mm_s);
+    p16(&out[10], (uint16_t)snapshot.right_mm_s);
+    out[12] = (uint8_t)snapshot.source;
+    out[13] = snapshot.active ? 1U : 0U;
+    out[14] = (uint8_t)snapshot.stop_reason;
 }
 
 static bool action_base_safe(void)
@@ -294,13 +311,28 @@ static void publish_emergency_event(const SafetySnapshot_t *safety,
                         sizeof(body), now_ms);
 }
 
+static void publish_manual_drive_event(uint32_t now_ms)
+{
+    uint8_t body[16];
+    fill_manual_drive(body);
+    (void)publish_event(M6_TX_P1, M6_EVENT_MANUAL_DRIVE_STATE, 0U,
+                        body, sizeof(body), now_ms);
+}
+
 static void stop_action(uint32_t now_ms)
 {
+    uint8_t previous_state;
     if ((s_action.state != 1U) && (s_action.state != 2U)) return;
-    WheelSpeed_Disable();
-    Heading_Stop();
-    Safety_EndAction();
-    (void)SystemState_RequestIdle();
+    previous_state = s_action.state;
+    if ((previous_state == 2U) &&
+        (s_action.kind == M6_ACTION_KIND_LINE_FOLLOW)) {
+        (void)AppLine_Stop(now_ms);
+    } else {
+        WheelSpeed_Disable();
+        Heading_Stop();
+        Safety_EndAction();
+        (void)SystemState_RequestIdle();
+    }
     s_action.state = 0U;
     s_action.start_ms = now_ms;
 }
@@ -319,6 +351,11 @@ void M6Rpc_Init(ControlProtocolCommitCallback_t commit_callback)
     s_event_session = 0U;
     s_last_emergency_epoch = debug_get_emergency_epoch();
     s_last_fault_bits = safety.fault_bits;
+    {
+        AppManualDriveSnapshot_t manual;
+        AppManualDrive_GetSnapshot(&manual);
+        s_last_manual_transition = manual.transition_id;
+    }
     s_pending_apply_sequence = 0U;
 }
 
@@ -385,6 +422,14 @@ static M6Result_t execute_read(uint16_t opcode, const uint8_t *body,
         p16(&out[2], (uint16_t)(telemetry_length - 8U));
         memcpy(&out[4], &telemetry[8], telemetry_length - 8U);
         *out_length = (uint16_t)(telemetry_length - 4U);
+        return M6_RESULT_OK;
+    }
+    if (opcode == M6_RPC_MANUAL_DRIVE_GET) {
+        if (length != 0U) return M6_RESULT_BAD_LENGTH;
+        if ((M6Link_EnabledCapabilities() & M6_CAP_MANUAL_DRIVE) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        fill_manual_drive(out);
+        *out_length = 16U;
         return M6_RESULT_OK;
     }
     if (length != 0U && opcode != 0x0101U && opcode != 0x0102U)
@@ -747,6 +792,51 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
             out[8U + j * 4U] = i + 1U; p16(&out[10U + j * 4U], s_subscriptions[i].period_ms); j++; }}
         *out_length = (uint16_t)(8U + count * 4U); return M6_RESULT_OK;
     }
+    if (opcode == M6_RPC_MANUAL_DRIVE_SET) {
+        uint32_t now = SystemTime_Now();
+        uint16_t flags;
+        int16_t left;
+        int16_t right;
+        uint16_t lease;
+        if ((M6Link_EnabledCapabilities() & M6_CAP_MANUAL_DRIVE) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != 16U) return M6_RESULT_BAD_LENGTH;
+        if (u32(body) != s_boot_id) return M6_RESULT_INVALID_ARGUMENT;
+        left = i16(&body[8]);
+        right = i16(&body[10]);
+        lease = u16(&body[12]);
+        flags = u16(&body[14]);
+        if ((flags & (uint16_t)~(M6_MANUAL_DRIVE_FLAG_TAKEOVER |
+                                 M6_MANUAL_DRIVE_FLAG_RELEASE)) != 0U)
+            return M6_RESULT_INVALID_ARGUMENT;
+        if ((flags & M6_MANUAL_DRIVE_FLAG_RELEASE) != 0U) {
+            if ((left != 0) || (right != 0) || (lease != 0U) ||
+                ((flags & M6_MANUAL_DRIVE_FLAG_TAKEOVER) != 0U))
+                return M6_RESULT_INVALID_ARGUMENT;
+            (void)AppManualDrive_Stop(APP_MANUAL_SOURCE_HOST_RPC,
+                APP_MANUAL_STOP_RELEASE, now);
+            fill_manual_drive(out);
+            *out_length = 16U;
+            return M6_RESULT_OK;
+        }
+        if ((left == 0) && (right == 0)) return M6_RESULT_INVALID_ARGUMENT;
+        if ((left < -400) || (left > 400) ||
+            (right < -400) || (right > 400) ||
+            (lease < 100U) || (lease > 500U))
+            return M6_RESULT_OUT_OF_RANGE;
+        if ((flags & M6_MANUAL_DRIVE_FLAG_TAKEOVER) != 0U) {
+            stop_action(now);
+            (void)Diagnostics_ActionCancel(now);
+            (void)AppRemote_NormalStop(now);
+        }
+        if (!AppManualDrive_Submit(APP_MANUAL_SOURCE_HOST_RPC,
+                left, right, lease, 0U, u32(&body[4]), now))
+            return Safety_HasFault() ? M6_RESULT_SAFETY_FAULT :
+                                      M6_RESULT_WRONG_STATE;
+        fill_manual_drive(out);
+        *out_length = 16U;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_ACTION_ARM) {
         uint32_t now = SystemTime_Now();
         uint8_t token_input[40];
@@ -760,7 +850,9 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
         }
         memset(&s_action, 0, sizeof(s_action)); s_action.state = 1U; s_action.kind = body[0];
         s_action.wheel_mask = body[1]; s_action.left = i16(&body[4]); s_action.right = i16(&body[6]);
-        s_action.angle_mdeg = i32(&body[8]); s_action.duration_ms = u32(&body[16]);
+        s_action.angle_mdeg = i32(&body[8]);
+        s_action.yaw_rate_mdeg_s = i32(&body[12]);
+        s_action.duration_ms = u32(&body[16]);
         s_action.armed_revision = ControlParams_Revision();
         s_action.armed_session = M6Link_CurrentSession();
         memcpy(s_action.parameters, body, sizeof(s_action.parameters));
@@ -790,27 +882,42 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
             (SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
             !Diagnostics_ActionIsIdle() || !remote_idle())
             return M6_RESULT_WRONG_STATE;
-        if (s_action.kind != M6_ACTION_KIND_WHEEL_SPEED_TEST) {
+        if ((s_action.kind == M6_ACTION_KIND_HEADING_HOLD) ||
+            (s_action.kind == M6_ACTION_KIND_HEADING_TURN) ||
+            (s_action.kind == M6_ACTION_KIND_HEADING_RATE)) {
             HeadingSnapshot_t heading;
             Heading_GetSnapshot(&heading);
             if (!heading.valid || !heading.calibrated)
                 return M6_RESULT_SENSOR_NOT_READY;
         }
-        if (!SystemState_RequestRun()) return M6_RESULT_WRONG_STATE;
-        Safety_BeginAction(now, s_action.duration_ms,
-            s_action.kind == M6_ACTION_KIND_WHEEL_SPEED_TEST ? 0U :
-            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO));
-        WheelSpeed_Enable();
-        if (s_action.kind == M6_ACTION_KIND_WHEEL_SPEED_TEST) {
-            WheelSpeed_SetTarget((float)s_action.left, (float)s_action.right);
-            started = true;
-        } else if (s_action.kind == M6_ACTION_KIND_HEADING_HOLD)
-            started = Heading_StartHold((float)s_action.left);
-        else if (s_action.kind == M6_ACTION_KIND_HEADING_TURN)
-            started = Heading_StartTurn((float)s_action.angle_mdeg / 1000.0f);
+        if (s_action.kind == M6_ACTION_KIND_LINE_FOLLOW) {
+            started = AppLine_StartTimed(now, s_action.duration_ms);
+        } else {
+            if (!SystemState_RequestRun()) return M6_RESULT_WRONG_STATE;
+            Safety_BeginAction(now, s_action.duration_ms,
+                s_action.kind == M6_ACTION_KIND_WHEEL_SPEED_TEST ? 0U :
+                SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO));
+            WheelSpeed_Enable();
+            if (s_action.kind == M6_ACTION_KIND_WHEEL_SPEED_TEST) {
+                WheelSpeed_SetTarget((float)s_action.left,
+                                     (float)s_action.right);
+                started = true;
+            } else if (s_action.kind == M6_ACTION_KIND_HEADING_HOLD)
+                started = Heading_StartHold((float)s_action.left);
+            else if (s_action.kind == M6_ACTION_KIND_HEADING_TURN)
+                started = Heading_StartTurn(
+                    (float)s_action.angle_mdeg / 1000.0f);
+            else if (s_action.kind == M6_ACTION_KIND_HEADING_RATE)
+                started = Heading_StartRate(
+                    (float)s_action.yaw_rate_mdeg_s / 1000.0f);
+        }
         if (!started) { stop_action(now); return M6_RESULT_SENSOR_NOT_READY; }
         s_action.state = 2U; s_action.action_id = s_next_action_id++;
-        s_action.start_ms = now; s_action.deadline_ms = now + s_action.duration_ms;
+        s_action.start_ms = now;
+        s_action.deadline_ms =
+            (s_action.duration_ms == M6_LINE_ACTION_CONTINUOUS_DURATION_MS)
+                ? 0U
+                : (now + s_action.duration_ms);
         memset(out, 0, 16U); p32(out, s_action.action_id); p32(&out[4], now);
         p32(&out[8], s_action.deadline_ms); out[12] = 2U; out[13] = s_action.kind;
         *out_length = 16U; return M6_RESULT_OK;
@@ -855,6 +962,7 @@ M6Result_t M6Rpc_Execute(uint16_t opcode, const uint8_t *body,
 
 void M6Rpc_Service(uint32_t now_ms)
 {
+    AppLineSnapshot_t line;
     HeadingSnapshot_t heading;
     SafetySnapshot_t safety;
     uint32_t session;
@@ -887,12 +995,25 @@ void M6Rpc_Service(uint32_t now_ms)
         (safety.fault_bits != s_last_fault_bits))
         publish_fault_event(&safety, now_ms);
     s_last_fault_bits = safety.fault_bits;
+    {
+        AppManualDriveSnapshot_t manual;
+        AppManualDrive_GetSnapshot(&manual);
+        if ((session != 0U) &&
+            (manual.transition_id != s_last_manual_transition))
+            publish_manual_drive_event(now_ms);
+        s_last_manual_transition = manual.transition_id;
+    }
     if ((s_action.state == 1U) && ((int32_t)(now_ms - s_action.expires_ms) >= 0))
         memset(&s_action, 0, sizeof(s_action));
     if (s_action.state != 2U) return;
     Heading_GetSnapshot(&heading);
-    if (Safety_HasFault() || ((int32_t)(now_ms - s_action.deadline_ms) >= 0) ||
-        ((s_action.kind == M6_ACTION_KIND_HEADING_TURN) && heading.complete))
+    AppLine_GetSnapshot(&line);
+    if (Safety_HasFault() ||
+        ((s_action.duration_ms != M6_LINE_ACTION_CONTINUOUS_DURATION_MS) &&
+         ((int32_t)(now_ms - s_action.deadline_ms) >= 0)) ||
+        ((s_action.kind == M6_ACTION_KIND_HEADING_TURN) && heading.complete) ||
+        ((s_action.kind == M6_ACTION_KIND_LINE_FOLLOW) &&
+         (line.state != APP_LINE_RUNNING)))
         stop_action(now_ms);
 }
 

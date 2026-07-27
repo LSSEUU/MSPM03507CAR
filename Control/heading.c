@@ -10,6 +10,9 @@
 #define HEADING_CALIBRATION_MAX_RATE_DEG_S 3.0f
 #define HEADING_CALIBRATION_MAX_SPAN_DEG 1.0f
 #define HEADING_CALIBRATION_MAX_STDDEV_DEG 0.35f
+#define HEADING_RATE_MIN_TARGET_DEG_S 1.0f
+#define HEADING_RATE_MAX_TARGET_DEG_S 360.0f
+#define HEADING_RATE_CONTROL_MAX_DT_MS 100U
 
 static HeadingSnapshot_t heading;
 static HeadingConfig_t active_config;
@@ -27,6 +30,8 @@ static bool continuous_yaw_valid;
 static bool yaw_rate_initialized;
 static float previous_yaw_deg;
 static uint32_t previous_yaw_ms;
+static float rate_integral_error_deg;
+static uint32_t rate_control_last_ms;
 
 static float Heading_Abs(float value)
 {
@@ -147,6 +152,8 @@ static void Heading_UpdateControl(void)
     heading.error_deg = heading.mode == HEADING_MODE_TURN ?
         (turn_target_continuous_deg - continuous_yaw_deg) :
         Heading_NormalizeDegrees(heading.target_deg - heading.yaw_deg);
+    heading.rate_error_deg_s = heading.target_rate_deg_s -
+        heading.yaw_rate_deg_s;
     if (heading.mode == HEADING_MODE_HOLD) {
         correction = Heading_Clamp(
             (active_config.straight_kp * heading.error_deg) -
@@ -191,6 +198,43 @@ static void Heading_UpdateControl(void)
             heading.left_target_mm_s = -turn_speed;
             heading.right_target_mm_s = turn_speed;
         }
+    } else if (heading.mode == HEADING_MODE_RATE) {
+        turn_speed = Heading_Clamp(
+            (active_config.turn_kd * heading.target_rate_deg_s) +
+            (active_config.turn_kp * rate_integral_error_deg),
+            active_config.turn_speed_mm_s);
+        heading.left_target_mm_s = -turn_speed;
+        heading.right_target_mm_s = turn_speed;
+    }
+}
+
+static void Heading_UpdateRateIntegral(uint32_t now_ms)
+{
+    float candidate;
+    float command;
+    uint32_t elapsed_ms;
+    if (heading.mode != HEADING_MODE_RATE) return;
+    if (rate_control_last_ms == 0U) {
+        rate_control_last_ms = now_ms;
+        return;
+    }
+    elapsed_ms = (uint32_t)(now_ms - rate_control_last_ms);
+    rate_control_last_ms = now_ms;
+    if (elapsed_ms > HEADING_RATE_CONTROL_MAX_DT_MS)
+        elapsed_ms = HEADING_RATE_CONTROL_MAX_DT_MS;
+    candidate = rate_integral_error_deg +
+        ((heading.target_rate_deg_s - heading.yaw_rate_deg_s) *
+         (float)elapsed_ms / 1000.0f);
+    command = (active_config.turn_kd * heading.target_rate_deg_s) +
+        (active_config.turn_kp * candidate);
+    if ((command <= active_config.turn_speed_mm_s) &&
+        (command >= -active_config.turn_speed_mm_s)) {
+        rate_integral_error_deg = candidate;
+    } else if (((command > active_config.turn_speed_mm_s) &&
+                (heading.target_rate_deg_s < heading.yaw_rate_deg_s)) ||
+               ((command < -active_config.turn_speed_mm_s) &&
+                (heading.target_rate_deg_s > heading.yaw_rate_deg_s))) {
+        rate_integral_error_deg = candidate;
     }
 }
 
@@ -341,7 +385,10 @@ void Heading_UpdateWithRate(float raw_yaw_deg, uint32_t frame_id,
             previous_yaw_ms = now_ms;
         }
     }
-    if (heading.calibrated) Heading_UpdateControl();
+    if (heading.calibrated) {
+        Heading_UpdateRateIntegral(now_ms);
+        Heading_UpdateControl();
+    }
 }
 
 void Heading_Update(float raw_yaw_deg, uint32_t frame_id, uint32_t now_ms)
@@ -388,11 +435,33 @@ bool Heading_StartTurn(float relative_degrees)
     return true;
 }
 
+bool Heading_StartRate(float target_rate_deg_s)
+{
+    float magnitude = Heading_Abs(target_rate_deg_s);
+    if (!heading.calibrated || !heading.valid ||
+        !Heading_IsFinite(target_rate_deg_s) ||
+        (magnitude < HEADING_RATE_MIN_TARGET_DEG_S) ||
+        (magnitude > HEADING_RATE_MAX_TARGET_DEG_S)) return false;
+    heading.mode = HEADING_MODE_RATE;
+    heading.complete = false;
+    heading.reference_deg = heading.yaw_deg;
+    heading.target_deg = heading.reference_deg;
+    heading.target_rate_deg_s = target_rate_deg_s;
+    rate_integral_error_deg = 0.0f;
+    rate_control_last_ms = 0U;
+    Heading_UpdateControl();
+    return true;
+}
+
 void Heading_Stop(void)
 {
     heading.mode = HEADING_MODE_IDLE;
     heading.complete = false;
     heading.error_deg = 0.0f;
+    heading.target_rate_deg_s = 0.0f;
+    heading.rate_error_deg_s = 0.0f;
+    rate_integral_error_deg = 0.0f;
+    rate_control_last_ms = 0U;
     heading.left_target_mm_s = 0.0f;
     heading.right_target_mm_s = 0.0f;
     turn_settle_samples = 0U;

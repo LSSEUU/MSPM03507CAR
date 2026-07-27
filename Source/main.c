@@ -2,6 +2,7 @@
 
 #include "app_line.h"
 #include "app_remote.h"
+#include "app_manual_drive.h"
 #include "control_params.h"
 #include "control_protocol.h"
 #include "control_runtime.h"
@@ -22,6 +23,7 @@
 #include "system_state.h"
 #include "system_time.h"
 #include "uart_debug.h"
+#include "vision_uart.h"
 #include "vehicle_config.h"
 #include "watchdog.h"
 #include "wheel_speed.h"
@@ -101,6 +103,7 @@ int main(void)
     ParameterStore_Init();
 
     debug_init();
+    VisionUart_Init();
     debug_set_emergency_callback(Main_EmergencyStopCallback);
     Encoder_Init();
     WheelSpeed_Init();
@@ -121,6 +124,7 @@ int main(void)
     }
 
     Diagnostics_Init();
+    AppManualDrive_Init();
     AppRemote_Init();
     if (!ControlRuntime_ApplyActive(NULL)) {
         Safety_EmergencyStop(SystemTime_Now());
@@ -214,6 +218,7 @@ int main(void)
 
             ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TASK_20MS);
             AppRemote_Task20ms(started);
+            AppManualDrive_Task20ms(started);
             Gyro_GetSnapshot(&gyro);
             Heading_UpdateWithRate(
                 gyro.sample.yaw, gyro.valid_frames,

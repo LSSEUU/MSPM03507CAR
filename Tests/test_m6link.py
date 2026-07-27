@@ -131,6 +131,20 @@ class V2FakeSerial:
             success = struct.pack("<IIIBBH", 9, 100, 1600, 2, 1, 0)
         elif opcode == int(RpcOpcode.HEADING_CALIBRATE):
             success = struct.pack("<II", 321, 20)
+        elif opcode == int(RpcOpcode.MANUAL_DRIVE_GET):
+            success = struct.pack("<IIhhBBBB", 0, 0, 0, 0, 0, 0, 0, 0)
+        elif opcode == int(RpcOpcode.MANUAL_DRIVE_SET):
+            boot_id, command_id, left, right, lease, flags = struct.unpack(
+                "<IIhhHH", request_body
+            )
+            assert boot_id == 7
+            released = bool(flags & 2)
+            success = struct.pack(
+                "<IIhhBBBB", command_id, 0 if released else 100 + lease,
+                0 if released else left, 0 if released else right,
+                0 if released else 3, 0 if released else 1,
+                1 if released else 0, 0,
+            )
         elif opcode == int(RpcOpcode.TASK_STATS_GET):
             success = bytearray(64)
             success[0] = 4
@@ -266,6 +280,56 @@ class M6LinkSessionTests(unittest.TestCase):
         self.assertEqual(len(fake.io_threads), 1)
         self.assertIn(b"S", fake.writes)
 
+    def test_continuous_duration_is_accepted_only_for_line_follow(self):
+        fake = V2FakeSerial()
+        session = Session(transport=fake, timeout=0.5)
+        session.connect()
+        armed = session.arm_action(ActionSpec(
+            kind=ActionKind.LINE_FOLLOW,
+            duration_ms=0,
+        ))
+        self.assertEqual(armed.spec.duration_ms, 0)
+        with self.assertRaises(ValueError):
+            session.arm_action(ActionSpec(
+                kind=ActionKind.WHEEL_SPEED_TEST,
+                target_l_mm_s=100,
+                target_r_mm_s=100,
+                duration_ms=0,
+            ))
+        session.close()
+
+    def test_partial_boot_banner_cannot_hide_first_legacy_response(self):
+        class PartialBannerSerial(V2FakeSerial):
+            def __init__(self) -> None:
+                super().__init__()
+                self.inject_partial_banner = True
+
+            def write(self, data: bytes) -> int:
+                written = super().write(data)
+                if self.inject_partial_banner and data.startswith(b":"):
+                    response = self.responses.pop()
+                    self.responses.append(b"runtime-20260727 partial banner" + response)
+                    self.inject_partial_banner = False
+                return written
+
+        fake = PartialBannerSerial()
+        session = Session(transport=fake, timeout=0.5)
+        identity = session.connect()
+        self.assertEqual(identity.firmware_id, "M6-runtime-test")
+        self.assertIn("runtime-20260727 partial banner", session.unsolicited)
+        session.close()
+
+    def test_reconnect_rebuilds_session_without_replaying_actions(self):
+        fake = V2FakeSerial()
+        session = Session(transport=fake, timeout=0.5)
+        first = session.connect()
+        second = session.reconnect()
+        self.assertEqual(first.firmware_id, second.firmware_id)
+        self.assertEqual(fake.opcodes.count(int(RpcOpcode.IDENTITY_GET)), 2)
+        self.assertNotIn(int(RpcOpcode.ACTION_ARM), fake.opcodes)
+        self.assertNotIn(int(RpcOpcode.ACTION_CONFIRM), fake.opcodes)
+        session.close()
+
     def test_heading_calibration_is_an_explicit_non_action_rpc(self):
         fake = V2FakeSerial()
         session = Session(transport=fake, timeout=0.5)
@@ -275,6 +339,27 @@ class M6LinkSessionTests(unittest.TestCase):
         self.assertEqual(fake.opcodes[-1], int(RpcOpcode.HEADING_CALIBRATE))
         self.assertNotIn(int(RpcOpcode.ACTION_ARM), fake.opcodes)
         self.assertNotIn(int(RpcOpcode.ACTION_CONFIRM), fake.opcodes)
+        session.close()
+
+    def test_manual_drive_encodes_lease_takeover_and_release(self):
+        fake = V2FakeSerial()
+        session = Session(transport=fake, timeout=0.5)
+        session.connect()
+        idle = session.get_manual_drive()
+        self.assertFalse(idle.active)
+        driving = session.set_manual_drive(
+            160, -80, lease_ms=300, takeover=True, command_id=41
+        )
+        self.assertTrue(driving.active)
+        self.assertEqual(driving.target_mm_s, (160, -80))
+        stopped = session.stop_manual_drive(command_id=42)
+        self.assertFalse(stopped.active)
+        self.assertEqual(stopped.target_mm_s, (0, 0))
+        self.assertEqual(fake.opcodes[-3:], [
+            int(RpcOpcode.MANUAL_DRIVE_GET),
+            int(RpcOpcode.MANUAL_DRIVE_SET),
+            int(RpcOpcode.MANUAL_DRIVE_SET),
+        ])
         session.close()
 
     def test_empty_subscription_response_decodes_as_an_empty_array(self):

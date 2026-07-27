@@ -35,6 +35,7 @@ from .models import (
     Identity,
     LinkEvent,
     LinkStats,
+    ManualDriveSnapshot,
     ParameterDescriptor,
     ParameterSnapshot,
     ParameterValue,
@@ -69,6 +70,9 @@ from .registry import (
     Capability,
     FrameFlag,
     FrameType,
+    ManualDriveFlag,
+    ManualDriveSource,
+    ManualDriveStopReason,
     PARAMETER_BY_ID,
     PARAMETER_BY_KEY,
     ParameterSource,
@@ -163,9 +167,11 @@ class Session:
         self._route_mode = "legacy"
         self._legacy_lock = threading.Lock()
         self._rpc_lock = threading.Lock()
+        self._reconnect_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._next_legacy_id = 1
         self._next_sequence = 1
+        self._next_manual_command_id = 1
         self._session_id = 0
         self._outcome_unknown: OutcomeUnknown | None = None
         self._pending_lines: dict[int, _PendingLine] = {}
@@ -383,6 +389,27 @@ class Session:
                 else:
                     pending.line = line
                     pending.event.set()
+            return
+        # A wireless DAPLink can keep the host COM port open while the vehicle
+        # powers up and can deliver only the tail of the boot banner.  If that
+        # tail loses its newline, the first transaction response is appended to
+        # it.  Recover only a response whose id is currently pending; arbitrary
+        # banner text can therefore never satisfy a future transaction.
+        candidates = list(re.finditer(r"(?=(ok|err),([0-9]{1,5})(?:,|$))", line))
+        for match in reversed(candidates):
+            request_id = int(match.group(2))
+            if not 1 <= request_id <= 65535:
+                continue
+            with self._state_lock:
+                pending = self._pending_lines.get(request_id)
+                if pending is None:
+                    continue
+                prefix = line[:match.start()]
+                if prefix:
+                    self.unsolicited.append(prefix)
+                    self._line_events.put(prefix)
+                pending.line = line[match.start():]
+                pending.event.set()
             return
         self.unsolicited.append(line)
         self._line_events.put(line)
@@ -766,6 +793,73 @@ class Session:
         self.status = status
         return status
 
+    @staticmethod
+    def _manual_drive_snapshot(values: Mapping[str, Any]) -> ManualDriveSnapshot:
+        return ManualDriveSnapshot(
+            command_id=int(values["command_id"]),
+            lease_deadline_ms=int(values["lease_deadline_ms"]),
+            target_mm_s=(int(values["target_l_mm_s"]), int(values["target_r_mm_s"])),
+            source=_enum_or_int(ManualDriveSource, values["source"]),
+            active=bool(values["active"]),
+            stop_reason=_enum_or_int(ManualDriveStopReason, values["stop_reason"]),
+        )
+
+    def get_manual_drive(self) -> ManualDriveSnapshot:
+        self.require_capability(Capability.MANUAL_DRIVE)
+        values = decode_layout(
+            "manual_drive_snapshot_v1", self._rpc(RpcOpcode.MANUAL_DRIVE_GET)
+        )
+        return self._manual_drive_snapshot(values)
+
+    def set_manual_drive(
+        self,
+        left_mm_s: int,
+        right_mm_s: int,
+        *,
+        lease_ms: int = 300,
+        takeover: bool = False,
+        command_id: int | None = None,
+    ) -> ManualDriveSnapshot:
+        self.require_capability(Capability.MANUAL_DRIVE)
+        identity = self._require_identity()
+        left, right, lease = int(left_mm_s), int(right_mm_s), int(lease_ms)
+        if not -400 <= left <= 400 or not -400 <= right <= 400:
+            raise ValueError("manual-drive targets must be within -400..400 mm/s")
+        if left == 0 and right == 0:
+            raise ValueError("use stop_manual_drive() for a zero target")
+        if not 100 <= lease <= 500:
+            raise ValueError("manual-drive lease must be within 100..500 ms")
+        if command_id is None:
+            command_id = self._next_manual_command_id
+            self._next_manual_command_id = 1 if command_id >= 0xFFFFFFFF else command_id + 1
+        command_id = int(command_id)
+        if not 1 <= command_id <= 0xFFFFFFFF:
+            raise ValueError("manual-drive command_id must be within 1..0xffffffff")
+        flags = int(ManualDriveFlag.TAKEOVER) if takeover else 0
+        body = struct.pack("<IIhhHH", identity.boot_id, command_id, left, right, lease, flags)
+        values = decode_layout(
+            "manual_drive_snapshot_v1", self._rpc(RpcOpcode.MANUAL_DRIVE_SET, body)
+        )
+        return self._manual_drive_snapshot(values)
+
+    def stop_manual_drive(self, *, command_id: int | None = None) -> ManualDriveSnapshot:
+        self.require_capability(Capability.MANUAL_DRIVE)
+        identity = self._require_identity()
+        if command_id is None:
+            command_id = self._next_manual_command_id
+            self._next_manual_command_id = 1 if command_id >= 0xFFFFFFFF else command_id + 1
+        command_id = int(command_id)
+        if not 1 <= command_id <= 0xFFFFFFFF:
+            raise ValueError("manual-drive command_id must be within 1..0xffffffff")
+        body = struct.pack(
+            "<IIhhHH", identity.boot_id, command_id, 0, 0, 0,
+            int(ManualDriveFlag.RELEASE),
+        )
+        values = decode_layout(
+            "manual_drive_snapshot_v1", self._rpc(RpcOpcode.MANUAL_DRIVE_SET, body)
+        )
+        return self._manual_drive_snapshot(values)
+
     def get_reset_info(self) -> ResetInfo:
         values = decode_layout("reset_snapshot_v1", self._rpc(RpcOpcode.RESET_GET))
         previous = Breadcrumb(
@@ -951,6 +1045,7 @@ class Session:
         return values
 
     def clear_fault(self, observed_fault_bits: int | None = None) -> Mapping[str, Any]:
+        self.require_capability(Capability.FAULT_CLEAR)
         identity = self._require_identity()
         if observed_fault_bits is None:
             observed_fault_bits = self.get_status().fault_bits
@@ -1061,7 +1156,9 @@ class Session:
             self.require_capability(Capability[capability_name])
         if spec.wheel_mask not in rule["wheel_mask_allowed"]:
             raise ValueError("wheel mask is invalid for this action")
-        if not int(rule["duration_min_ms"]) <= spec.duration_ms <= int(rule["duration_max_ms"]):
+        # Project extension: LINE_FOLLOW duration 0 means run until explicit stop.
+        continuous_line = kind == ActionKind.LINE_FOLLOW and spec.duration_ms == 0
+        if not continuous_line and not int(rule["duration_min_ms"]) <= spec.duration_ms <= int(rule["duration_max_ms"]):
             raise ValueError("action duration is out of range")
         for field in rule["zero_fields"]:
             if int(getattr(spec, field)) != 0:
@@ -1228,6 +1325,46 @@ class Session:
             except Exception:
                 pass
         self._shutdown_transport()
+
+    def reconnect(self) -> Identity:
+        """Reopen the same port and establish a fresh session after a reboot.
+
+        No RPC, Arm token, action, or queued write from the previous session is
+        replayed.  This is intentionally explicit so callers can decide which
+        read-only subscriptions to restore after reconnecting.
+        """
+
+        with self._reconnect_lock:
+            candidate = self.port
+            if not candidate:
+                raise Disconnected("cannot reconnect before a port is selected")
+            self.close(clean=False)
+            stale_error = Disconnected("serial session replaced during reconnect")
+            while True:
+                try:
+                    _, _, request = self._writes.get_nowait()
+                except queue.Empty:
+                    break
+                request.error = stale_error
+                request.done.set()
+            self._writes = queue.PriorityQueue()
+            self._write_counter = itertools.count()
+            self._legacy_decoder = LegacyLineDecoder()
+            self._v2_decoder = FrameDecoder()
+            self._line_events = queue.Queue()
+            self._events = queue.Queue()
+            self._telemetry = queue.Queue()
+            self._subscriptions.clear()
+            self._outcome_unknown = None
+            self._worker_error = None
+            self._last_async_sequence = 0
+            self._next_sequence = 1
+            self._next_manual_command_id = 1
+            self._next_legacy_id = 1
+            self._session_id = 0
+            self.identity = None
+            self.status = None
+            return self.connect(candidate)
 
     def _shutdown_transport(self) -> None:
         self._stop.set()

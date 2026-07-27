@@ -207,6 +207,43 @@ static void test_turn_smooth_zone_has_no_minimum_speed_step(void)
     assert(close_to(snapshot.right_target_mm_s, 1.33745f, 0.01f));
 }
 
+static void test_heading_rate_control(void)
+{
+    HeadingSnapshot_t snapshot;
+    calibrate_at(0.0f);
+    assert(Heading_StartRate(90.0f));
+    Heading_GetSnapshot(&snapshot);
+    assert(snapshot.mode == HEADING_MODE_RATE);
+    assert(close_to(snapshot.target_rate_deg_s, 90.0f, 0.01f));
+    assert(close_to(snapshot.rate_error_deg_s, 90.0f, 0.01f));
+    assert(close_to(snapshot.left_target_mm_s, -49.5f, 0.01f));
+    assert(close_to(snapshot.right_target_mm_s, 49.5f, 0.01f));
+
+    Heading_UpdateWithRate(1.0f, HEADING_CALIBRATION_SAMPLES + 1U,
+                           60.0f, 1U, 420U, 420U);
+    Heading_GetSnapshot(&snapshot);
+    assert(close_to(snapshot.yaw_rate_deg_s, 21.0f, 0.01f));
+    assert(close_to(snapshot.rate_error_deg_s, 69.0f, 0.01f));
+    assert(close_to(snapshot.left_target_mm_s, -49.5f, 0.01f));
+    assert(close_to(snapshot.right_target_mm_s, 49.5f, 0.01f));
+
+    Heading_UpdateWithRate(2.0f, HEADING_CALIBRATION_SAMPLES + 2U,
+                           60.0f, 2U, 440U, 440U);
+    Heading_GetSnapshot(&snapshot);
+    assert(close_to(snapshot.yaw_rate_deg_s, 34.65f, 0.01f));
+    assert(close_to(snapshot.rate_error_deg_s, 55.35f, 0.01f));
+    assert(close_to(snapshot.left_target_mm_s, -51.714f, 0.01f));
+    assert(close_to(snapshot.right_target_mm_s, 51.714f, 0.01f));
+
+    Heading_Stop();
+    assert(Heading_StartRate(-90.0f));
+    Heading_GetSnapshot(&snapshot);
+    assert(snapshot.left_target_mm_s > 0.0f);
+    assert(snapshot.right_target_mm_s < 0.0f);
+    assert(!Heading_StartRate(0.0f));
+    assert(!Heading_StartRate(361.0f));
+}
+
 int main(void)
 {
     test_normalization();
@@ -219,5 +256,6 @@ int main(void)
     test_calibration_dispersion_gate();
     test_calibration_rate_gate();
     test_turn_smooth_zone_has_no_minimum_speed_step();
+    test_heading_rate_control();
     return 0;
 }

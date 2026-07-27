@@ -7,7 +7,8 @@
 typedef enum {
     HEADING_MODE_IDLE = 0,
     HEADING_MODE_HOLD,
-    HEADING_MODE_TURN
+    HEADING_MODE_TURN,
+    HEADING_MODE_RATE
 } HeadingMode_t;
 
 typedef enum {
@@ -51,6 +52,8 @@ typedef struct {
     float reference_deg;
     float target_deg;
     float error_deg;
+    float target_rate_deg_s;
+    float rate_error_deg_s;
     float left_target_mm_s;
     float right_target_mm_s;
 } HeadingSnapshot_t;
@@ -66,6 +69,7 @@ void Heading_UpdateWithRate(float raw_yaw_deg, uint32_t frame_id,
 bool Heading_StartHold(float base_speed_mm_s);
 bool Heading_SetHoldSpeed(float base_speed_mm_s);
 bool Heading_StartTurn(float relative_degrees);
+bool Heading_StartRate(float target_rate_deg_s);
 void Heading_Stop(void);
 void Heading_GetDefaultConfig(HeadingConfig_t *config);
 void Heading_GetConfig(HeadingConfig_t *config);
