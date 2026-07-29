@@ -23,6 +23,8 @@ let parameterData = [];
 let toastTimer = 0;
 let controlFetching = false;
 let parametersLoading = false;
+let calibrationState = { available: false, active: false };
+let calibrationFetching = false;
 let recordingState = { recording: false };
 let recordingFetching = false;
 const LAYOUT_STORAGE_KEY = "m6.dashboard.layout.v1";
@@ -32,6 +34,11 @@ const MICRO_TREND_MS = 5000;
 const manualDrive = {
   enabled: false, controllerId: null, sequence: 0, keys: new Set(),
   sending: false, pending: false, lastTarget: [0, 0], lastBootId: null,
+};
+const CAMERA_BUFFER_LIMIT = 32 * 1024;
+const cameraView = {
+  bytes: [], baseOffset: 0, autoScrollPaused: false,
+  status: { available: false, enabled: false },
 };
 const playback = {
   active: false, sessionId: null, manifest: null, records: [], position: 0,
@@ -238,6 +245,10 @@ function initializeSensors() {
 }
 
 function appendEvent(event) {
+  if (event.stream === "vision_uart_rx") {
+    appendCameraEvent(event);
+    return;
+  }
   if (!history[event.stream]) return;
   history[event.stream].push(event);
   latest[event.stream] = event;
@@ -246,8 +257,106 @@ function appendEvent(event) {
 function clearHistory(resetCursor = false) {
   Object.keys(history).forEach((stream) => { history[stream].length = 0; });
   Object.keys(latest).forEach((stream) => { delete latest[stream]; });
+  clearCameraDisplay();
   if (resetCursor) cursor = 0;
   dirty = true;
+}
+
+function cameraBytesFromHex(value) {
+  const hex = typeof value === "string" ? value.trim() : "";
+  if (!hex || hex.length % 2 || !/^[0-9a-fA-F]+$/.test(hex)) return [];
+  const bytes = new Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index += 1)
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  return bytes;
+}
+
+function safeCameraText(bytes) {
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(Uint8Array.from(bytes));
+  let output = "";
+  for (const character of decoded) {
+    const code = character.codePointAt(0);
+    if (character === "\n" || character === "\r" || character === "\t" || code >= 0xa0) output += character;
+    else if (code >= 0x20 && code < 0x7f) output += character;
+    else if (code <= 0xff) output += `\\x${code.toString(16).padStart(2, "0").toUpperCase()}`;
+    else output += `\\u${code.toString(16).padStart(4, "0").toUpperCase()}`;
+  }
+  return output;
+}
+
+function cameraHexDump(bytes, baseOffset) {
+  const lines = [];
+  for (let start = 0; start < bytes.length; start += 16) {
+    const row = bytes.slice(start, start + 16);
+    const offset = (baseOffset + start).toString(16).padStart(8, "0").toUpperCase();
+    const hex = row.map((value) => value.toString(16).padStart(2, "0").toUpperCase()).join(" ").padEnd(47, " ");
+    const ascii = row.map((value) => value >= 0x20 && value <= 0x7e ? String.fromCharCode(value) : ".").join("");
+    lines.push(`${offset}  ${hex}  |${ascii}|`);
+  }
+  return lines.join("\n");
+}
+
+function renderCameraData() {
+  const textPanel = $("cameraText");
+  const hexPanel = $("cameraHex");
+  const textScroll = textPanel.scrollTop;
+  const hexScroll = hexPanel.scrollTop;
+  const hasData = cameraView.bytes.length > 0;
+  textPanel.textContent = hasData ? safeCameraText(cameraView.bytes) : "等待 UART1 RX 数据…";
+  hexPanel.textContent = hasData ? cameraHexDump(cameraView.bytes, cameraView.baseOffset) : "等待 UART1 RX 数据…";
+  if (cameraView.autoScrollPaused) {
+    textPanel.scrollTop = textScroll;
+    hexPanel.scrollTop = hexScroll;
+  } else {
+    textPanel.scrollTop = textPanel.scrollHeight;
+    hexPanel.scrollTop = hexPanel.scrollHeight;
+  }
+}
+
+function updateCameraStatus(status = cameraView.status) {
+  cameraView.status = { ...cameraView.status, ...(status || {}) };
+  const current = cameraView.status;
+  const losses = numeric(current.rx_overflow) + numeric(current.tx_overflow) +
+    numeric(current.bridge_dropped) + numeric(current.hardware_errors);
+  const badge = $("cameraBadge");
+  badge.className = `badge ${!current.available ? "waiting" : (losses ? "bad" : (current.enabled ? "ok" : "waiting"))}`;
+  badge.textContent = playback.active ? "历史回放 · 只读" :
+    (!current.available ? "固件不支持" : (current.enabled ? "监视已启用" : "监视未启用"));
+  $("cameraMessage").textContent = current.message || (current.enabled ? "尚未收到数据" : "UART1 监视未启用");
+  $("cameraRxTx").textContent = `${numeric(current.rx_bytes).toLocaleString()} / ${numeric(current.tx_bytes).toLocaleString()} B`;
+  $("cameraOverflow").textContent = `${numeric(current.rx_overflow).toLocaleString()} / ${numeric(current.tx_overflow).toLocaleString()}`;
+  $("cameraBridgeDrop").textContent = numeric(current.bridge_dropped).toLocaleString();
+  $("cameraHardwareErrors").textContent = numeric(current.hardware_errors).toLocaleString();
+  const nowMs = playback.active ? playback.currentMs : numeric(current.dashboard_now_ms, 0);
+  const lastMs = current.last_received_ms;
+  $("cameraAge").textContent = lastMs == null ? "—" : `${Math.max(0, nowMs - numeric(lastMs))} ms`;
+}
+
+function appendCameraEvent(event) {
+  const values = event.values || {};
+  const incoming = cameraBytesFromHex(values.data_hex);
+  if (incoming.length) {
+    cameraView.bytes.push(...incoming);
+    if (cameraView.bytes.length > CAMERA_BUFFER_LIMIT) {
+      const removed = cameraView.bytes.length - CAMERA_BUFFER_LIMIT;
+      cameraView.bytes.splice(0, removed);
+      cameraView.baseOffset += removed;
+    }
+  }
+  updateCameraStatus({
+    available: true, enabled: true, message: event.gap ? "最近收到数据，期间存在遗漏" : "最近收到 UART1 数据",
+    last_received_ms: event.received_ms, dashboard_now_ms: event.received_ms,
+    rx_bytes: values.rx_bytes, tx_bytes: values.tx_bytes,
+    rx_overflow: values.rx_overflow, tx_overflow: values.tx_overflow,
+    bridge_dropped: values.bridge_dropped, hardware_errors: values.hardware_errors,
+  });
+  renderCameraData();
+}
+
+function clearCameraDisplay() {
+  cameraView.bytes.length = 0;
+  cameraView.baseOffset = 0;
+  renderCameraData();
 }
 
 function trimHistory(nowMs) {
@@ -277,6 +386,8 @@ async function poll() {
       gaps = state.gaps || {};
       lastServerOk = performance.now();
       updateConnection(state);
+      cameraView.status = { available: false, enabled: false };
+      updateCameraStatus({ ...(state.camera || {}), dashboard_now_ms: numeric(state.uptime_ms) });
       rounds += 1;
     }
     if (!paused) dirty = true;
@@ -384,6 +495,148 @@ function updateControlState(state) {
   updateManualState(state);
   updateArmButton();
   if (playback.active) applyPlaybackLock(true);
+}
+
+function calibrationStep(stateName, failedStage = 0) {
+  if (["WAIT_WHITE", "CAPTURE_WHITE"].includes(stateName)) return "white";
+  if (["WAIT_BLACK", "CAPTURE_BLACK"].includes(stateName)) return "black";
+  if (stateName === "FAILED") {
+    if (failedStage === 1) return "white";
+    if (failedStage === 2) return "black";
+    return "save";
+  }
+  if (stateName === "REVIEW") return "review";
+  if (["SAVING", "COMPLETE"].includes(stateName)) return "save";
+  return "white";
+}
+
+function setCalibrationInterlock(active) {
+  document.body.classList.toggle("calibration-active", active);
+  const selector = ".control-section button:not(.estop), .control-section input, .control-section select, #parameterDialog button, #parameterDialog input, #parameterDialog select";
+  document.querySelectorAll(selector).forEach((element) => {
+    if (active) {
+      if (element.dataset.calibrationDisabled == null)
+        element.dataset.calibrationDisabled = element.disabled ? "1" : "0";
+      element.disabled = true;
+    } else if (element.dataset.calibrationDisabled != null) {
+      element.disabled = element.dataset.calibrationDisabled === "1";
+      delete element.dataset.calibrationDisabled;
+    }
+  });
+}
+
+function renderCalibration(state) {
+  calibrationState = state || { available: false, active: false };
+  const available = Boolean(calibrationState.available);
+  const stateName = calibrationState.state_name || "IDLE";
+  const ownerName = calibrationState.owner_name || "NONE";
+  const active = Boolean(calibrationState.active);
+  const hostOwner = ownerName === "HOST";
+  const readonly = playback.active || (active && !hostOwner);
+  $("openCalibrationButton").disabled = !available || playback.active;
+  $("calibrationSummary").textContent = available
+    ? `${calibrationState.active_source_name || "COMPILED"} · generation ${calibrationState.generation ?? "—"}`
+    : "固件未提供自动标定能力";
+  setCalibrationInterlock(active);
+  const current = calibrationStep(stateName, numeric(calibrationState.failed_stage));
+  const order = ["white", "black", "review", "save"];
+  const currentIndex = order.indexOf(current);
+  document.querySelectorAll("#calibrationSteps li").forEach((item) => {
+    const index = order.indexOf(item.dataset.step);
+    item.classList.toggle("current", index === currentIndex);
+    item.classList.toggle("complete", index < currentIndex || stateName === "COMPLETE");
+    item.setAttribute("aria-current", index === currentIndex ? "step" : "false");
+  });
+  const progress = numeric(calibrationState.progress);
+  const required = numeric(calibrationState.required, 64);
+  const progressElement = $("calibrationProgress");
+  progressElement.max = required;
+  progressElement.value = progress;
+  progressElement.textContent = `${progress} / ${required}`;
+  progressElement.setAttribute("aria-valuenow", String(progress));
+  progressElement.setAttribute("aria-valuemax", String(required));
+  $("calibrationProgressText").textContent = `${progress} / ${required}`;
+  $("calibrationOwnerText").textContent = `所有者：${ownerName === "HOST" ? "当前网页" : ownerName === "REMOTE" ? "红外遥控器（只读查看）" : "无"}`;
+  const titles = {
+    IDLE: ["可以开始赛前标定", "确认车辆静止、无故障，先把全部 8 路探头放在白底上。"],
+    WAIT_WHITE: ["第 1 步：准备白底", "全部探头覆盖同一块浅色背景后开始采集。"],
+    CAPTURE_WHITE: ["正在采集白底", "保持车辆和光源完全不动，采集会自动完成。"],
+    WAIT_BLACK: ["第 2 步：准备黑线", "把全部探头完整压在足够宽的黑线上，然后继续。"],
+    CAPTURE_BLACK: ["正在采集黑线", "保持车辆静止，避免手或阴影遮挡探头。"],
+    REVIEW: ["第 3 步：全部通道通过", "请复核白值、黑值、跨度和噪声；确认后才会写入 Flash。"],
+    SAVING: ["正在写入并回读 Flash", "旧标定仍在使用，验证成功后才切换。"],
+    COMPLETE: ["标定已保存并应用", "新的阈值已生效，循迹会等待新采样重新锁线。"],
+    FAILED: ["本次标定未通过", "按通道查看原因，修正放置或光线后重试当前阶段。"],
+    CANCELLED: ["标定已取消", "旧标定保持不变，可随时重新开始。"],
+  };
+  const message = titles[stateName] || ["标定状态未知", "请刷新后重试。"];
+  $("calibrationStatusTitle").textContent = message[0];
+  $("calibrationStatusDetail").textContent = message[1];
+  const rows = $("calibrationRows");
+  rows.innerHTML = "";
+  for (let index = 0; index < 8; index += 1) {
+    const failure = (calibrationState.failures || []).find((item) => numeric(item.channel) === index + 1);
+    const row = document.createElement("tr");
+    const values = [
+      [`CH${index + 1}`, "通道"],
+      [calibrationState.white_adc?.[index] ?? "—", "白底"],
+      [calibrationState.black_adc?.[index] ?? "—", "黑线"],
+      [calibrationState.span_adc?.[index] ?? "—", "跨度"],
+      [calibrationState.max_noise_adc?.[index] ?? "—", "最大噪声"],
+      [failure ? failure.reasons.join("；") : ((numeric(calibrationState.valid_mask) & (1 << index)) ? "通过" : "等待采样"), "检查结果"],
+    ];
+    values.forEach(([value, label], column) => {
+      const cell = document.createElement("td");
+      cell.dataset.label = label;
+      cell.textContent = value;
+      if (column === 5) cell.className = failure ? "channel-fail" : "channel-ok";
+      row.appendChild(cell);
+    });
+    rows.appendChild(row);
+  }
+  const failures = calibrationState.failures || [];
+  $("calibrationFailureSummary").hidden = !failures.length && !calibrationState.scan_error;
+  $("calibrationFailureSummary").textContent = calibrationState.scan_error
+    ? "扫描链路发生错误：请检查灰度 ADC 后重试当前阶段。"
+    : failures.map((item) => `CH${item.channel}：${item.reasons.join("；")}`).join("\n");
+  const primary = $("calibrationPrimaryButton");
+  const actions = {
+    IDLE: ["开始向导", "start"], CANCELLED: ["重新开始", "start"], COMPLETE: ["重新标定", "start"],
+    WAIT_WHITE: ["采集白底 64 帧", "capture-white"], CAPTURE_WHITE: ["白底采集中…", null],
+    WAIT_BLACK: ["采集黑线 64 帧", "capture-black"], CAPTURE_BLACK: ["黑线采集中…", null],
+    REVIEW: ["确认并写入 Flash", "confirm"], SAVING: ["正在写入 Flash…", null],
+    FAILED: [calibrationState.failed_stage === 1 ? "重试白底" : calibrationState.failed_stage === 2 ? "重试黑线" : "重试写入 Flash", calibrationState.failed_stage === 1 ? "capture-white" : calibrationState.failed_stage === 2 ? "capture-black" : "confirm"],
+  };
+  const [label, action] = actions[stateName] || ["刷新状态", null];
+  primary.textContent = label;
+  primary.dataset.action = action || "";
+  primary.disabled = !action || readonly || !available;
+  $("cancelCalibrationButton").disabled = !active || !hostOwner || playback.active;
+}
+
+async function pollCalibration(force = false) {
+  if (calibrationFetching) return;
+  calibrationFetching = true;
+  try {
+    const response = await fetch(`/api/calibration${force ? "?refresh=1" : ""}`, {cache: "no-store"});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderCalibration(await response.json());
+  } catch (error) {
+    $("calibrationStatusTitle").textContent = "标定状态读取失败";
+    $("calibrationStatusDetail").textContent = error.message;
+  } finally { calibrationFetching = false; }
+}
+
+async function runCalibrationAction(action, button) {
+  const body = {expected_generation: calibrationState.generation};
+  if (action === "confirm") body.confirm = "WRITE_GRAYSCALE_CALIBRATION_TO_FLASH";
+  try {
+    renderCalibration(await command(`/api/calibration/${action}`, body, button));
+    showToast(action === "confirm" ? "灰度标定已写入 Flash 并应用" : "标定步骤已接受");
+  } catch (error) {
+    showToast(`标定操作失败：${error.message}`, true);
+    await pollCalibration(true);
+  }
 }
 
 function renderFaultDetails(details, faultBits, statusError) {
@@ -1060,6 +1313,10 @@ function processPlaybackRecords(untilMs, announceMarkers = true) {
       appendEvent(playbackTelemetryRecord(record));
       counts[record.stream] = numeric(counts[record.stream]) + 1;
       if (record.gap) gaps[record.stream] = numeric(gaps[record.stream]) + 1;
+    } else if (record.record_type === "uart_data" && record.stream === "vision_uart_rx") {
+      appendEvent(playbackTelemetryRecord(record));
+      counts[record.stream] = numeric(counts[record.stream]) + 1;
+      if (record.gap) gaps[record.stream] = numeric(gaps[record.stream]) + 1;
     } else if (announceMarkers && record.event === "marker") {
       showToast(`回放标记：${record.values?.label || "未命名"}`);
     }
@@ -1103,6 +1360,13 @@ async function seekPlayback(targetMs) {
   $("playbackPlayButton").textContent = "播放";
   const warmupMs = Math.max(0, target - windowSeconds * 1000);
   clearHistory(false);
+  cameraView.status = { available: true, enabled: false };
+  updateCameraStatus({
+    message: "历史回放 · 此时间范围尚无 UART1 数据",
+    last_received_ms: null,
+    rx_bytes: 0, tx_bytes: 0, rx_overflow: 0, tx_overflow: 0,
+    bridge_dropped: 0, hardware_errors: 0, dashboard_now_ms: target,
+  });
   counts = {}; gaps = {};
   playback.records = [];
   playback.position = 0;
@@ -1221,6 +1485,7 @@ function render(frameNow) {
   dirty = false;
   const newest = Math.max(0, ...Object.values(latest).map((event) => event.received_ms));
   const hostNow = playback.active ? playback.currentMs : (lastServerOk ? newest + (performance.now() - lastServerOk) : newest);
+  updateCameraStatus({ dashboard_now_ms: hostNow });
   trimHistory(hostNow);
   updateNumbers(Math.round(hostNow));
   drawChart("speedChart", [
@@ -1247,11 +1512,38 @@ $("pauseButton").addEventListener("click", () => {
   if (!paused) dirty = true;
 });
 $("clearButton").addEventListener("click", () => clearHistory(false));
+$("cameraPauseButton").addEventListener("click", () => {
+  cameraView.autoScrollPaused = !cameraView.autoScrollPaused;
+  const button = $("cameraPauseButton");
+  button.textContent = cameraView.autoScrollPaused ? "恢复滚动" : "暂停滚动";
+  button.setAttribute("aria-pressed", String(cameraView.autoScrollPaused));
+  if (!cameraView.autoScrollPaused) renderCameraData();
+});
+$("cameraClearButton").addEventListener("click", clearCameraDisplay);
 $("windowSelect").addEventListener("change", (event) => { windowSeconds = numeric(event.target.value, 10); dirty = true; });
 $("layoutScrollButton").addEventListener("click", () => setLayoutMode("scroll"));
 $("layoutCockpitButton").addEventListener("click", () => setLayoutMode("cockpit"));
 $("openParametersButton").addEventListener("click", openParameterDialog);
 $("closeParametersButton").addEventListener("click", () => $("parameterDialog").close());
+$("openCalibrationButton").addEventListener("click", async () => {
+  if (!$("calibrationDialog").open) $("calibrationDialog").showModal();
+  await pollCalibration(true);
+  $("calibrationPrimaryButton").focus();
+});
+async function closeCalibrationDialog() {
+  if (calibrationState.active && calibrationState.owner_name === "HOST") {
+    if (!window.confirm("当前候选标定尚未保存。关闭向导将取消本次标定并保留旧值，是否继续？")) return;
+    await runCalibrationAction("cancel", $("cancelCalibrationButton"));
+  }
+  $("calibrationDialog").close();
+}
+$("closeCalibrationButton").addEventListener("click", closeCalibrationDialog);
+$("calibrationDialog").addEventListener("cancel", (event) => { event.preventDefault(); closeCalibrationDialog(); });
+$("calibrationPrimaryButton").addEventListener("click", () => {
+  const action = $("calibrationPrimaryButton").dataset.action;
+  if (action) runCalibrationAction(action, $("calibrationPrimaryButton"));
+});
+$("cancelCalibrationButton").addEventListener("click", () => runCalibrationAction("cancel", $("cancelCalibrationButton")));
 $("startRecordingButton").addEventListener("click", () => {
   $("autoRecording").checked = autoRecordingEnabled();
   if (!$("recordingDialog").open) $("recordingDialog").showModal();
@@ -1452,12 +1744,17 @@ $("saveParametersButton").addEventListener("click", () => {
 window.addEventListener("resize", () => { dirty = true; });
 
 initializeSensors();
+renderCameraData();
+updateCameraStatus();
 setLayoutMode(storedLayoutMode(), false);
 loadManualSettings();
 setManualMode("action");
 $("autoRecording").checked = autoRecordingEnabled();
 setInterval(poll, 50);
 setInterval(pollControl, 1000);
+setInterval(() => {
+  if ($("calibrationDialog").open || calibrationState.active) pollCalibration(true);
+}, 250);
 setInterval(pollRecordingStatus, 500);
 setInterval(updateCountdown, 100);
 setInterval(() => {
@@ -1465,7 +1762,12 @@ setInterval(() => {
   if (manualDrive.enabled && (input.throttle || input.steering)) sendManualCommand();
 }, 100);
 setInterval(() => { if (!paused) dirty = true; }, 250);
+setInterval(() => {
+  if (!playback.active && cameraView.status.last_received_ms != null && lastServerOk)
+    updateCameraStatus({ dashboard_now_ms: numeric(cameraView.status.dashboard_now_ms) + 500 });
+}, 500);
 poll();
 pollControl();
+pollCalibration(true);
 pollRecordingStatus();
 requestAnimationFrame(render);

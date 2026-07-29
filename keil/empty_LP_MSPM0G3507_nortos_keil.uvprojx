@@ -535,6 +535,11 @@
               <FilePath>../System/parameter_store.c</FilePath>
             </File>
             <File>
+              <FileName>grayscale_calibration.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/grayscale_calibration.c</FilePath>
+            </File>
+            <File>
               <FileName>control_protocol.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/control_protocol.c</FilePath>
@@ -553,6 +558,11 @@
               <FileName>m6_rpc.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/m6_rpc.c</FilePath>
+            </File>
+            <File>
+              <FileName>m6_vision_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/m6_vision_uart.c</FilePath>
             </File>
             <File>
               <FileName>m6_action_validate.c</FileName>

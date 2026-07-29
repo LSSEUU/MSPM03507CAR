@@ -9,7 +9,8 @@ typedef enum {
     APP_REMOTE_MANUAL,
     APP_REMOTE_PENDING_DEMO,
     APP_REMOTE_DEMO_RUNNING,
-    APP_REMOTE_CAPTURE
+    APP_REMOTE_CAPTURE,
+    APP_REMOTE_CALIBRATION
 } AppRemoteState_t;
 
 typedef enum {

@@ -38,8 +38,40 @@ static void test_record_validation(void)
     ParameterStore_BuildRecord(damaged, ControlParams_Defaults(), 8U, 12U,
                                false);
     assert(!ParameterStore_DecodeRecord(damaged, sizeof(damaged), &decoded));
-    assert(!ParameterStore_DecodeRecord(record, sizeof(record) - 1U,
+    assert(!ParameterStore_DecodeRecord(record,
+                                        PARAMETER_STORE_RECORD_V1_SIZE - 1U,
                                         &decoded));
+}
+
+static void test_v2_calibration_round_trip(void)
+{
+    uint8_t record[PARAMETER_STORE_RECORD_SIZE];
+    uint8_t damaged[PARAMETER_STORE_RECORD_SIZE];
+    LineCalibrationValues_t calibration = {
+        {3000U, 3010U, 3020U, 3030U, 3040U, 3050U, 3060U, 3070U},
+        { 500U,  510U,  520U,  530U,  540U,  550U,  560U,  570U}
+    };
+    ParameterStoreDecoded_t decoded;
+
+    ParameterStore_BuildRecordV2(record, ControlParams_Defaults(),
+        &calibration, true, 12U, 9U, true);
+    assert(ParameterStore_DecodeRecord(record, sizeof(record), &decoded));
+    assert(decoded.valid && decoded.calibration_valid);
+    assert(decoded.generation == 12U && decoded.parameter_revision == 9U);
+    assert(memcmp(&decoded.calibration, &calibration,
+                  sizeof(calibration)) == 0);
+    assert(!ParameterStore_DecodeRecord(record,
+                                        PARAMETER_STORE_RECORD_SIZE - 1U,
+                                        &decoded));
+
+    memcpy(damaged, record, sizeof(damaged));
+    damaged[180] ^= 1U;
+    assert(!ParameterStore_DecodeRecord(damaged, sizeof(damaged), &decoded));
+    calibration.white_adc[3] = calibration.black_adc[3];
+    ParameterStore_BuildRecordV2(damaged, ControlParams_Defaults(),
+        &calibration, true, 13U, 9U, true);
+    assert(ParameterStore_DecodeRecord(damaged, sizeof(damaged), &decoded));
+    assert(!decoded.calibration_valid);
 }
 
 static void test_invalid_payload_is_rejected_even_with_valid_crc(void)
@@ -91,10 +123,12 @@ static void test_generation_selection(void)
 int main(void)
 {
     ControlParams_Init();
-    assert(PARAMETER_STORE_RECORD_SIZE == 168U);
+    assert(PARAMETER_STORE_RECORD_V1_SIZE == 168U);
+    assert(PARAMETER_STORE_RECORD_SIZE == 208U);
     test_crc();
     test_record_validation();
     test_invalid_payload_is_rejected_even_with_valid_crc();
+    test_v2_calibration_round_trip();
     test_generation_selection();
     return 0;
 }

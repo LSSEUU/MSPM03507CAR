@@ -41,7 +41,7 @@ SystemState_t SystemState_Get(void)
 const char *SystemState_Name(SystemState_t state)
 {
     static const char *const names[] = {
-        "BOOT", "SELF_TEST", "IDLE", "RUN", "FAULT"
+        "BOOT", "SELF_TEST", "IDLE", "RUN", "FAULT", "CALIBRATION"
     };
     if ((unsigned int)state >= (unsigned int)(sizeof(names) / sizeof(names[0])))
         return "UNKNOWN";
@@ -88,6 +88,30 @@ bool SystemState_RequestIdle(void)
 {
     uint32_t key = SystemState_EnterCritical();
     if (system_state != SYSTEM_STATE_RUN) {
+        SystemState_ExitCritical(key);
+        return false;
+    }
+    system_state = SYSTEM_STATE_IDLE;
+    SystemState_ExitCritical(key);
+    return true;
+}
+
+bool SystemState_BeginCalibration(void)
+{
+    uint32_t key = SystemState_EnterCritical();
+    if (system_state != SYSTEM_STATE_IDLE) {
+        SystemState_ExitCritical(key);
+        return false;
+    }
+    system_state = SYSTEM_STATE_CALIBRATION;
+    SystemState_ExitCritical(key);
+    return true;
+}
+
+bool SystemState_EndCalibration(void)
+{
+    uint32_t key = SystemState_EnterCritical();
+    if (system_state != SYSTEM_STATE_CALIBRATION) {
         SystemState_ExitCritical(key);
         return false;
     }

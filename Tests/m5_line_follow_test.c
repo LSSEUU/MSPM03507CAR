@@ -438,6 +438,44 @@ static void test_confirmed_branch_stays_latched_until_centered_reacquisition(voi
     assert(snapshot.left_target_mm_s > snapshot.right_target_mm_s);
 }
 
+static void test_runtime_calibration_rebuilds_thresholds_and_unlocks_line(void)
+{
+    LineCalibrationValues_t values;
+    LineFollowSnapshot_t snapshot;
+    uint16_t adc[LINE_SENSOR_CHANNEL_COUNT];
+    uint32_t channel;
+
+    LineFollow_Init();
+    make_black_line(adc, 3U, 4U);
+    LineFollow_ProcessSample(adc, 1U, 20U);
+    LineFollow_ProcessSample(adc, 2U, 40U);
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.line_valid);
+    assert(snapshot.active_mask == 0x18U);
+
+    for (channel = 0U; channel < LINE_SENSOR_CHANNEL_COUNT; channel++) {
+        values.white_adc[channel] = 3200U;
+        values.black_adc[channel] = 400U;
+    }
+    assert(LineFollow_ApplyCalibration(
+        &values, LINE_CALIBRATION_SOURCE_RUNTIME));
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.calibration.source == LINE_CALIBRATION_SOURCE_RUNTIME);
+    assert(snapshot.calibration.enter_black_adc[0] == 1333U);
+    assert(snapshot.calibration.exit_black_adc[0] == 2266U);
+    assert(snapshot.active_mask == 0U);
+    assert(!snapshot.line_valid);
+    assert(snapshot.position == 0.0f);
+    assert(snapshot.filtered_derivative == 0.0f);
+
+    values.black_adc[7] = 2800U;
+    assert(!LineFollow_ApplyCalibration(
+        &values, LINE_CALIBRATION_SOURCE_PERSISTED));
+    LineFollow_GetSnapshot(&snapshot);
+    assert(snapshot.calibration.source == LINE_CALIBRATION_SOURCE_RUNTIME);
+    assert(snapshot.calibration.black_adc[7] == 400U);
+}
+
 int main(void)
 {
     test_calibration_hysteresis_and_position();
@@ -450,5 +488,6 @@ int main(void)
     test_centered_corner_branch_hint_selects_search_direction();
     test_single_ambiguous_scan_does_not_latch_branch_hint();
     test_confirmed_branch_stays_latched_until_centered_reacquisition();
+    test_runtime_calibration_rebuilds_thresholds_and_unlocks_line();
     return 0;
 }

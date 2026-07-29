@@ -4,6 +4,10 @@
 #include <string.h>
 
 #ifndef PARAMETER_STORE_HOST_TEST
+#include "line_follow.h"
+#endif
+
+#ifndef PARAMETER_STORE_HOST_TEST
 #include "ti_msp_dl_config.h"
 #include "reset_diag.h"
 
@@ -59,6 +63,14 @@ typedef struct {
 } ParameterPayloadV1_t;
 
 typedef struct {
+    ParameterPayloadV1_t controls;
+    uint16_t grayscale_white[GRAYSCALE_CALIBRATION_CHANNEL_COUNT];
+    uint16_t grayscale_black[GRAYSCALE_CALIBRATION_CHANNEL_COUNT];
+    uint32_t grayscale_valid;
+    uint32_t reserved;
+} ParameterPayloadV2_t;
+
+typedef struct {
     uint32_t magic;
     uint16_t schema_version;
     uint16_t payload_length;
@@ -70,18 +82,57 @@ typedef struct {
     uint32_t commit_reserved;
 } ParameterRecordV1_t;
 
+typedef struct {
+    uint32_t magic;
+    uint16_t schema_version;
+    uint16_t payload_length;
+    uint32_t generation;
+    uint32_t parameter_revision;
+    ParameterPayloadV2_t payload;
+    uint32_t crc32;
+    uint32_t commit_marker;
+    uint32_t commit_reserved;
+} ParameterRecordV2_t;
+
+#define PARAMETER_STORE_SCHEMA_V1 1U
+#define PARAMETER_STORE_SCHEMA_V2 2U
+
 _Static_assert(sizeof(ParameterPayloadV1_t) == 140U,
                "parameter payload V1 layout changed");
+_Static_assert(sizeof(ParameterPayloadV2_t) == 180U,
+               "parameter payload V2 layout changed");
 _Static_assert(offsetof(ParameterRecordV1_t, crc32) == 156U,
                "parameter CRC coverage changed");
 _Static_assert(offsetof(ParameterRecordV1_t, commit_marker) == 160U,
                "commit marker must begin the final flash word");
-_Static_assert(sizeof(ParameterRecordV1_t) == PARAMETER_STORE_RECORD_SIZE,
+_Static_assert(sizeof(ParameterRecordV1_t) == PARAMETER_STORE_RECORD_V1_SIZE,
                "parameter record V1 layout changed");
 _Static_assert((sizeof(ParameterRecordV1_t) % 8U) == 0U,
                "record must use complete 64-bit flash words");
+_Static_assert(offsetof(ParameterRecordV2_t, crc32) == 196U,
+               "parameter V2 CRC coverage changed");
+_Static_assert(offsetof(ParameterRecordV2_t, commit_marker) == 200U,
+               "parameter V2 commit offset changed");
+_Static_assert(sizeof(ParameterRecordV2_t) == PARAMETER_STORE_RECORD_SIZE,
+               "parameter record V2 layout changed");
+_Static_assert((sizeof(ParameterRecordV2_t) % 8U) == 0U,
+               "V2 record must use complete 64-bit flash words");
 
 static ParameterStoreInfo_t s_info;
+static LineCalibrationValues_t s_loaded_calibration;
+static bool s_loaded_calibration_valid;
+
+static bool calibration_values_valid(const LineCalibrationValues_t *values)
+{
+    uint32_t i;
+    if (values == NULL) return false;
+    for (i = 0U; i < GRAYSCALE_CALIBRATION_CHANNEL_COUNT; i++) {
+        if ((values->white_adc[i] <= values->black_adc[i]) ||
+            ((uint16_t)(values->white_adc[i] - values->black_adc[i]) < 512U))
+            return false;
+    }
+    return true;
+}
 
 static void encode_payload(ParameterPayloadV1_t *payload,
                            const ControlParams_t *params)
@@ -193,13 +244,48 @@ void ParameterStore_BuildRecord(void *destination,
         return;
     memset(record, 0xFF, sizeof(*record));
     record->magic = PARAMETER_STORE_MAGIC;
-    record->schema_version = CONTROL_PARAMS_SCHEMA_VERSION;
+    record->schema_version = PARAMETER_STORE_SCHEMA_V1;
     record->payload_length = (uint16_t)sizeof(record->payload);
     record->generation = generation;
     record->parameter_revision = parameter_revision;
     encode_payload(&record->payload, params);
     record->crc32 = ParameterStore_Crc32(record,
         offsetof(ParameterRecordV1_t, crc32));
+    record->commit_marker = committed ? PARAMETER_STORE_COMMIT_MARKER :
+                                        0xFFFFFFFFUL;
+    record->commit_reserved = 0xFFFFFFFFUL;
+}
+
+void ParameterStore_BuildRecordV2(void *destination,
+                                  const ControlParams_t *params,
+                                  const LineCalibrationValues_t *calibration,
+                                  bool calibration_valid,
+                                  uint32_t generation,
+                                  uint32_t parameter_revision,
+                                  bool committed)
+{
+    ParameterRecordV2_t *record = (ParameterRecordV2_t *)destination;
+    uint32_t i;
+    if ((record == NULL) || (params == NULL)) return;
+    if (calibration_valid && !calibration_values_valid(calibration))
+        calibration_valid = false;
+    memset(record, 0xFF, sizeof(*record));
+    record->magic = PARAMETER_STORE_MAGIC;
+    record->schema_version = PARAMETER_STORE_SCHEMA_V2;
+    record->payload_length = (uint16_t)sizeof(record->payload);
+    record->generation = generation;
+    record->parameter_revision = parameter_revision;
+    encode_payload(&record->payload.controls, params);
+    for (i = 0U; i < GRAYSCALE_CALIBRATION_CHANNEL_COUNT; i++) {
+        record->payload.grayscale_white[i] = calibration_valid ?
+            calibration->white_adc[i] : 0U;
+        record->payload.grayscale_black[i] = calibration_valid ?
+            calibration->black_adc[i] : 0U;
+    }
+    record->payload.grayscale_valid = calibration_valid ? 1U : 0U;
+    record->payload.reserved = 0xFFFFFFFFUL;
+    record->crc32 = ParameterStore_Crc32(record,
+        offsetof(ParameterRecordV2_t, crc32));
     record->commit_marker = committed ? PARAMETER_STORE_COMMIT_MARKER :
                                         0xFFFFFFFFUL;
     record->commit_reserved = 0xFFFFFFFFUL;
@@ -218,14 +304,39 @@ bool ParameterStore_DecodeRecord(const void *record_data,
     if ((record == NULL) || (decoded == NULL) ||
         (available < sizeof(*record))) return false;
     if ((record->magic != PARAMETER_STORE_MAGIC) ||
-        (record->schema_version != CONTROL_PARAMS_SCHEMA_VERSION) ||
-        (record->payload_length != sizeof(record->payload)) ||
-        (record->commit_marker != PARAMETER_STORE_COMMIT_MARKER) ||
-        (record->commit_reserved != 0xFFFFFFFFUL) ||
-        (record->crc32 != ParameterStore_Crc32(record,
-            offsetof(ParameterRecordV1_t, crc32)))) return false;
-
-    decode_payload(&candidate, &record->payload);
+        (record->schema_version != PARAMETER_STORE_SCHEMA_V1 &&
+         record->schema_version != PARAMETER_STORE_SCHEMA_V2)) return false;
+    if (record->schema_version == PARAMETER_STORE_SCHEMA_V1) {
+        if ((record->payload_length != sizeof(record->payload)) ||
+            (record->commit_marker != PARAMETER_STORE_COMMIT_MARKER) ||
+            (record->commit_reserved != 0xFFFFFFFFUL) ||
+            (record->crc32 != ParameterStore_Crc32(record,
+                offsetof(ParameterRecordV1_t, crc32)))) return false;
+        decode_payload(&candidate, &record->payload);
+    } else {
+        const ParameterRecordV2_t *record_v2 =
+            (const ParameterRecordV2_t *)record_data;
+        uint32_t i;
+        if ((available < sizeof(*record_v2)) ||
+            (record_v2->payload_length != sizeof(record_v2->payload)) ||
+            (record_v2->commit_marker != PARAMETER_STORE_COMMIT_MARKER) ||
+            (record_v2->commit_reserved != 0xFFFFFFFFUL) ||
+            (record_v2->payload.reserved != 0xFFFFFFFFUL) ||
+            (record_v2->payload.grayscale_valid > 1U) ||
+            (record_v2->crc32 != ParameterStore_Crc32(record_v2,
+                offsetof(ParameterRecordV2_t, crc32)))) return false;
+        decode_payload(&candidate, &record_v2->payload.controls);
+        if (record_v2->payload.grayscale_valid != 0U) {
+            for (i = 0U; i < GRAYSCALE_CALIBRATION_CHANNEL_COUNT; i++) {
+                decoded->calibration.white_adc[i] =
+                    record_v2->payload.grayscale_white[i];
+                decoded->calibration.black_adc[i] =
+                    record_v2->payload.grayscale_black[i];
+            }
+            if (!calibration_values_valid(&decoded->calibration)) return false;
+            decoded->calibration_valid = true;
+        }
+    }
     if (ControlParams_Validate(&candidate) != CONTROL_PARAMS_OK)
         return false;
     decoded->valid = true;
@@ -280,7 +391,7 @@ unprotect_parameter_group_from_ram(void)
 
 __attribute__((section(".ramfunc"), noinline))
 static bool write_sector_from_ram(uint32_t address,
-                                  const ParameterRecordV1_t *record)
+                                  const ParameterRecordV2_t *record)
 {
     const uint32_t *words = (const uint32_t *)record;
     uint32_t word_index;
@@ -318,7 +429,7 @@ static bool write_sector_from_ram(uint32_t address,
 
     /* Program all covered bytes first; the final 64-bit commit word is last. */
     for (word_index = 0U;
-         word_index < (sizeof(ParameterRecordV1_t) / 8U);
+         word_index < (sizeof(ParameterRecordV2_t) / 8U);
          word_index++) {
         uint32_t source_index = word_index * 2U;
         unprotect_parameter_group_from_ram();
@@ -362,6 +473,8 @@ static bool write_sector_from_ram(uint32_t address,
 void ParameterStore_Init(void)
 {
     memset(&s_info, 0, sizeof(s_info));
+    memset(&s_loaded_calibration, 0, sizeof(s_loaded_calibration));
+    s_loaded_calibration_valid = false;
 #ifdef PARAMETER_STORE_HOST_TEST
     s_info.health = PARAMETER_STORE_HEALTH_DEGRADED;
     return;
@@ -377,10 +490,18 @@ void ParameterStore_Init(void)
         PARAMETER_STORE_HEALTH_DEGRADED : PARAMETER_STORE_HEALTH_OK;
     if (selected == PARAMETER_STORE_SLOT_A) {
         s_info.generation = a.generation;
+        if (a.calibration_valid) {
+            s_loaded_calibration = a.calibration;
+            s_loaded_calibration_valid = true;
+        }
         (void)ControlParams_BootRestore(&a.params, a.parameter_revision,
                                         CONTROL_PARAMS_SOURCE_PERSISTED);
     } else if (selected == PARAMETER_STORE_SLOT_B) {
         s_info.generation = b.generation;
+        if (b.calibration_valid) {
+            s_loaded_calibration = b.calibration;
+            s_loaded_calibration_valid = true;
+        }
         (void)ControlParams_BootRestore(&b.params, b.parameter_revision,
                                         CONTROL_PARAMS_SOURCE_PERSISTED);
     }
@@ -418,26 +539,39 @@ ParameterStoreResult_t ParameterStore_LoadStaged(void)
 #endif
 }
 
-ParameterStoreResult_t ParameterStore_SaveActive(void)
+static ParameterStoreResult_t save_active_with_calibration(
+    const LineCalibrationValues_t *calibration, bool calibration_valid,
+    uint32_t expected_generation, bool enforce_generation)
 {
 #ifdef PARAMETER_STORE_HOST_TEST
+    (void)calibration;
+    (void)calibration_valid;
+    (void)expected_generation;
+    (void)enforce_generation;
     return PARAMETER_STORE_ERR_IO;
 #else
     ParameterStoreDecoded_t a;
     ParameterStoreDecoded_t b;
     ParameterStoreDecoded_t verification;
-    ParameterRecordV1_t record;
+    ParameterRecordV2_t record;
     ParameterStoreSlot_t selected;
     ParameterStoreSlot_t target;
     uint32_t target_address;
     uint32_t next_generation;
+    uint32_t current_generation;
     uint32_t primask;
     bool write_ok;
 
     if (ControlParams_Validate(ControlParams_Active()) != CONTROL_PARAMS_OK)
         return PARAMETER_STORE_ERR_PARAMS;
+    if (calibration_valid && !calibration_values_valid(calibration))
+        return PARAMETER_STORE_ERR_PARAMS;
     read_slots(&a, &b);
     selected = ParameterStore_Select(&a, &b);
+    current_generation = (selected == PARAMETER_STORE_SLOT_A) ? a.generation :
+        ((selected == PARAMETER_STORE_SLOT_B) ? b.generation : 0U);
+    if (enforce_generation && (current_generation != expected_generation))
+        return PARAMETER_STORE_ERR_STALE_GENERATION;
     target = (selected == PARAMETER_STORE_SLOT_A) ?
         PARAMETER_STORE_SLOT_B : PARAMETER_STORE_SLOT_A;
     target_address = (target == PARAMETER_STORE_SLOT_A) ?
@@ -445,8 +579,8 @@ ParameterStoreResult_t ParameterStore_SaveActive(void)
     next_generation = (selected == PARAMETER_STORE_SLOT_A) ?
         (a.generation + 1U) : ((selected == PARAMETER_STORE_SLOT_B) ?
         (b.generation + 1U) : 1U);
-    ParameterStore_BuildRecord(&record, ControlParams_Active(),
-        next_generation, ControlParams_Revision(), true);
+    ParameterStore_BuildRecordV2(&record, ControlParams_Active(), calibration,
+        calibration_valid, next_generation, ControlParams_Revision(), true);
 
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_PARAMETER_FLASH);
     DL_FlashCTL_executeClearStatus(FLASHCTL);
@@ -469,7 +603,11 @@ ParameterStoreResult_t ParameterStore_SaveActive(void)
                                      PARAMETER_STORE_SLOT_SIZE,
                                      &verification) ||
         (verification.generation != next_generation) ||
-        (verification.parameter_revision != ControlParams_Revision())) {
+        (verification.parameter_revision != ControlParams_Revision()) ||
+        (verification.calibration_valid != calibration_valid) ||
+        (calibration_valid &&
+         memcmp(&verification.calibration, calibration,
+                sizeof(*calibration)) != 0)) {
         s_info.save_failures++;
         return PARAMETER_STORE_ERR_VERIFY;
     }
@@ -478,8 +616,44 @@ ParameterStoreResult_t ParameterStore_SaveActive(void)
     s_info.generation = next_generation;
     s_info.slot_a_valid = (target == PARAMETER_STORE_SLOT_A) ? true : a.valid;
     s_info.slot_b_valid = (target == PARAMETER_STORE_SLOT_B) ? true : b.valid;
+    if (calibration_valid) {
+        s_loaded_calibration = *calibration;
+        s_loaded_calibration_valid = true;
+    } else {
+        memset(&s_loaded_calibration, 0, sizeof(s_loaded_calibration));
+        s_loaded_calibration_valid = false;
+    }
     return PARAMETER_STORE_OK;
 #endif
+}
+
+ParameterStoreResult_t ParameterStore_SaveActive(void)
+{
+#ifdef PARAMETER_STORE_HOST_TEST
+    return PARAMETER_STORE_ERR_IO;
+#else
+    LineCalibrationValues_t calibration;
+    LineFollowSnapshot_t line;
+    LineFollow_GetSnapshot(&line);
+    LineFollow_GetCalibrationValues(&calibration, NULL);
+    return save_active_with_calibration(&calibration,
+                                        line.calibration.valid, 0U, false);
+#endif
+}
+
+ParameterStoreResult_t ParameterStore_SaveCalibration(
+    const LineCalibrationValues_t *calibration,
+    uint32_t expected_generation)
+{
+    return save_active_with_calibration(calibration, true,
+                                        expected_generation, true);
+}
+
+bool ParameterStore_GetLoadedCalibration(LineCalibrationValues_t *calibration)
+{
+    if ((calibration == NULL) || !s_loaded_calibration_valid) return false;
+    *calibration = s_loaded_calibration;
+    return true;
 }
 
 void ParameterStore_GetInfo(ParameterStoreInfo_t *info)

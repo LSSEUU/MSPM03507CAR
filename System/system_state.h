@@ -8,7 +8,8 @@ typedef enum {
     SYSTEM_STATE_SELF_TEST,
     SYSTEM_STATE_IDLE,
     SYSTEM_STATE_RUN,
-    SYSTEM_STATE_FAULT
+    SYSTEM_STATE_FAULT,
+    SYSTEM_STATE_CALIBRATION = 5
 } SystemState_t;
 
 void SystemState_Init(void);
@@ -18,6 +19,8 @@ bool SystemState_BeginSelfTest(void);
 bool SystemState_CompleteSelfTest(bool passed);
 bool SystemState_RequestRun(void);
 bool SystemState_RequestIdle(void);
+bool SystemState_BeginCalibration(void);
+bool SystemState_EndCalibration(void);
 void SystemState_EnterFault(void);
 bool SystemState_ClearFault(void);
 

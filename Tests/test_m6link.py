@@ -14,7 +14,16 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python" / "src"))
 
-from m6link import ActionKind, ActionSpec, Session, TelemetrySample  # noqa: E402
+from m6link import (  # noqa: E402
+    ActionKind,
+    ActionSpec,
+    GrayscaleCalibrationCommand,
+    GrayscaleCalibrationOwner,
+    GrayscaleCalibrationSource,
+    GrayscaleCalibrationState,
+    Session,
+    TelemetrySample,
+)
 from m6link.protocol.framing import Frame, FrameDecoder, encode_frame  # noqa: E402
 from m6link.recording import _consume_transition_sample, _recording_subscriptions  # noqa: E402
 from m6link.registry import CAPABILITY_MASKS, FrameType, REGISTRY, RpcOpcode, TelemetryStream  # noqa: E402
@@ -31,6 +40,10 @@ class V2FakeSerial:
         self.decoder = FrameDecoder()
         self.session_id = 0x12345678
         self.opcodes: list[int] = []
+        self.calibration_requests: list[tuple[int, int, int]] = []
+        self.calibration_state = int(GrayscaleCalibrationState.IDLE)
+        self.calibration_owner = int(GrayscaleCalibrationOwner.NONE)
+        self.calibration_generation = 3
 
     @property
     def in_waiting(self) -> int:
@@ -145,6 +158,45 @@ class V2FakeSerial:
                 0 if released else 3, 0 if released else 1,
                 1 if released else 0, 0,
             )
+        elif opcode == int(RpcOpcode.VISION_UART_MONITOR_GET):
+            success = struct.pack("<BB2xIIIIIIHH", 0, 1, 123, 0, 0, 0, 0, 0, 7, 0)
+        elif opcode == int(RpcOpcode.VISION_UART_MONITOR_SET):
+            boot_id, enabled = struct.unpack("<IB3x", request_body)
+            assert boot_id == 7
+            success = struct.pack(
+                "<BB2xIIIIIIHH", int(enabled), 1, 123, 0, 0, 0, 0, 0, 7, 0
+            )
+        elif opcode in (
+            int(RpcOpcode.GRAYSCALE_CALIBRATION_GET),
+            int(RpcOpcode.GRAYSCALE_CALIBRATION_COMMAND),
+        ):
+            if opcode == int(RpcOpcode.GRAYSCALE_CALIBRATION_COMMAND):
+                boot_id, command, generation = struct.unpack("<IB3xI", request_body)
+                self.calibration_requests.append((boot_id, command, generation))
+                if command == int(GrayscaleCalibrationCommand.START):
+                    self.calibration_state = int(GrayscaleCalibrationState.WAIT_WHITE)
+                    self.calibration_owner = int(GrayscaleCalibrationOwner.HOST)
+                elif command == int(GrayscaleCalibrationCommand.CAPTURE_WHITE):
+                    self.calibration_state = int(GrayscaleCalibrationState.CAPTURE_WHITE)
+                elif command == int(GrayscaleCalibrationCommand.CAPTURE_BLACK):
+                    self.calibration_state = int(GrayscaleCalibrationState.CAPTURE_BLACK)
+                elif command == int(GrayscaleCalibrationCommand.CONFIRM):
+                    self.calibration_state = int(GrayscaleCalibrationState.COMPLETE)
+                    self.calibration_owner = int(GrayscaleCalibrationOwner.NONE)
+                    self.calibration_generation += 1
+                else:
+                    self.calibration_state = int(GrayscaleCalibrationState.CANCELLED)
+                    self.calibration_owner = int(GrayscaleCalibrationOwner.NONE)
+            success = bytearray(84)
+            success[0] = self.calibration_state
+            success[1] = self.calibration_owner
+            success[2] = int(GrayscaleCalibrationSource.PERSISTED)
+            struct.pack_into("<HHI", success, 4, 64, 64, self.calibration_generation)
+            success[12] = 0xFF
+            struct.pack_into("<8H", success, 20, *([3000] * 8))
+            struct.pack_into("<8H", success, 36, *([800] * 8))
+            struct.pack_into("<8H", success, 52, *([2200] * 8))
+            struct.pack_into("<8H", success, 68, *([12] * 8))
         elif opcode == int(RpcOpcode.TASK_STATS_GET):
             success = bytearray(64)
             success[0] = 4
@@ -359,6 +411,75 @@ class M6LinkSessionTests(unittest.TestCase):
             int(RpcOpcode.MANUAL_DRIVE_GET),
             int(RpcOpcode.MANUAL_DRIVE_SET),
             int(RpcOpcode.MANUAL_DRIVE_SET),
+        ])
+        session.close()
+
+    def test_vision_uart_monitor_rpc_and_binary_bulk_are_lossless(self):
+        fake = V2FakeSerial()
+        session = Session(transport=fake, timeout=0.5)
+        session.connect()
+        initial = session.get_vision_uart_monitor()
+        self.assertFalse(initial.enabled)
+        self.assertTrue(initial.receive_enabled)
+        enabled = session.set_vision_uart_monitor(True)
+        self.assertTrue(enabled.enabled)
+        self.assertEqual(enabled.rx_queued, 7)
+
+        raw = b"camera\x00\x7d\x7e\xff\xc3(\n"
+        payload = struct.pack(
+            "<BBHIIIIIII", 2, 1, 0x0006, 456, 140, 0, 2, 0, 1, 9
+        ) + raw
+        fake.responses.append(
+            encode_frame(
+                Frame(2, int(FrameType.BULK), 0, fake.session_id, 77, payload)
+            )
+        )
+        chunk = session.read_vision_uart(timeout=0.5)
+        self.assertIsNotNone(chunk)
+        assert chunk is not None
+        self.assertEqual(chunk.data, raw)
+        self.assertEqual(chunk.time_ms, 456)
+        self.assertEqual(chunk.rx_overflow, 2)
+        self.assertEqual(chunk.hardware_errors, 1)
+        self.assertEqual(chunk.bridge_dropped, 9)
+        self.assertTrue(chunk.gap_before)
+        self.assertEqual(chunk.sequence, 77)
+        self.assertEqual(session.read_event(timeout=0.5), chunk)
+
+        unknown_payload = b"\x63future-bulk"
+        fake.responses.append(encode_frame(
+            Frame(2, int(FrameType.BULK), 0, fake.session_id, 78, unknown_payload)
+        ))
+        unknown = session.read_event(timeout=0.5)
+        self.assertIsInstance(unknown, Frame)
+        assert isinstance(unknown, Frame)
+        self.assertEqual(unknown.payload, unknown_payload)
+        self.assertEqual(fake.opcodes[-2:], [
+            int(RpcOpcode.VISION_UART_MONITOR_GET),
+            int(RpcOpcode.VISION_UART_MONITOR_SET),
+        ])
+        session.close()
+
+    def test_grayscale_calibration_rpc_model_and_generation_update(self):
+        fake = V2FakeSerial()
+        session = Session(transport=fake, timeout=0.5)
+        session.connect()
+        initial = session.get_grayscale_calibration()
+        self.assertEqual(initial.state, GrayscaleCalibrationState.IDLE)
+        self.assertEqual(initial.active_source, GrayscaleCalibrationSource.PERSISTED)
+        self.assertEqual(initial.white_adc, (3000,) * 8)
+        started = session.start_grayscale_calibration()
+        self.assertEqual(started.owner, GrayscaleCalibrationOwner.HOST)
+        session.capture_grayscale_white(expected_generation=3)
+        session.capture_grayscale_black(expected_generation=3)
+        completed = session.confirm_grayscale_calibration(expected_generation=3)
+        self.assertEqual(completed.state, GrayscaleCalibrationState.COMPLETE)
+        self.assertEqual(session.identity.generation, 4)
+        self.assertEqual(fake.calibration_requests, [
+            (7, int(GrayscaleCalibrationCommand.START), 3),
+            (7, int(GrayscaleCalibrationCommand.CAPTURE_WHITE), 3),
+            (7, int(GrayscaleCalibrationCommand.CAPTURE_BLACK), 3),
+            (7, int(GrayscaleCalibrationCommand.CONFIRM), 3),
         ])
         session.close()
 

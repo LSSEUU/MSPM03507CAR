@@ -148,7 +148,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_UART_1_init(void)
         UART_1_FBRD_32_MHZ_115200_BAUD);
     DL_UART_Main_enableFIFOs(UART_1_INST);
     DL_UART_Main_setRXFIFOThreshold(UART_1_INST,
-        DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
+        DL_UART_RX_FIFO_LEVEL_1_2_FULL);
     DL_UART_Main_enable(UART_1_INST);
 }
 

@@ -101,7 +101,14 @@
 
     <section class="lower-grid">
       <article class="panel sensors-panel">
-        <div class="panel-heading"><div><h2>八路灰度</h2><p>ADC 顺序为通道 0 → 7；亮起表示 active mask 对应位为 1</p></div><strong id="maskText">mask —</strong></div>
+        <div class="panel-heading sensor-heading">
+          <div><h2>八路灰度</h2><p>ADC 顺序为通道 0 → 7；亮起表示 active mask 对应位为 1</p></div>
+          <div class="sensor-calibration-entry">
+            <strong id="maskText">mask —</strong>
+            <button id="openCalibrationButton" class="secondary" type="button">自动标定灰度</button>
+            <span id="calibrationSummary">编译期标定 · generation —</span>
+          </div>
+        </div>
         <div id="sensorBars" class="sensor-bars" aria-label="八路灰度 ADC 柱状图"></div>
       </article>
       <article class="panel health-panel">
@@ -114,6 +121,35 @@
           <div><dt>遥测队列</dt><dd id="telemetryQueue">—</dd></div>
           <div><dt>数据年龄 CORE / WHEEL / LINE</dt><dd id="dataAge">—</dd></div>
         </dl>
+      </article>
+      <article class="panel camera-panel" aria-labelledby="cameraTitle">
+        <div class="panel-heading camera-heading">
+          <div><h2 id="cameraTitle">摄像头 UART1</h2><p>115200 8N1 · PB7 RX · PB6 TX</p></div>
+          <span id="cameraBadge" class="badge waiting">读取监视能力</span>
+        </div>
+        <div class="camera-summary">
+          <span id="cameraMessage">尚未收到数据</span>
+          <span>最近数据 <strong id="cameraAge">—</strong></span>
+          <span>RX / TX <strong id="cameraRxTx">—</strong></span>
+          <span>overflow RX / TX <strong id="cameraOverflow">—</strong></span>
+          <span>桥接丢弃 <strong id="cameraBridgeDrop">—</strong></span>
+          <span>硬件错误 <strong id="cameraHardwareErrors">—</strong></span>
+        </div>
+        <div class="camera-toolbar" aria-label="摄像头数据显示控制">
+          <button id="cameraPauseButton" class="secondary compact" type="button" aria-pressed="false">暂停滚动</button>
+          <button id="cameraClearButton" class="secondary compact" type="button">清空显示</button>
+          <span>浏览器仅保留最近 32 KiB</span>
+        </div>
+        <div class="camera-console-grid">
+          <section class="camera-console" aria-labelledby="cameraTextTitle">
+            <h3 id="cameraTextTitle">文本</h3>
+            <pre id="cameraText" tabindex="0" aria-label="摄像头 UART1 文本数据">等待 UART1 RX 数据…</pre>
+          </section>
+          <section class="camera-console" aria-labelledby="cameraHexTitle">
+            <h3 id="cameraHexTitle">HEX</h3>
+            <pre id="cameraHex" tabindex="0" aria-label="摄像头 UART1 十六进制数据">等待 UART1 RX 数据…</pre>
+          </section>
+        </div>
       </article>
     </section>
 
@@ -219,6 +255,22 @@
       <section class="library-shell">
         <div class="dialog-heading"><div><p class="section-kicker">SESSION LIBRARY</p><h2 id="recordingLibraryTitle">遥测录制库</h2><p>回放会复用当前全部仪表组件；下载为适合归档和 AI 分析的 ZIP。</p></div><div class="dialog-actions"><button id="refreshRecordingLibraryButton" class="secondary" type="button">刷新</button><button id="closeRecordingLibraryButton" class="secondary" type="button">关闭</button></div></div>
         <div id="recordingLibraryList" class="recording-library-list"><p class="empty-library">正在读取会话…</p></div>
+      </section>
+    </dialog>
+
+    <dialog id="calibrationDialog" class="calibration-dialog" aria-labelledby="calibrationTitle" aria-describedby="calibrationHelp">
+      <section class="calibration-shell">
+        <div class="dialog-heading"><div><p class="section-kicker">GRAYSCALE · TWO-STAGE CALIBRATION</p><h2 id="calibrationTitle">赛前灰度自动标定</h2><p id="calibrationHelp">车辆必须完全静止。依次采集白底和黑线各 64 个完整扫描，检查全部通道后才写入 Flash。</p></div><button id="closeCalibrationButton" class="icon-close secondary" type="button">关闭</button></div>
+        <ol id="calibrationSteps" class="calibration-steps" aria-label="标定进度">
+          <li data-step="white"><strong>1</strong><span>白底</span></li><li data-step="black"><strong>2</strong><span>黑线</span></li><li data-step="review"><strong>3</strong><span>检查</span></li><li data-step="save"><strong>4</strong><span>保存</span></li>
+        </ol>
+        <div class="calibration-status" role="status" aria-live="polite" aria-atomic="true"><strong id="calibrationStatusTitle">读取标定状态…</strong><span id="calibrationStatusDetail">请稍候</span></div>
+        <div class="calibration-progress"><div class="calibration-progress-label"><span>有效扫描</span><strong id="calibrationProgressText">0 / 64</strong></div><progress id="calibrationProgress" max="64" value="0">0 / 64</progress></div>
+        <div class="calibration-table-wrap" tabindex="0" aria-label="八路候选标定数据">
+          <table class="calibration-table"><thead><tr><th>通道</th><th>白底</th><th>黑线</th><th>跨度</th><th>最大噪声</th><th>检查结果</th></tr></thead><tbody id="calibrationRows"></tbody></table>
+        </div>
+        <div id="calibrationFailureSummary" class="calibration-failures" role="alert" hidden></div>
+        <div class="dialog-footer calibration-actions"><small id="calibrationOwnerText">所有者：—</small><button id="cancelCalibrationButton" class="secondary danger" type="button">取消标定</button><button id="calibrationPrimaryButton" type="button">开始向导</button></div>
       </section>
     </dialog>
 

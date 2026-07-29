@@ -2,7 +2,9 @@
 #include "app_manual_drive.h"
 #include "diagnostics.h"
 #include "heading.h"
+#include "grayscale_calibration.h"
 #include "ir_receiver.h"
+#include "parameter_store.h"
 #include "remote_config.h"
 #include "safety.h"
 #include "system_state.h"
@@ -37,6 +39,8 @@ static DiagnosticsAction_t test_last_action;
 static HeadingSnapshot_t test_heading;
 static uint32_t test_heading_start_calls;
 static uint32_t test_heading_stop_calls;
+static bool test_oled_present;
+static GrayscaleCalibrationStatus_t test_calibration;
 
 static void inject(IrNecEventType_t type, uint8_t address, uint8_t command,
                    uint32_t timestamp_ms)
@@ -65,6 +69,10 @@ static void reset_fixture(void)
     memset(&test_heading, 0, sizeof(test_heading));
     test_heading_start_calls = 0U;
     test_heading_stop_calls = 0U;
+    test_oled_present = false;
+    memset(&test_calibration, 0, sizeof(test_calibration));
+    test_calibration.required = GRAYSCALE_CALIBRATION_SAMPLE_COUNT;
+    test_calibration.generation = 7U;
     AppManualDrive_Init();
     AppRemote_Init();
 }
@@ -186,6 +194,55 @@ int debug_try_write(const char *data, size_t length)
 {
     (void)data;
     return (length > 0U) ? 1 : 0;
+}
+
+bool OLED_IsPresent(void) { return test_oled_present; }
+
+void ParameterStore_GetInfo(ParameterStoreInfo_t *info)
+{
+    memset(info, 0, sizeof(*info));
+    info->generation = test_calibration.generation;
+}
+
+GrayscaleCalibrationResult_t GrayscaleCalibration_Command(
+    GrayscaleCalibrationOwner_t owner, uint32_t owner_id,
+    GrayscaleCalibrationCommand_t command, uint32_t expected_generation,
+    uint32_t now_ms)
+{
+    (void)owner_id;
+    (void)now_ms;
+    if (expected_generation != test_calibration.generation)
+        return GRAYSCALE_CAL_RESULT_STALE_GENERATION;
+    if (command == GRAYSCALE_CAL_COMMAND_START) {
+        test_calibration.owner = owner;
+        test_calibration.state = GRAYSCALE_CAL_STATE_WAIT_WHITE;
+        test_calibration.expected_generation = expected_generation;
+        return GRAYSCALE_CAL_RESULT_OK;
+    }
+    if (test_calibration.owner != owner)
+        return GRAYSCALE_CAL_RESULT_WRONG_OWNER;
+    if (command == GRAYSCALE_CAL_COMMAND_CANCEL) {
+        test_calibration.owner = GRAYSCALE_CAL_OWNER_NONE;
+        test_calibration.state = GRAYSCALE_CAL_STATE_CANCELLED;
+    } else if (command == GRAYSCALE_CAL_COMMAND_CAPTURE_WHITE) {
+        test_calibration.state = GRAYSCALE_CAL_STATE_CAPTURE_WHITE;
+    } else if (command == GRAYSCALE_CAL_COMMAND_CAPTURE_BLACK) {
+        test_calibration.state = GRAYSCALE_CAL_STATE_CAPTURE_BLACK;
+    } else if (command == GRAYSCALE_CAL_COMMAND_CONFIRM) {
+        test_calibration.owner = GRAYSCALE_CAL_OWNER_NONE;
+        test_calibration.state = GRAYSCALE_CAL_STATE_COMPLETE;
+    }
+    return GRAYSCALE_CAL_RESULT_OK;
+}
+
+void GrayscaleCalibration_GetStatus(GrayscaleCalibrationStatus_t *status)
+{
+    *status = test_calibration;
+}
+
+bool GrayscaleCalibration_IsActive(void)
+{
+    return test_calibration.owner != GRAYSCALE_CAL_OWNER_NONE;
 }
 
 static void test_four_directions_and_heartbeat(void)
@@ -313,6 +370,36 @@ static void test_optional_heading_hold_only_for_straight_keys(void)
     assert(test_required_sensor_mask == 0U);
 }
 
+static void test_oled_gated_calibration_keys(void)
+{
+    AppRemoteSnapshot_t snapshot;
+    reset_fixture();
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_5, 10U);
+    AppRemote_Poll();
+    AppRemote_GetSnapshot(&snapshot);
+    assert(snapshot.state == APP_REMOTE_IDLE);
+    assert(snapshot.action_rejects == 1U);
+
+    test_oled_present = true;
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_5, 20U);
+    AppRemote_Poll();
+    AppRemote_GetSnapshot(&snapshot);
+    assert(snapshot.state == APP_REMOTE_CALIBRATION);
+    assert(test_calibration.state == GRAYSCALE_CAL_STATE_WAIT_WHITE);
+
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_UP, 25U);
+    AppRemote_Poll();
+    assert(!test_wheel_enabled);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_OK, 30U);
+    AppRemote_Poll();
+    assert(test_calibration.state == GRAYSCALE_CAL_STATE_CAPTURE_WHITE);
+    inject(IR_NEC_EVENT_FULL, 0x00U, IR_REMOTE_KEY_0, 40U);
+    AppRemote_Poll();
+    AppRemote_GetSnapshot(&snapshot);
+    assert(snapshot.state == APP_REMOTE_IDLE);
+    assert(test_calibration.state == GRAYSCALE_CAL_STATE_CANCELLED);
+}
+
 static void test_production_keymap_gate(void)
 {
     AppRemoteSnapshot_t snapshot;
@@ -337,6 +424,7 @@ int main(void)
         test_speed_demo_confirmation_and_cancel();
         test_conflicts_capture_fault_and_address_filter();
         test_optional_heading_hold_only_for_straight_keys();
+        test_oled_gated_calibration_keys();
     } else {
         test_production_keymap_gate();
     }

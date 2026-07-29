@@ -143,6 +143,7 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("../System/m6_wire.c", paths)
         self.assertIn("../System/m6_link.c", paths)
         self.assertIn("../System/m6_rpc.c", paths)
+        self.assertIn("../System/m6_vision_uart.c", paths)
         self.assertIn("../System/m6_action_validate.c", paths)
         self.assertIn("../Hardware/watchdog.c", paths)
         self.assertIn("../Hardware/vision_uart.c", paths)
@@ -164,10 +165,22 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("IOMUX_PINCM24_PF_UART1_RX", header)
         self.assertIn("UART_1_BAUD_RATE", header)
         self.assertIn("DL_UART_MAIN_DIRECTION_TX_RX", config)
+        self.assertIn("DL_UART_RX_FIFO_LEVEL_1_2_FULL", config)
         self.assertIn("void UART1_IRQHandler(void)", driver)
+        self.assertIn("DL_UART_INTERRUPT_RX_TIMEOUT_ERROR", driver)
         self.assertIn("VISION_UART_RX_BUFFER_SIZE 256U", driver)
         self.assertIn("VISION_UART_TX_BUFFER_SIZE 256U", driver)
         self.assertNotIn("AppManualDrive", driver)
+
+    def test_watchdog_and_scheduler_clock_start_after_boot_diagnostics(self):
+        main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")
+        diagnostics = main.index("Diagnostics_RunBootSelfTest();")
+        watchdog = main.index("Watchdog_Init();")
+        systick = main.index("DL_SYSTICK_enable();")
+        loop = main.index("while (1)")
+        self.assertLess(diagnostics, watchdog)
+        self.assertLess(watchdog, systick)
+        self.assertLess(systick, loop)
 
     def test_grayscale_api_exposes_adc_scans_without_stale_line_state(self):
         header = (ROOT / "Hardware" / "grayscale.h").read_text(encoding="utf-8")

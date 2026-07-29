@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 import threading
 import time
@@ -16,17 +17,23 @@ from m6link.errors import Disconnected
 from m6link.models import (
     ActionStatus,
     ArmedAction,
+    GrayscaleCalibrationStatus,
     ManualDriveSnapshot,
     ParameterSnapshot,
     ParameterValue,
     Status,
     TelemetrySample,
+    VisionUartChunk,
 )
 from m6link.registry import (
     REGISTRY,
     ActionKind,
     ActionState,
     Capability,
+    GrayscaleCalibrationOwner,
+    GrayscaleCalibrationResult,
+    GrayscaleCalibrationSource,
+    GrayscaleCalibrationState,
     ManualDriveSource,
     ManualDriveStopReason,
     ParameterSource,
@@ -211,6 +218,36 @@ def test_dashboard_buffer_reports_overflow_reset_and_gap() -> None:
     assert state["gaps"] == {"core": 1}
 
 
+def test_dashboard_buffer_exposes_lossless_camera_uart_events_and_status() -> None:
+    now = [10.0]
+    buffer = DashboardBuffer({}, clock=lambda: now[0])
+    now[0] += 0.025
+    buffer.ingest_vision_uart(VisionUartChunk(
+        time_ms=321,
+        data=b"<tag>\x00\x7d\x7e\xff",
+        status_flags=0x06,
+        rx_bytes=99,
+        tx_bytes=4,
+        rx_overflow=2,
+        tx_overflow=1,
+        hardware_errors=3,
+        bridge_dropped=7,
+        gap_before=True,
+        sequence=44,
+    ), received_at=now[0])
+
+    state = buffer.read_since(0)
+    event = state["events"][0]
+    assert event["record_type"] == "uart_data"
+    assert event["stream"] == "vision_uart_rx"
+    assert event["values"]["data_hex"] == "3c7461673e007d7eff"
+    assert event["gap"] is True
+    assert "检测到遗漏" in state["camera"]["message"]
+    assert state["camera"]["bridge_dropped"] == 7
+    assert state["counts"]["vision_uart_rx"] == 1
+    assert state["gaps"]["vision_uart_rx"] == 1
+
+
 def test_dashboard_buffer_recovers_from_cursor_created_by_old_server() -> None:
     buffer = DashboardBuffer({})
     buffer.ingest(_sample(1))
@@ -258,6 +295,11 @@ def test_dashboard_http_serves_assets_state_and_rejects_writes() -> None:
             assert 'id="playbackBar"' in html
             assert 'id="manualDrivePanel"' in html
             assert 'id="manualEnableButton"' in html
+            assert 'id="cameraText"' in html
+            assert 'id="cameraHex"' in html
+            assert "115200 8N1 · PB7 RX · PB6 TX" in html
+            assert 'class="panel-heading sensor-heading"' in html
+            assert html.index('id="openCalibrationButton"') < html.index('id="sensorBars"')
         with urlopen(base + "/dashboard.js", timeout=2) as response:
             javascript = response.read()
             assert b"requestAnimationFrame" in javascript
@@ -269,6 +311,10 @@ def test_dashboard_http_serves_assets_state_and_rejects_writes() -> None:
             assert b"applyPlaybackLock" in javascript
             assert b"sendManualCommand" in javascript
             assert b"m6.dashboard.manual-drive.v1" in javascript
+            assert b"CAMERA_BUFFER_LIMIT" in javascript
+            assert b"TextDecoder" in javascript
+            assert b"textContent" in javascript
+            assert b"vision_uart_rx" in javascript
         with urlopen(base + "/dashboard.css", timeout=2) as response:
             stylesheet = response.read()
             assert b'data-layout="cockpit"' in stylesheet
@@ -276,6 +322,9 @@ def test_dashboard_http_serves_assets_state_and_rejects_writes() -> None:
             assert b"playback-bar" in stylesheet
             assert b"recording-card" in stylesheet
             assert b"wasd-keys" in stylesheet
+            assert b"camera-console-grid" in stylesheet
+            assert b"height: 190px; overflow: hidden" in stylesheet
+            assert b"overscroll-behavior: contain" in stylesheet
         with urlopen(base + "/api/state?after=0", timeout=2) as response:
             state = json.load(response)
             assert state["events"][0]["sample_id"] == 7
@@ -453,6 +502,117 @@ def test_dashboard_parameter_commands_keep_persistence_explicit() -> None:
         controller.parameter_command(command, {"confirm": confirmation})
     assert ("stage", "wheel.left.kp", 0.8) in session.parameter_commands
     assert ("save",) in session.parameter_commands
+
+
+def test_dashboard_calibration_workflow_requires_explicit_flash_confirmation() -> None:
+    class CalibrationSession(FakeControlSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self.capabilities |= Capability.GRAYSCALE_CALIBRATION
+            self.identity = SimpleNamespace(
+                generation=3, enabled_capabilities=self.capabilities
+            )
+            self.calibration_commands = []
+            self.calibration = GrayscaleCalibrationStatus(
+                GrayscaleCalibrationState.IDLE,
+                GrayscaleCalibrationOwner.NONE,
+                GrayscaleCalibrationSource.COMPILED,
+                GrayscaleCalibrationResult.OK,
+                0, 64, 3, 0, 0, 0, 0, 0, 0, False,
+                (2800,) * 8, (100,) * 8, (2700,) * 8, (0,) * 8,
+            )
+
+        def get_grayscale_calibration(self):
+            return self.calibration
+
+        def start_grayscale_calibration(self):
+            self.calibration_commands.append("start")
+            self.calibration = replace(
+                self.calibration,
+                state=GrayscaleCalibrationState.WAIT_WHITE,
+                owner=GrayscaleCalibrationOwner.HOST,
+                progress=0,
+            )
+            return self.calibration
+
+        def capture_grayscale_white(self, *, expected_generation):
+            assert expected_generation == 3
+            self.calibration_commands.append("capture-white")
+            self.calibration = replace(
+                self.calibration,
+                state=GrayscaleCalibrationState.CAPTURE_WHITE,
+            )
+            return self.calibration
+
+        def capture_grayscale_black(self, *, expected_generation):
+            assert expected_generation == 3
+            self.calibration_commands.append("capture-black")
+            self.calibration = replace(
+                self.calibration,
+                state=GrayscaleCalibrationState.CAPTURE_BLACK,
+            )
+            return self.calibration
+
+        def confirm_grayscale_calibration(self, *, expected_generation):
+            assert expected_generation == 3
+            self.calibration_commands.append("confirm")
+            self.identity = SimpleNamespace(
+                generation=4, enabled_capabilities=self.capabilities
+            )
+            self.calibration = replace(
+                self.calibration,
+                state=GrayscaleCalibrationState.COMPLETE,
+                owner=GrayscaleCalibrationOwner.NONE,
+                active_source=GrayscaleCalibrationSource.PERSISTED,
+                generation=4,
+                progress=64,
+                valid_mask=0xFF,
+            )
+            return self.calibration
+
+        def cancel_grayscale_calibration(self, *, expected_generation):
+            self.calibration_commands.append("cancel")
+            self.calibration = replace(
+                self.calibration,
+                state=GrayscaleCalibrationState.CANCELLED,
+                owner=GrayscaleCalibrationOwner.NONE,
+            )
+            return self.calibration
+
+    session = CalibrationSession()
+    controller = DashboardController(session, session.identity)
+    try:
+        initial = controller.calibration_state(force=True)
+        assert initial["available"] is True
+        assert initial["active_source_name"] == "COMPILED"
+        started = controller.calibration_command("start", {})
+        assert started["owner_name"] == "HOST"
+        controller.calibration_command("capture-white", {"expected_generation": 3})
+        session.calibration = replace(
+            session.calibration, state=GrayscaleCalibrationState.WAIT_BLACK
+        )
+        controller._calibration = session.calibration
+        controller.calibration_command("capture-black", {"expected_generation": 3})
+        session.calibration = replace(
+            session.calibration, state=GrayscaleCalibrationState.REVIEW
+        )
+        controller._calibration = session.calibration
+        try:
+            controller.calibration_command("confirm", {"expected_generation": 3})
+            raise AssertionError("Flash confirmation phrase must be required")
+        except ValueError as exc:
+            assert "明确确认" in str(exc)
+        saved = controller.calibration_command("confirm", {
+            "expected_generation": 3,
+            "confirm": "WRITE_GRAYSCALE_CALIBRATION_TO_FLASH",
+        })
+        assert saved["state_name"] == "COMPLETE"
+        assert saved["generation"] == 4
+        assert session.calibration_commands == [
+            "start", "capture-white", "capture-black", "confirm"
+        ]
+    finally:
+        controller.close()
 
 
 def test_control_http_requires_token_and_accepts_authenticated_estop() -> None:

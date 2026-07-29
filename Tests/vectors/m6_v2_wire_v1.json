@@ -345,6 +345,16 @@
       "admission_gate": "frozen-matching-capture",
       "p3_abort_retry": "new-sequence-same-capture-and-offset"
     },
+    "vision_uart_monitor": {
+      "bulk_kind": "VISION_UART_RX",
+      "schema": 1,
+      "priority": "P3",
+      "metadata_bytes": 32,
+      "data_max_bytes": 64,
+      "receive_only": true,
+      "overflow_policy": "preserve-startup-then-drop-oldest-for-low-latency",
+      "motor_control_forbidden": true
+    },
     "result_detail_rules": [
       {"results": ["BAD_LENGTH"], "encoding": "expected-hi16-actual-lo16"},
       {"results": ["UNSUPPORTED_TYPE", "UNSUPPORTED_OPCODE"], "encoding": "unsupported-value"},
@@ -405,12 +415,14 @@
       {"name": "CONFIGURABLE_TURN", "value": 4194304, "bit": 22},
       {"name": "BULK_TRANSFER", "value": 8388608, "bit": 23},
       {"name": "HEADING_RATE_ACTION", "value": 16777216, "bit": 24},
-      {"name": "MANUAL_DRIVE", "value": 33554432, "bit": 25}
+      {"name": "MANUAL_DRIVE", "value": 33554432, "bit": 25},
+      {"name": "VISION_UART_MONITOR", "value": 67108864, "bit": 26},
+      {"name": "GRAYSCALE_CALIBRATION", "value": 134217728, "bit": 27}
     ],
     "capability_masks": [
       {"name": "HANDSHAKE_REQUIRED", "value_hex": "000000000000600f"},
-      {"name": "HELLO_OPTIONAL", "value_hex": "0000000003ff9ff0"},
-      {"name": "ALL_DEFINED", "value_hex": "0000000003ffffff"}
+      {"name": "HELLO_OPTIONAL", "value_hex": "000000000fff9ff0"},
+      {"name": "ALL_DEFINED", "value_hex": "000000000fffffff"}
     ],
     "rpc_opcodes": [
       {"name": "PING", "value": 1, "mutating": false, "request_body_layout": "rpc_ping_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_ping_success_body_v1", "success_body_min": 12, "success_body_max": 12},
@@ -424,6 +436,8 @@
       {"name": "SUBSCRIPTION_GET", "value": 9, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "rpc_subscription_get_success_body_v1", "success_body_min": 8, "success_body_max": 24},
       {"name": "SNAPSHOT_GET", "value": 10, "mutating": false, "request_body_layout": "rpc_snapshot_get_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_snapshot_get_success_body_v1", "success_body_min": 36, "success_body_max": 68},
       {"name": "MANUAL_DRIVE_GET", "value": 11, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "manual_drive_snapshot_v1", "success_body_min": 16, "success_body_max": 16},
+      {"name": "VISION_UART_MONITOR_GET", "value": 12, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "vision_uart_monitor_status_v1", "success_body_min": 32, "success_body_max": 32},
+      {"name": "GRAYSCALE_CALIBRATION_GET", "value": 13, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "grayscale_calibration_status_v1", "success_body_min": 84, "success_body_max": 84},
       {"name": "PARAM_SUMMARY_GET", "value": 256, "mutating": false, "request_body_layout": "rpc_empty_body_v1", "request_body_min": 0, "request_body_max": 0, "success_body_layout": "rpc_param_summary_get_success_body_v1", "success_body_min": 24, "success_body_max": 24},
       {"name": "PARAM_DESCRIPTOR_GET", "value": 257, "mutating": false, "request_body_layout": "rpc_parameter_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_param_descriptor_get_success_body_v1", "success_body_min": 20, "success_body_max": 51},
       {"name": "PARAM_VALUE_GET", "value": 258, "mutating": false, "request_body_layout": "rpc_parameter_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_param_value_get_success_body_v1", "success_body_min": 28, "success_body_max": 28},
@@ -443,7 +457,9 @@
       {"name": "ACTION_CANCEL", "value": 33538, "mutating": true, "request_body_layout": "rpc_action_cancel_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_action_cancel_success_body_v1", "success_body_min": 12, "success_body_max": 12},
       {"name": "HEADING_CALIBRATE", "value": 33539, "mutating": true, "request_body_layout": "rpc_boot_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_heading_calibrate_success_body_v1", "success_body_min": 8, "success_body_max": 8},
       {"name": "GRAYSCALE_CAPTURE_START", "value": 33540, "mutating": true, "request_body_layout": "rpc_boot_id_request_body_v1", "request_body_min": 4, "request_body_max": 4, "success_body_layout": "rpc_grayscale_capture_start_success_body_v1", "success_body_min": 8, "success_body_max": 8},
-      {"name": "MANUAL_DRIVE_SET", "value": 33541, "mutating": true, "request_body_layout": "rpc_manual_drive_set_request_body_v1", "request_body_min": 16, "request_body_max": 16, "success_body_layout": "manual_drive_snapshot_v1", "success_body_min": 16, "success_body_max": 16}
+      {"name": "MANUAL_DRIVE_SET", "value": 33541, "mutating": true, "request_body_layout": "rpc_manual_drive_set_request_body_v1", "request_body_min": 16, "request_body_max": 16, "success_body_layout": "manual_drive_snapshot_v1", "success_body_min": 16, "success_body_max": 16},
+      {"name": "VISION_UART_MONITOR_SET", "value": 33542, "mutating": true, "request_body_layout": "rpc_vision_uart_monitor_set_request_body_v1", "request_body_min": 8, "request_body_max": 8, "success_body_layout": "vision_uart_monitor_status_v1", "success_body_min": 32, "success_body_max": 32},
+      {"name": "GRAYSCALE_CALIBRATION_COMMAND", "value": 33543, "mutating": true, "request_body_layout": "rpc_grayscale_calibration_command_request_body_v1", "request_body_min": 12, "request_body_max": 12, "success_body_layout": "grayscale_calibration_status_v1", "success_body_min": 84, "success_body_max": 84}
     ],
     "rpc_results": [
       {"name": "OK", "value": 0},
@@ -643,6 +659,47 @@
       {"name": "TAKEOVER", "value": 1, "bit": 0},
       {"name": "RELEASE", "value": 2, "bit": 1}
     ],
+    "grayscale_calibration_states": [
+      {"name": "IDLE", "value": 0},
+      {"name": "WAIT_WHITE", "value": 1},
+      {"name": "CAPTURE_WHITE", "value": 2},
+      {"name": "WAIT_BLACK", "value": 3},
+      {"name": "CAPTURE_BLACK", "value": 4},
+      {"name": "REVIEW", "value": 5},
+      {"name": "SAVING", "value": 6},
+      {"name": "COMPLETE", "value": 7},
+      {"name": "FAILED", "value": 8},
+      {"name": "CANCELLED", "value": 9}
+    ],
+    "grayscale_calibration_owners": [
+      {"name": "NONE", "value": 0},
+      {"name": "HOST", "value": 1},
+      {"name": "REMOTE", "value": 2}
+    ],
+    "grayscale_calibration_sources": [
+      {"name": "COMPILED", "value": 0},
+      {"name": "PERSISTED", "value": 1},
+      {"name": "RUNTIME", "value": 2}
+    ],
+    "grayscale_calibration_commands": [
+      {"name": "START", "value": 1},
+      {"name": "CAPTURE_WHITE", "value": 2},
+      {"name": "CAPTURE_BLACK", "value": 3},
+      {"name": "CONFIRM", "value": 4},
+      {"name": "CANCEL", "value": 5}
+    ],
+    "grayscale_calibration_results": [
+      {"name": "OK", "value": 0},
+      {"name": "BUSY", "value": 1},
+      {"name": "WRONG_STATE", "value": 2},
+      {"name": "WRONG_OWNER", "value": 3},
+      {"name": "STALE_GENERATION", "value": 4},
+      {"name": "TIMEOUT", "value": 5},
+      {"name": "SCAN_ERROR", "value": 6},
+      {"name": "REJECTED", "value": 7},
+      {"name": "STORAGE", "value": 8},
+      {"name": "CANCELLED", "value": 9}
+    ],
     "emergency_sources": [
       {"name": "UNKNOWN", "value": 0},
       {"name": "UART_S", "value": 1},
@@ -696,7 +753,8 @@
       {"name": "SELF_TEST", "value": 1},
       {"name": "IDLE", "value": 2},
       {"name": "RUN", "value": 3},
-      {"name": "FAULT", "value": 4}
+      {"name": "FAULT", "value": 4},
+      {"name": "CALIBRATION", "value": 5}
     ],
     "reset_classes": [
       {"name": "NONE", "value": 0},
@@ -845,7 +903,8 @@
       {"name": "BRANCH_LATCHED", "value": 1, "bit": 0}
     ],
     "bulk_kinds": [
-      {"name": "LINE_TRACE", "value": 1}
+      {"name": "LINE_TRACE", "value": 1},
+      {"name": "VISION_UART_RX", "value": 2}
     ]
   },
   "layouts": [
@@ -1226,6 +1285,51 @@
       {"name": "stop_reason", "offset": 14, "size": 1, "kind": "u8", "registry": "manual_drive_stop_reasons"},
       {"name": "reserved", "offset": 15, "size": 1, "kind": "u8", "reserved": true}
     ]},
+    {"name": "rpc_vision_uart_monitor_set_request_body_v1", "size": 8, "fields": [
+      {"name": "boot_id", "offset": 0, "size": 4, "kind": "u32"},
+      {"name": "enabled", "offset": 4, "size": 1, "kind": "u8", "registry": "boolean_values"},
+      {"name": "reserved", "offset": 5, "size": 3, "kind": "bytes", "reserved": true}
+    ]},
+    {"name": "vision_uart_monitor_status_v1", "size": 32, "fields": [
+      {"name": "enabled", "offset": 0, "size": 1, "kind": "u8", "registry": "boolean_values"},
+      {"name": "receive_enabled", "offset": 1, "size": 1, "kind": "u8", "registry": "boolean_values"},
+      {"name": "reserved", "offset": 2, "size": 2, "kind": "u16", "reserved": true},
+      {"name": "rx_bytes", "offset": 4, "size": 4, "kind": "u32"},
+      {"name": "tx_bytes", "offset": 8, "size": 4, "kind": "u32"},
+      {"name": "rx_overflow", "offset": 12, "size": 4, "kind": "u32"},
+      {"name": "tx_overflow", "offset": 16, "size": 4, "kind": "u32"},
+      {"name": "hardware_errors", "offset": 20, "size": 4, "kind": "u32"},
+      {"name": "bridge_dropped", "offset": 24, "size": 4, "kind": "u32"},
+      {"name": "rx_queued", "offset": 28, "size": 2, "kind": "u16"},
+      {"name": "tx_queued", "offset": 30, "size": 2, "kind": "u16"}
+    ]},
+    {"name": "rpc_grayscale_calibration_command_request_body_v1", "size": 12, "fields": [
+      {"name": "boot_id", "offset": 0, "size": 4, "kind": "u32"},
+      {"name": "command", "offset": 4, "size": 1, "kind": "u8", "registry": "grayscale_calibration_commands"},
+      {"name": "reserved", "offset": 5, "size": 3, "kind": "bytes", "reserved": true},
+      {"name": "expected_generation", "offset": 8, "size": 4, "kind": "u32"}
+    ]},
+    {"name": "grayscale_calibration_status_v1", "size": 84, "fields": [
+      {"name": "state", "offset": 0, "size": 1, "kind": "u8", "registry": "grayscale_calibration_states"},
+      {"name": "owner", "offset": 1, "size": 1, "kind": "u8", "registry": "grayscale_calibration_owners"},
+        {"name": "active_source", "offset": 2, "size": 1, "kind": "u8", "registry": "grayscale_calibration_sources"},
+      {"name": "result", "offset": 3, "size": 1, "kind": "u8", "registry": "grayscale_calibration_results"},
+      {"name": "progress", "offset": 4, "size": 2, "kind": "u16"},
+      {"name": "required", "offset": 6, "size": 2, "kind": "u16"},
+      {"name": "generation", "offset": 8, "size": 4, "kind": "u32"},
+      {"name": "valid_mask", "offset": 12, "size": 1, "kind": "u8"},
+      {"name": "polarity_fail_mask", "offset": 13, "size": 1, "kind": "u8"},
+      {"name": "span_fail_mask", "offset": 14, "size": 1, "kind": "u8"},
+      {"name": "noise_fail_mask", "offset": 15, "size": 1, "kind": "u8"},
+      {"name": "rail_fail_mask", "offset": 16, "size": 1, "kind": "u8"},
+      {"name": "failed_stage", "offset": 17, "size": 1, "kind": "u8"},
+      {"name": "scan_error", "offset": 18, "size": 1, "kind": "u8", "registry": "boolean_values"},
+      {"name": "reserved", "offset": 19, "size": 1, "kind": "u8", "reserved": true},
+      {"name": "white_adc", "offset": 20, "size": 16, "kind": "bytes"},
+      {"name": "black_adc", "offset": 36, "size": 16, "kind": "bytes"},
+      {"name": "span_adc", "offset": 52, "size": 16, "kind": "bytes"},
+      {"name": "max_noise_adc", "offset": 68, "size": 16, "kind": "bytes"}
+    ]},
     {"name": "protocol_error_v1", "size": 8, "fields": [
       {"name": "result", "offset": 0, "size": 2, "kind": "u16", "registry": "protocol_errors"},
       {"name": "offending_type", "offset": 2, "size": 1, "kind": "u8"},
@@ -1440,6 +1544,19 @@
       {"name": "count", "offset": 14, "size": 1, "kind": "u8"},
       {"name": "record_size", "offset": 15, "size": 1, "kind": "u8"}
     ]},
+    {"name": "vision_uart_rx_chunk_v1", "size": 96, "fields": [
+      {"name": "kind", "offset": 0, "size": 1, "kind": "u8", "registry": "bulk_kinds"},
+      {"name": "schema", "offset": 1, "size": 1, "kind": "u8"},
+      {"name": "status_flags", "offset": 2, "size": 2, "kind": "u16"},
+      {"name": "time_ms", "offset": 4, "size": 4, "kind": "u32"},
+      {"name": "rx_bytes", "offset": 8, "size": 4, "kind": "u32"},
+      {"name": "tx_bytes", "offset": 12, "size": 4, "kind": "u32"},
+      {"name": "rx_overflow", "offset": 16, "size": 4, "kind": "u32"},
+      {"name": "tx_overflow", "offset": 20, "size": 4, "kind": "u32"},
+      {"name": "hardware_errors", "offset": 24, "size": 4, "kind": "u32"},
+      {"name": "bridge_dropped", "offset": 28, "size": 4, "kind": "u32"},
+      {"name": "data", "offset": 32, "size": 64, "kind": "opaque"}
+    ]},
     {"name": "line_trace_info_v1", "size": 24, "fields": [
       {"name": "capture_id", "offset": 0, "size": 4, "kind": "u32"},
       {"name": "state_flags", "offset": 4, "size": 1, "kind": "u8", "registry": "trace_state_flags"},
@@ -1599,12 +1716,12 @@
       {"id": "mode_v2_ready_sample", "transaction_id": 42, "challenge_hex": "0123456789abcdef", "mode_ascii": ":42,mode,v2,0123456789abcdef\r\n", "mode_hex": "3a 34 32 2c 6d 6f 64 65 2c 76 32 2c 30 31 32 33 34 35 36 37 38 39 61 62 63 64 65 66 0d 0a", "ready_ascii": "ok,42,v2-ready,0123456789abcdef,2,1,96,32,1\r\n", "ready_hex": "6f 6b 2c 34 32 2c 76 32 2d 72 65 61 64 79 2c 30 31 32 33 34 35 36 37 38 39 61 62 63 64 65 66 2c 32 2c 31 2c 39 36 2c 33 32 2c 31 0d 0a"}
     ],
     "resync": [
-      {"id": "capability_probe_reply", "transaction_id": 1, "probe_ascii": ":1,get,meta.capabilities\r\n", "probe_hex": "3a 31 2c 67 65 74 2c 6d 65 74 61 2e 63 61 70 61 62 69 6c 69 74 69 65 73 0d 0a", "reply_ascii": "ok,1,meta.capabilities,0000000003ffffff\r\n", "reply_hex": "6f 6b 2c 31 2c 6d 65 74 61 2e 63 61 70 61 62 69 6c 69 74 69 65 73 2c 30 30 30 30 30 30 30 30 30 33 66 66 66 66 66 66 0d 0a"}
+      {"id": "capability_probe_reply", "transaction_id": 1, "probe_ascii": ":1,get,meta.capabilities\r\n", "probe_hex": "3a 31 2c 67 65 74 2c 6d 65 74 61 2e 63 61 70 61 62 69 6c 69 74 69 65 73 0d 0a", "reply_ascii": "ok,1,meta.capabilities,000000000fffffff\r\n", "reply_hex": "6f 6b 2c 31 2c 6d 65 74 61 2e 63 61 70 61 62 69 6c 69 74 69 65 73 2c 30 30 30 30 30 30 30 30 30 66 66 66 66 66 66 66 0d 0a"}
     ],
     "frames": [
-      {"id":"hello_request","type":"HELLO","flags":0,"session":0,"sequence":0,"payload_hex":"4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 03 00 00 00 00 60 00 20 00 01 00 00 00","expected":{"crc_input_hex":"02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 03 00 00 00 00 60 00 20 00 01 00 00 00","crc16":49765,"crc_le_hex":"65 c2","decoded_hex":"02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 03 00 00 00 00 60 00 20 00 01 00 00 00 65 c2","wire_hex":"7e 02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 03 00 00 00 00 60 00 7d 00 00 01 00 00 00 65 c2 7e","decoded_length":55,"wire_length":58}},
-      {"id":"ready","type":"READY","flags":0,"session":0,"sequence":0,"payload_hex":"52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 ff ff ff 03 00 00 00 00 60 00 20 00 01 00 00 00","expected":{"crc_input_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 ff ff ff 03 00 00 00 00 60 00 20 00 01 00 00 00","crc16":36790,"crc_le_hex":"b6 8f","decoded_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 ff ff ff 03 00 00 00 00 60 00 20 00 01 00 00 00 b6 8f","wire_hex":"7e 02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 7d 00 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 ff ff ff 03 00 00 00 00 60 00 7d 00 00 01 00 00 00 b6 8f 7e","decoded_length":79,"wire_length":83}},
-      {"id":"ready_bad_host_payload_64","type":"READY","flags":0,"session":0,"sequence":0,"payload_hex":"52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00","expected":{"crc_input_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00","crc16":60242,"crc_le_hex":"52 eb","decoded_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 52 eb","wire_hex":"7e 02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 7d 00 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 52 eb 7e","decoded_length":79,"wire_length":82}},
+      {"id":"hello_request","type":"HELLO","flags":0,"session":0,"sequence":0,"payload_hex":"4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 0f 00 00 00 00 60 00 20 00 01 00 00 00","expected":{"crc_input_hex":"02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 0f 00 00 00 00 60 00 20 00 01 00 00 00","crc16":52370,"crc_le_hex":"92 cc","decoded_hex":"02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 0f 00 00 00 00 60 00 20 00 01 00 00 00 92 cc","wire_hex":"7e 02 01 00 00 00 00 00 00 00 00 00 28 00 4d 36 56 32 01 00 01 00 ef cd ab 89 67 45 23 01 0f 60 00 00 00 00 00 00 f0 9f ff 0f 00 00 00 00 60 00 7d 00 00 01 00 00 00 92 cc 7e","decoded_length":55,"wire_length":58}},
+      {"id":"ready","type":"READY","flags":0,"session":0,"sequence":0,"payload_hex":"52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 0f 00 00 00 00 ff ff ff 0f 00 00 00 00 60 00 20 00 01 00 00 00","expected":{"crc_input_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 0f 00 00 00 00 ff ff ff 0f 00 00 00 00 60 00 20 00 01 00 00 00","crc16":10636,"crc_le_hex":"8c 29","decoded_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 0f 00 00 00 00 ff ff ff 0f 00 00 00 00 60 00 20 00 01 00 00 00 8c 29","wire_hex":"7e 02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 01 00 00 00 00 00 00 00 ef cd ab 89 67 45 23 01 06 72 1c 14 40 30 7d 00 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 0f 00 00 00 00 ff ff ff 0f 00 00 00 00 60 00 7d 00 00 01 00 00 00 8c 29 7e","decoded_length":79,"wire_length":83}},
+      {"id":"ready_bad_host_payload_64","type":"READY","flags":0,"session":0,"sequence":0,"payload_hex":"52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 0f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00","expected":{"crc_input_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 0f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00","crc16":17311,"crc_le_hex":"9f 43","decoded_hex":"02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 20 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 0f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 9f 43","wire_hex":"7e 02 02 00 00 00 00 00 00 00 00 00 40 00 52 32 44 59 00 00 03 00 40 00 60 00 ef cd ab 89 67 45 23 01 00 00 00 00 40 30 7d 00 10 0c 00 00 00 07 00 00 00 01 00 00 00 ff ff ff 0f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 9f 43 7e","decoded_length":79,"wire_length":82}},
       {"id": "ping_request", "type": "RPC_REQUEST", "flags": 0, "session": 337408518, "sequence": 1, "payload_hex": "01 00 7e 20 53 7d", "expected": {"crc_input_hex": "02 10 00 06 72 1c 14 01 00 00 00 06 00 01 00 7e 20 53 7d", "crc16": 3701, "crc_le_hex": "75 0e", "decoded_hex": "02 10 00 06 72 1c 14 01 00 00 00 06 00 01 00 7e 20 53 7d 75 0e", "wire_hex": "7e 02 10 00 06 72 1c 14 01 00 00 00 06 00 01 00 7d 5e 7d 00 7d 73 7d 5d 75 0e 7e", "decoded_length": 21, "wire_length": 27}},
       {"id": "ping_response", "type": "RPC_RESPONSE", "flags": 0, "session": 337408518, "sequence": 1, "payload_hex": "01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10", "expected": {"crc_input_hex": "02 11 00 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10", "crc16": 46612, "crc_le_hex": "14 b6", "decoded_hex": "02 11 00 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10 14 b6", "wire_hex": "7e 02 11 00 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7d 5e 7d 00 7d 73 7d 5d 7d 5e 7d 5d 7d 73 7d 00 40 30 7d 00 10 14 b6 7e", "decoded_length": 35, "wire_length": 46}},
       {"id": "ping_response_replay", "type": "RPC_RESPONSE", "flags": 1, "session": 337408518, "sequence": 1, "payload_hex": "01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10", "expected": {"crc_input_hex": "02 11 01 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10", "crc16": 14397, "crc_le_hex": "3d 38", "decoded_hex": "02 11 01 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7e 20 53 7d 7e 7d 53 20 40 30 20 10 3d 38", "wire_hex": "7e 02 11 01 06 72 1c 14 01 00 00 00 14 00 01 00 00 00 00 00 00 00 7d 5e 7d 00 7d 73 7d 5d 7d 5e 7d 5d 7d 73 7d 00 40 30 7d 00 10 3d 38 7e", "decoded_length": 35, "wire_length": 46}},

@@ -25,8 +25,8 @@ DEFAULT_REGISTRY = ROOT / "Tests" / "vectors" / "m6_v2_wire_v1.json"
 DEFAULT_SCHEMA = ROOT / "Tests" / "vectors" / "m6_v2_wire.schema.json"
 DEFAULT_INC = ROOT / "Tests" / "generated" / "m6_v2_wire_vectors.inc"
 DEFAULT_C_WIRE = ROOT / "System" / "m6_wire.h"
-FROZEN_REGISTRY_SHA256 = "8f47a5525b9fc7ef348c070d359c07ccf59c366d7703174af05274f6632dec67"
-FROZEN_SCHEMA_SHA256 = "aa657ad8f2f34c7c5dd55764e1c6dc77661d264b52129f14e478f619c83f217a"
+FROZEN_REGISTRY_SHA256 = "724d64dfd91a613b5ed7a6e297730623623a69859b047a4a72433abf0a0d410d"
+FROZEN_SCHEMA_SHA256 = "14f352b8903a55f98dbe3b9336ad59239500ebd4b5fe1f283ba0da3f248f5d0e"
 
 
 class RegistryError(ValueError):
@@ -416,6 +416,8 @@ def _validate_rpc_contract(registry: dict[str, Any]) -> None:
         "SUBSCRIPTION_GET": 0x0009,
         "SNAPSHOT_GET": 0x000A,
         "MANUAL_DRIVE_GET": 0x000B,
+        "VISION_UART_MONITOR_GET": 0x000C,
+        "GRAYSCALE_CALIBRATION_GET": 0x000D,
         "PARAM_SUMMARY_GET": 0x0100,
         "PARAM_DESCRIPTOR_GET": 0x0101,
         "PARAM_VALUE_GET": 0x0102,
@@ -436,6 +438,8 @@ def _validate_rpc_contract(registry: dict[str, Any]) -> None:
         "HEADING_CALIBRATE": 0x8303,
         "GRAYSCALE_CAPTURE_START": 0x8304,
         "MANUAL_DRIVE_SET": 0x8305,
+        "VISION_UART_MONITOR_SET": 0x8306,
+        "GRAYSCALE_CALIBRATION_COMMAND": 0x8307,
     }
     opcodes = registry["registries"]["rpc_opcodes"]
     if [entry["name"] for entry in opcodes] != list(expected_values):
@@ -476,8 +480,8 @@ def _validate_rpc_contract(registry: dict[str, Any]) -> None:
     }
     if variable_sides != expected_variable_sides:
         raise RegistryError("wire-v1 variable RPC body set changed")
-    if max(request_totals) != 26 or max(success_totals) != 84:
-        raise RegistryError("wire-v1 largest RPC payload must remain request=26/success=84")
+    if max(request_totals) != 26 or max(success_totals) != 92:
+        raise RegistryError("wire-v1 largest RPC payload must remain request=26/success=92")
     if registry["semantics"]["rpc_failure_body_bytes"] != 0:
         raise RegistryError("failed RPC responses must not append a body")
 
@@ -856,11 +860,11 @@ def _validate_registry_invariants(registry: dict[str, Any]) -> None:
     if registries["frame_types"] != expected_frame_types:
         raise RegistryError("wire-v1 frame type/direction/flag registry changed")
     capabilities = registries["capabilities"]
-    if len(capabilities) != 26:
-        raise RegistryError("wire-v1 requires capability bits 0..25")
+    if len(capabilities) != 28:
+        raise RegistryError("wire-v1 requires capability bits 0..27")
     for expected_bit, entry in enumerate(capabilities):
         if entry.get("bit") != expected_bit or entry["value"] != 1 << expected_bit:
-            raise RegistryError("capability bits must be contiguous 0..25")
+            raise RegistryError("capability bits must be contiguous 0..27")
     mask_entries = registries["capability_masks"]
     mask_names = [entry["name"] for entry in mask_entries]
     mask_hex = [entry["value_hex"] for entry in mask_entries]
@@ -872,8 +876,8 @@ def _validate_registry_invariants(registry: dict[str, Any]) -> None:
         all_defined |= entry["value"]
     if masks != {
         "HANDSHAKE_REQUIRED": 0x000000000000600F,
-        "HELLO_OPTIONAL": 0x0000000003FF9FF0,
-        "ALL_DEFINED": 0x0000000003FFFFFF,
+        "HELLO_OPTIONAL": 0x000000000FFF9FF0,
+        "ALL_DEFINED": 0x000000000FFFFFFF,
     }:
         raise RegistryError("wire-v1 capability aggregate masks changed")
     if masks["ALL_DEFINED"] != all_defined:
@@ -889,6 +893,12 @@ def _validate_registry_invariants(registry: dict[str, Any]) -> None:
     if opcode_values.get("MANUAL_DRIVE_GET") != 0x000B or \
        opcode_values.get("MANUAL_DRIVE_SET") != 0x8305:
         raise RegistryError("manual-drive opcodes must remain 0x000B/0x8305")
+    if opcode_values.get("VISION_UART_MONITOR_GET") != 0x000C or \
+       opcode_values.get("VISION_UART_MONITOR_SET") != 0x8306:
+        raise RegistryError("vision-UART monitor opcodes must remain 0x000C/0x8306")
+    if opcode_values.get("GRAYSCALE_CALIBRATION_GET") != 0x000D or \
+       opcode_values.get("GRAYSCALE_CALIBRATION_COMMAND") != 0x8307:
+        raise RegistryError("grayscale calibration opcodes must remain 0x000D/0x8307")
     results = {item["name"]: item["value"] for item in registries["rpc_results"]}
     expected_results = {
         "OK": 0, "MALFORMED": 1, "BAD_FLAGS": 2, "BAD_LENGTH": 3,

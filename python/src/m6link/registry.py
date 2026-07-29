@@ -20,8 +20,8 @@ from typing import Any, Iterable
 from .errors import IntegrityError
 
 
-REGISTRY_SHA256 = "8f47a5525b9fc7ef348c070d359c07ccf59c366d7703174af05274f6632dec67"
-SCHEMA_SHA256 = "aa657ad8f2f34c7c5dd55764e1c6dc77661d264b52129f14e478f619c83f217a"
+REGISTRY_SHA256 = "724d64dfd91a613b5ed7a6e297730623623a69859b047a4a72433abf0a0d410d"
+SCHEMA_SHA256 = "14f352b8903a55f98dbe3b9336ad59239500ebd4b5fe1f283ba0da3f248f5d0e"
 
 
 def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -113,6 +113,7 @@ def enum(name: str, registry_name: str, *, flag: bool = False) -> type[IntEnum]:
 
 FrameType = enum("FrameType", "frame_types")
 FrameFlag = enum("FrameFlag", "flags", flag=True)
+BulkKind = enum("BulkKind", "bulk_kinds")
 Capability = enum("Capability", "capabilities", flag=True)
 RpcOpcode = enum("RpcOpcode", "rpc_opcodes")
 RpcResult = enum("RpcResult", "rpc_results")
@@ -125,6 +126,11 @@ EventCode = enum("EventCode", "event_codes")
 ManualDriveSource = enum("ManualDriveSource", "manual_drive_sources")
 ManualDriveStopReason = enum("ManualDriveStopReason", "manual_drive_stop_reasons")
 ManualDriveFlag = enum("ManualDriveFlag", "manual_drive_flags", flag=True)
+GrayscaleCalibrationState = enum("GrayscaleCalibrationState", "grayscale_calibration_states")
+GrayscaleCalibrationOwner = enum("GrayscaleCalibrationOwner", "grayscale_calibration_owners")
+GrayscaleCalibrationSource = enum("GrayscaleCalibrationSource", "grayscale_calibration_sources")
+GrayscaleCalibrationCommand = enum("GrayscaleCalibrationCommand", "grayscale_calibration_commands")
+GrayscaleCalibrationResult = enum("GrayscaleCalibrationResult", "grayscale_calibration_results")
 Severity = enum("Severity", "severities")
 TelemetryStream = enum("TelemetryStream", "telemetry_streams")
 

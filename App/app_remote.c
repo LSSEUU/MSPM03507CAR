@@ -3,7 +3,10 @@
 #include "app_manual_drive.h"
 #include "diagnostics.h"
 #include "heading.h"
+#include "grayscale_calibration.h"
 #include "ir_receiver.h"
+#include "oled.h"
+#include "parameter_store.h"
 #include "remote_config.h"
 #include "safety.h"
 #include "system_state.h"
@@ -228,6 +231,15 @@ bool AppRemote_NormalStop(uint32_t now_ms)
 {
     bool stopped = false;
     if (Safety_HasFault()) return false;
+    if (remote.state == APP_REMOTE_CALIBRATION) {
+        GrayscaleCalibrationStatus_t calibration;
+        GrayscaleCalibration_GetStatus(&calibration);
+        if (GrayscaleCalibration_Command(GRAYSCALE_CAL_OWNER_REMOTE,
+                1U, GRAYSCALE_CAL_COMMAND_CANCEL,
+                calibration.expected_generation, now_ms) ==
+                GRAYSCALE_CAL_RESULT_OK)
+            stopped = true;
+    }
     if (remote.state == APP_REMOTE_MANUAL) {
         AppRemote_StopManual(now_ms);
         stopped = true;
@@ -248,6 +260,48 @@ static void AppRemote_HandleFull(const IrNecEvent_t *event)
     uint32_t now_ms = event->timestamp_ms;
     if (event->address != IR_REMOTE_EXPECTED_ADDRESS) {
         remote.address_rejects++;
+        return;
+    }
+    if (remote.state == APP_REMOTE_CALIBRATION) {
+        GrayscaleCalibrationStatus_t calibration;
+        GrayscaleCalibrationCommand_t command;
+        GrayscaleCalibration_GetStatus(&calibration);
+        if (event->command == IR_REMOTE_KEY_0) {
+            (void)GrayscaleCalibration_Command(GRAYSCALE_CAL_OWNER_REMOTE,
+                1U, GRAYSCALE_CAL_COMMAND_CANCEL,
+                calibration.expected_generation, now_ms);
+            remote.state = APP_REMOTE_IDLE;
+        } else if (event->command == IR_REMOTE_KEY_5) {
+            (void)GrayscaleCalibration_Command(GRAYSCALE_CAL_OWNER_REMOTE,
+                1U, GRAYSCALE_CAL_COMMAND_CANCEL,
+                calibration.expected_generation, now_ms);
+            remote.state = APP_REMOTE_IDLE;
+            {
+                ParameterStoreInfo_t store;
+                ParameterStore_GetInfo(&store);
+                if (GrayscaleCalibration_Command(
+                        GRAYSCALE_CAL_OWNER_REMOTE, 1U,
+                        GRAYSCALE_CAL_COMMAND_START, store.generation,
+                        now_ms) != GRAYSCALE_CAL_RESULT_OK)
+                    remote.state = APP_REMOTE_IDLE;
+                else
+                    remote.state = APP_REMOTE_CALIBRATION;
+            }
+        } else if (event->command == IR_REMOTE_KEY_OK) {
+            if ((calibration.state == GRAYSCALE_CAL_STATE_WAIT_WHITE) ||
+                ((calibration.state == GRAYSCALE_CAL_STATE_FAILED) &&
+                 (calibration.failed_stage == 1U)))
+                command = GRAYSCALE_CAL_COMMAND_CAPTURE_WHITE;
+            else if ((calibration.state == GRAYSCALE_CAL_STATE_WAIT_BLACK) ||
+                     ((calibration.state == GRAYSCALE_CAL_STATE_FAILED) &&
+                      (calibration.failed_stage == 2U)))
+                command = GRAYSCALE_CAL_COMMAND_CAPTURE_BLACK;
+            else command = GRAYSCALE_CAL_COMMAND_CONFIRM;
+            if (GrayscaleCalibration_Command(GRAYSCALE_CAL_OWNER_REMOTE,
+                    1U, command, calibration.expected_generation,
+                    now_ms) != GRAYSCALE_CAL_RESULT_OK)
+                remote.action_rejects++;
+        }
         return;
     }
     if (AppRemote_IsDirection(event->command, &direction)) {
@@ -275,8 +329,18 @@ static void AppRemote_HandleFull(const IrNecEvent_t *event)
                (event->command == IR_REMOTE_KEY_3) ||
                (event->command == IR_REMOTE_KEY_4)) {
         AppRemote_ArmDemo(event->command, now_ms);
-    } else if ((event->command == IR_REMOTE_KEY_5) ||
-               (event->command == IR_REMOTE_KEY_6) ||
+    } else if (event->command == IR_REMOTE_KEY_5) {
+        ParameterStoreInfo_t store;
+        ParameterStore_GetInfo(&store);
+        if (!OLED_IsPresent() ||
+            (GrayscaleCalibration_Command(GRAYSCALE_CAL_OWNER_REMOTE,
+                1U, GRAYSCALE_CAL_COMMAND_START, store.generation,
+                now_ms) != GRAYSCALE_CAL_RESULT_OK)) {
+            remote.action_rejects++;
+        } else {
+            remote.state = APP_REMOTE_CALIBRATION;
+        }
+    } else if ((event->command == IR_REMOTE_KEY_6) ||
                (event->command == IR_REMOTE_KEY_7) ||
                (event->command == IR_REMOTE_KEY_8) ||
                (event->command == IR_REMOTE_KEY_9)) {
@@ -394,6 +458,9 @@ void AppRemote_Task20ms(uint32_t now_ms)
         remote.state = APP_REMOTE_IDLE;
         if (legacy_text_enabled)
             remote_notice_flags |= APP_REMOTE_NOTICE_CAPTURE_END;
+    } else if ((remote.state == APP_REMOTE_CALIBRATION) &&
+               !GrayscaleCalibration_IsActive()) {
+        remote.state = APP_REMOTE_IDLE;
     }
     if (Safety_HasFault() && (remote.state != APP_REMOTE_CAPTURE)) {
         if (remote.heading_hold_active) Heading_Stop();

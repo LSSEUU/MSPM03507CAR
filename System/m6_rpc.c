@@ -6,11 +6,13 @@
 #include "control_params.h"
 #include "diagnostics.h"
 #include "grayscale.h"
+#include "grayscale_calibration.h"
 #include "gyro.h"
 #include "heading.h"
 #include "motor.h"
 #include "m6_action_validate.h"
 #include "m6_telemetry.h"
+#include "m6_vision_uart.h"
 #include "parameter_store.h"
 #include "reset_diag.h"
 #include "safety.h"
@@ -311,6 +313,55 @@ static void publish_emergency_event(const SafetySnapshot_t *safety,
                         sizeof(body), now_ms);
 }
 
+static void fill_grayscale_calibration(uint8_t *out)
+{
+    GrayscaleCalibrationStatus_t status;
+    uint32_t i;
+    GrayscaleCalibration_GetStatus(&status);
+    memset(out, 0, 84U);
+    out[0] = (uint8_t)status.state;
+    out[1] = (uint8_t)status.owner;
+    out[2] = status.active_source;
+    out[3] = (uint8_t)status.result;
+    p16(&out[4], status.progress);
+    p16(&out[6], status.required);
+    p32(&out[8], status.generation);
+    out[12] = status.valid_mask;
+    out[13] = status.polarity_fail_mask;
+    out[14] = status.span_fail_mask;
+    out[15] = status.noise_fail_mask;
+    out[16] = status.rail_fail_mask;
+    out[17] = status.failed_stage;
+    out[18] = status.scan_error ? 1U : 0U;
+    for (i = 0U; i < GRAYSCALE_CALIBRATION_CHANNEL_COUNT; i++) {
+        p16(&out[20U + i * 2U], status.candidate.white_adc[i]);
+        p16(&out[36U + i * 2U], status.candidate.black_adc[i]);
+        p16(&out[52U + i * 2U], status.span[i]);
+        p16(&out[68U + i * 2U], status.max_noise[i]);
+    }
+}
+
+static M6Result_t grayscale_calibration_result(
+    GrayscaleCalibrationResult_t result, uint32_t *detail)
+{
+    ParameterStoreInfo_t store;
+    if (result == GRAYSCALE_CAL_RESULT_OK) return M6_RESULT_OK;
+    if (result == GRAYSCALE_CAL_RESULT_BUSY) return M6_RESULT_BUSY;
+    if (result == GRAYSCALE_CAL_RESULT_STALE_GENERATION) {
+        ParameterStore_GetInfo(&store);
+        *detail = store.generation;
+        return M6_RESULT_STALE_GENERATION;
+    }
+    if (result == GRAYSCALE_CAL_RESULT_STORAGE)
+        return M6_RESULT_STORAGE_IO;
+    if (result == GRAYSCALE_CAL_RESULT_REJECTED)
+        return M6_RESULT_INVALID_VALUE;
+    if (result == GRAYSCALE_CAL_RESULT_WRONG_OWNER ||
+        result == GRAYSCALE_CAL_RESULT_WRONG_STATE)
+        return M6_RESULT_WRONG_STATE;
+    return M6_RESULT_SENSOR_NOT_READY;
+}
+
 static void publish_manual_drive_event(uint32_t now_ms)
 {
     uint8_t body[16];
@@ -357,6 +408,7 @@ void M6Rpc_Init(ControlProtocolCommitCallback_t commit_callback)
         s_last_manual_transition = manual.transition_id;
     }
     s_pending_apply_sequence = 0U;
+    M6VisionUart_Init();
 }
 
 void M6Rpc_ParameterBoundaryCompleted(ControlParamsResult_t result,
@@ -430,6 +482,23 @@ static M6Result_t execute_read(uint16_t opcode, const uint8_t *body,
             return M6_RESULT_UNSUPPORTED_CAPABILITY;
         fill_manual_drive(out);
         *out_length = 16U;
+        return M6_RESULT_OK;
+    }
+    if (opcode == M6_RPC_VISION_UART_MONITOR_GET) {
+        if (length != 0U) return M6_RESULT_BAD_LENGTH;
+        if ((M6Link_EnabledCapabilities() &
+             M6_CAP_VISION_UART_MONITOR) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        M6VisionUart_GetStatus(out, out_length);
+        return M6_RESULT_OK;
+    }
+    if (opcode == M6_RPC_GRAYSCALE_CALIBRATION_GET) {
+        if (length != 0U) return M6_RESULT_BAD_LENGTH;
+        if ((M6Link_EnabledCapabilities() &
+             M6_CAP_GRAYSCALE_CALIBRATION) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        fill_grayscale_calibration(out);
+        *out_length = 84U;
         return M6_RESULT_OK;
     }
     if (length != 0U && opcode != 0x0101U && opcode != 0x0102U)
@@ -837,6 +906,40 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
         *out_length = 16U;
         return M6_RESULT_OK;
     }
+    if (opcode == M6_RPC_VISION_UART_MONITOR_SET) {
+        if ((M6Link_EnabledCapabilities() &
+             M6_CAP_VISION_UART_MONITOR) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != 8U) return M6_RESULT_BAD_LENGTH;
+        if (u32(body) != s_boot_id) return M6_RESULT_INVALID_ARGUMENT;
+        if ((body[5] | body[6] | body[7]) != 0U)
+            return M6_RESULT_MALFORMED;
+        if (body[4] > 1U) return M6_RESULT_INVALID_ARGUMENT;
+        M6VisionUart_SetEnabled(body[4] != 0U);
+        M6VisionUart_GetStatus(out, out_length);
+        return M6_RESULT_OK;
+    }
+    if (opcode == M6_RPC_GRAYSCALE_CALIBRATION_COMMAND) {
+        GrayscaleCalibrationResult_t result;
+        if ((M6Link_EnabledCapabilities() &
+             M6_CAP_GRAYSCALE_CALIBRATION) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != 12U) return M6_RESULT_BAD_LENGTH;
+        if (u32(body) != s_boot_id) return M6_RESULT_INVALID_ARGUMENT;
+        if ((body[5] | body[6] | body[7]) != 0U)
+            return M6_RESULT_MALFORMED;
+        if ((body[4] < GRAYSCALE_CAL_COMMAND_START) ||
+            (body[4] > GRAYSCALE_CAL_COMMAND_CANCEL))
+            return M6_RESULT_INVALID_ARGUMENT;
+        result = GrayscaleCalibration_Command(GRAYSCALE_CAL_OWNER_HOST,
+            M6Link_CurrentSession(), (GrayscaleCalibrationCommand_t)body[4],
+            u32(&body[8]), SystemTime_Now());
+        if (result != GRAYSCALE_CAL_RESULT_OK)
+            return grayscale_calibration_result(result, detail);
+        fill_grayscale_calibration(out);
+        *out_length = 84U;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_ACTION_ARM) {
         uint32_t now = SystemTime_Now();
         uint8_t token_input[40];
@@ -972,7 +1075,9 @@ void M6Rpc_Service(uint32_t now_ms)
     session = M6Link_Mode() == M6_LINK_V2_ESTABLISHED ?
         M6Link_CurrentSession() : 0U;
     if ((session == 0U) && (s_event_session != 0U)) {
+        GrayscaleCalibration_CancelHost(s_event_session, now_ms);
         memset(s_subscriptions, 0, sizeof(s_subscriptions));
+        M6VisionUart_SetEnabled(false);
         s_event_session = 0U;
     }
     if ((s_pending_apply_sequence != 0U) && Safety_HasFault()) {
@@ -983,6 +1088,7 @@ void M6Rpc_Service(uint32_t now_ms)
     if ((session != 0U) && (session != s_event_session)) {
         s_event_session = session;
         memset(s_subscriptions, 0, sizeof(s_subscriptions));
+        M6VisionUart_SetEnabled(false);
         for (uint8_t i = 0U; i < 4U; i++) s_next_sample_id[i] = 1U;
         publish_reset_event(now_ms);
         if (safety.fault_bits != 0U) publish_fault_event(&safety, now_ms);
@@ -995,6 +1101,7 @@ void M6Rpc_Service(uint32_t now_ms)
         (safety.fault_bits != s_last_fault_bits))
         publish_fault_event(&safety, now_ms);
     s_last_fault_bits = safety.fault_bits;
+    M6VisionUart_Service(now_ms);
     {
         AppManualDriveSnapshot_t manual;
         AppManualDrive_GetSnapshot(&manual);

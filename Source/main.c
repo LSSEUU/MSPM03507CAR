@@ -9,6 +9,7 @@
 #include "diagnostics.h"
 #include "encoder.h"
 #include "grayscale.h"
+#include "grayscale_calibration.h"
 #include "gyro.h"
 #include "heading.h"
 #include "led.h"
@@ -113,11 +114,6 @@ int main(void)
     Gyro_Init();
     LED_Init();
     OLED_Init();
-    Watchdog_Init();
-
-    DL_SYSTICK_init(SYSTICK_PERIOD);
-    DL_SYSTICK_enableInterrupt();
-    DL_SYSTICK_enable();
 
     if (Watchdog_WasResetCause(reset_cause)) {
         Safety_RaiseFault(SAFETY_FAULT_WATCHDOG_RESET, SystemTime_Now());
@@ -126,12 +122,21 @@ int main(void)
     Diagnostics_Init();
     AppManualDrive_Init();
     AppRemote_Init();
+    GrayscaleCalibration_Init(SystemTime_Now());
     if (!ControlRuntime_ApplyActive(NULL)) {
         Safety_EmergencyStop(SystemTime_Now());
     }
     M6Telemetry_Init();
     ControlProtocol_Init(Main_ControlParamsCommitted);
     Diagnostics_RunBootSelfTest();
+
+    /* One-time initialization and boot text are not scheduler-supervised work.
+     * Start both clocks together so the first 20 ms healthy window always has
+     * a complete watchdog period, even as startup diagnostics grow. */
+    Watchdog_Init();
+    DL_SYSTICK_init(SYSTICK_PERIOD);
+    DL_SYSTICK_enableInterrupt();
+    DL_SYSTICK_enable();
 
     while (1) {
         uint32_t missed;
@@ -200,11 +205,14 @@ int main(void)
             if (!Grayscale_IsScanPending()) (void)Grayscale_RequestScan();
             Grayscale_Task(started);
             Grayscale_GetSnapshot(&gray);
-            if ((gray.scan_count != last_gray_scan) && gray.last_scan_ok) {
+            if (gray.scan_count != last_gray_scan) {
                 last_gray_scan = gray.scan_count;
-                AppLine_ProcessGrayscale(&gray);
-                Safety_NotifySensor(SAFETY_SENSOR_GRAYSCALE,
-                                    gray.last_update_ms);
+                GrayscaleCalibration_ProcessScan(&gray);
+                if (gray.last_scan_ok) {
+                    AppLine_ProcessGrayscale(&gray);
+                    Safety_NotifySensor(SAFETY_SENSOR_GRAYSCALE,
+                                        gray.last_update_ms);
+                }
             }
 
             Main_CompleteTask(SCHEDULER_TASK_10MS, started,
@@ -218,6 +226,7 @@ int main(void)
 
             ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TASK_20MS);
             AppRemote_Task20ms(started);
+            GrayscaleCalibration_Task(started);
             AppManualDrive_Task20ms(started);
             Gyro_GetSnapshot(&gyro);
             Heading_UpdateWithRate(

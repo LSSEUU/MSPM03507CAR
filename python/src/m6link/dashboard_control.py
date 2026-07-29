@@ -11,7 +11,13 @@ from typing import Any, Callable, Mapping
 from .errors import M6Error
 from .faults import decode_safety_faults
 from .models import ActionSpec, ArmedAction
-from .registry import ActionKind, Capability, REGISTRY
+from .registry import (
+    ActionKind,
+    Capability,
+    GrayscaleCalibrationOwner,
+    GrayscaleCalibrationState,
+    REGISTRY,
+)
 
 
 _DASHBOARD_ACTIONS = {
@@ -62,6 +68,7 @@ class DashboardController:
         self._status: Any = None
         self._status_at = float("-inf")
         self._parameters: Any = None
+        self._calibration: Any = None
         self._manual_lock = threading.Lock()
         self._manual_condition = threading.Condition(self._manual_lock)
         self._manual_controller_id: str | None = None
@@ -279,10 +286,82 @@ class DashboardController:
                     self._manual_error = str(exc)
 
     def close(self) -> None:
+        try:
+            state = self.calibration_state(force=True)
+            if state.get("owner_name") == "HOST" and state.get("active"):
+                self.session.cancel_grayscale_calibration(
+                    expected_generation=state["generation"]
+                )
+        except Exception:
+            pass
         with self._manual_condition:
             self._manual_stop_worker = True
             self._manual_condition.notify_all()
         self._manual_thread.join(timeout=1.0)
+
+    def calibration_state(self, *, force: bool = False) -> dict[str, Any]:
+        available = (
+            self.capabilities & Capability.GRAYSCALE_CALIBRATION
+            == Capability.GRAYSCALE_CALIBRATION
+        )
+        if not available:
+            return {"ok": True, "available": False, "active": False}
+        with self._operation_lock:
+            if force or self._calibration is None:
+                self._calibration = self.session.get_grayscale_calibration()
+            status = self._calibration
+        payload = _object_payload(status)
+        payload["state_name"] = _enum_name(status.state)
+        payload["owner_name"] = _enum_name(status.owner)
+        payload["active_source_name"] = _enum_name(status.active_source)
+        payload["result_name"] = _enum_name(status.result)
+        payload["active"] = status.owner != GrayscaleCalibrationOwner.NONE
+        failures = []
+        masks = (
+            ("polarity", status.polarity_fail_mask, "白底均值必须高于黑线均值"),
+            ("span", status.span_fail_mask, "白黑跨度不足 512 ADC"),
+            ("noise", status.noise_fail_mask, "跨度不足峰峰噪声的 8 倍"),
+            ("rail", status.rail_fail_mask, "采样触碰 ADC 轨（0 或 4095）"),
+        )
+        for channel in range(8):
+            reasons = [text for _, mask, text in masks if mask & (1 << channel)]
+            if reasons:
+                failures.append({"channel": channel + 1, "reasons": reasons})
+        payload["failures"] = failures
+        return {"ok": True, "available": True, **payload}
+
+    def calibration_command(
+        self, command: str, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        if (
+            self.capabilities & Capability.GRAYSCALE_CALIBRATION
+            != Capability.GRAYSCALE_CALIBRATION
+        ):
+            raise ValueError("当前固件未协商灰度自动标定能力")
+        if command == "confirm" and request.get("confirm") != "WRITE_GRAYSCALE_CALIBRATION_TO_FLASH":
+            raise ValueError("写入 Flash 前需要明确确认")
+        expected = request.get("expected_generation")
+        expected_generation = None if expected is None else int(expected)
+        methods = {
+            "start": self.session.start_grayscale_calibration,
+            "capture-white": self.session.capture_grayscale_white,
+            "capture-black": self.session.capture_grayscale_black,
+            "confirm": self.session.confirm_grayscale_calibration,
+            "cancel": self.session.cancel_grayscale_calibration,
+        }
+        method = methods.get(command)
+        if method is None:
+            raise ValueError("未知灰度标定操作")
+        with self._operation_lock:
+            if command == "start":
+                result = method()
+            else:
+                result = method(expected_generation=expected_generation)
+            self._calibration = result
+            self._status = None
+            if command == "confirm":
+                self.identity = self.session.identity
+        return self.calibration_state()
 
     def parameter_state(self, *, force: bool = False) -> dict[str, Any]:
         with self._operation_lock:
@@ -439,6 +518,7 @@ class DashboardController:
             self.identity = identity
             self._status = None
             self._parameters = None
+            self._calibration = None
             self._status_at = float("-inf")
         with self._armed_lock:
             self._armed = None

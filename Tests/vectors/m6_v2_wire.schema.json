@@ -150,7 +150,7 @@
         "async_sequence_allocation", "active_v2_ascii_takeover", "rpc_failure_body_bytes", "rpc_opcode_registry_binding",
         "version_mismatch", "rx_overflow", "emergency", "safety_fault", "handshake", "resync", "sequence",
         "queues", "parameter_apply", "actions", "session_close", "protocol_error", "bulk_transfer", "result_detail_rules",
-        "health_high_water_units"
+        "health_high_water_units", "vision_uart_monitor"
       ],
       "properties": {
         "pre_established_failure_target": { "const": "V1_RESYNC" },
@@ -173,6 +173,7 @@
         "session_close": { "$ref": "#/$defs/sessionCloseSemantics" },
         "protocol_error": { "$ref": "#/$defs/protocolErrorSemantics" },
         "bulk_transfer": { "$ref": "#/$defs/bulkTransferSemantics" },
+        "vision_uart_monitor": { "$ref": "#/$defs/visionUartMonitorSemantics" },
         "result_detail_rules": {
           "type": "array", "minItems": 1,
           "items": { "$ref": "#/$defs/resultDetailRule" }
@@ -200,6 +201,8 @@
         "parameter_sources", "storage_slots", "storage_health", "descriptor_flags",
         "domain_rules", "status_flags", "link_flags", "action_kinds", "action_states", "action_reasons",
         "action_sources", "manual_drive_sources", "manual_drive_stop_reasons", "manual_drive_flags",
+        "grayscale_calibration_states", "grayscale_calibration_owners", "grayscale_calibration_sources",
+        "grayscale_calibration_commands", "grayscale_calibration_results",
         "emergency_sources", "gap_reasons", "link_modes", "link_reasons",
         "event_codes", "severities", "system_states", "reset_classes",
         "checkpoints", "safety_fault_bits", "safety_sensor_bits", "scheduler_task_bits", "adc_interrupt_flags", "grayscale_channel_bits",
@@ -251,6 +254,11 @@
         "manual_drive_sources": { "$ref": "#/$defs/namedValues" },
         "manual_drive_stop_reasons": { "$ref": "#/$defs/namedValues" },
         "manual_drive_flags": { "$ref": "#/$defs/namedValues" },
+        "grayscale_calibration_states": { "$ref": "#/$defs/namedValues" },
+        "grayscale_calibration_owners": { "$ref": "#/$defs/namedValues" },
+        "grayscale_calibration_sources": { "$ref": "#/$defs/namedValues" },
+        "grayscale_calibration_commands": { "$ref": "#/$defs/namedValues" },
+        "grayscale_calibration_results": { "$ref": "#/$defs/namedValues" },
         "emergency_sources": { "$ref": "#/$defs/namedValues" },
         "gap_reasons": { "$ref": "#/$defs/namedValues" },
         "link_modes": { "$ref": "#/$defs/namedValues" },
@@ -751,6 +759,20 @@
         "offset_order": { "const": "chronological-record-index" },
         "admission_gate": { "const": "frozen-matching-capture" },
         "p3_abort_retry": { "const": "new-sequence-same-capture-and-offset" }
+      }
+    },
+    "visionUartMonitorSemantics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["bulk_kind", "schema", "priority", "metadata_bytes", "data_max_bytes", "receive_only", "overflow_policy", "motor_control_forbidden"],
+      "properties": {
+        "bulk_kind": { "const": "VISION_UART_RX" },
+        "schema": { "const": 1 },
+        "priority": { "const": "P3" },
+        "metadata_bytes": { "const": 32 },
+        "data_max_bytes": { "const": 64 },
+        "receive_only": { "const": true },
+        "overflow_policy": { "const": "preserve-startup-then-drop-oldest-for-low-latency" },
+        "motor_control_forbidden": { "const": true }
       }
     },
     "resultDetailRule": {

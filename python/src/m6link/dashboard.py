@@ -7,6 +7,7 @@ import secrets
 import threading
 import time
 import webbrowser
+from dataclasses import fields, is_dataclass
 from collections import deque
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,7 +19,8 @@ from .dashboard_control import DashboardController
 from .dashboard_recording import DashboardRecordingManager
 from .errors import M6Error
 from .monitor import MONITOR_SUBSCRIPTIONS
-from .models import TelemetrySample
+from .models import TelemetrySample, VisionUartChunk, VisionUartStatus
+from .registry import Capability
 
 
 _WEB_ROOT = Path(__file__).with_name("web")
@@ -32,6 +34,8 @@ _RECONNECT_RETRY_S = 1.0
 
 
 def _json_safe(value: Any) -> Any:
+    if is_dataclass(value):
+        return {field.name: _json_safe(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -65,6 +69,11 @@ class DashboardBuffer:
         self._reconnecting = False
         self._connection_message = "串口数据在线"
         self._reconnect_count = 0
+        self._camera: dict[str, Any] = {
+            "available": False,
+            "enabled": False,
+            "message": "固件未协商 UART1 监视能力",
+        }
         self._lock = threading.Lock()
 
     def ingest(self, sample: TelemetrySample, *, received_at: float | None = None) -> int:
@@ -88,6 +97,72 @@ class DashboardBuffer:
             self._counts[stream] = self._counts.get(stream, 0) + 1
             self._gaps[stream] = self._gaps.get(stream, 0) + (1 if sample.gap_before else 0)
             return self._cursor
+
+    def ingest_vision_uart(
+        self, chunk: VisionUartChunk, *, received_at: float | None = None
+    ) -> int:
+        now = self._clock() if received_at is None else received_at
+        stream = "vision_uart_rx"
+        with self._lock:
+            self._cursor += 1
+            event = {
+                "cursor": self._cursor,
+                "received_ms": max(0, round((now - self._started_at) * 1000)),
+                "record_type": "uart_data",
+                "stream": stream,
+                "stream_id": None,
+                "sample_id": None,
+                "time_ms": chunk.time_ms,
+                "gap": chunk.gap_before,
+                "missing": 1 if chunk.gap_before else 0,
+                "values": {
+                    "direction": "rx",
+                    "sequence": chunk.sequence,
+                    "status_flags": chunk.status_flags,
+                    "rx_bytes": chunk.rx_bytes,
+                    "tx_bytes": chunk.tx_bytes,
+                    "rx_overflow": chunk.rx_overflow,
+                    "tx_overflow": chunk.tx_overflow,
+                    "hardware_errors": chunk.hardware_errors,
+                    "bridge_dropped": chunk.bridge_dropped,
+                    "data_hex": chunk.data.hex(),
+                },
+            }
+            self._events.append(event)
+            self._latest[stream] = event
+            self._counts[stream] = self._counts.get(stream, 0) + 1
+            self._gaps[stream] = self._gaps.get(stream, 0) + (1 if chunk.gap_before else 0)
+            self._camera.update(
+                {
+                    "available": True,
+                    "enabled": True,
+                    "message": (
+                        "最近收到 UART1 数据；检测到遗漏，详见丢弃统计"
+                        if chunk.gap_before else "最近收到 UART1 数据"
+                    ),
+                    "last_received_ms": event["received_ms"],
+                    **{key: event["values"][key] for key in (
+                        "rx_bytes", "tx_bytes", "rx_overflow", "tx_overflow",
+                        "hardware_errors", "bridge_dropped",
+                    )},
+                }
+            )
+            return self._cursor
+
+    def set_camera_status(
+        self,
+        status: VisionUartStatus | Mapping[str, Any] | None,
+        *,
+        available: bool,
+        message: str,
+    ) -> None:
+        with self._lock:
+            values = _json_safe(status) if status is not None else {}
+            self._camera = {
+                **(values if isinstance(values, dict) else {}),
+                "available": available,
+                "message": message,
+            }
 
     def set_connected(
         self,
@@ -132,6 +207,7 @@ class DashboardBuffer:
                 "counts": dict(self._counts),
                 "gaps": dict(self._gaps),
                 "latest": dict(self._latest),
+                "camera": dict(self._camera),
                 "events": events,
             }
 
@@ -166,6 +242,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/parameters":
             self._send_parameter_state(parse_qs(parsed.query))
+            return
+        if parsed.path == "/api/calibration":
+            self._send_calibration_state(parse_qs(parsed.query))
             return
         if parsed.path == "/api/recordings":
             manager = self.server.recording_manager
@@ -213,6 +292,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/parameters/load": lambda controller, body: controller.parameter_command("load", body),
             "/api/parameters/defaults": lambda controller, body: controller.parameter_command("defaults", body),
             "/api/parameters/save": lambda controller, body: controller.parameter_command("save", body),
+            "/api/calibration/start": lambda controller, body: controller.calibration_command("start", body),
+            "/api/calibration/capture-white": lambda controller, body: controller.calibration_command("capture-white", body),
+            "/api/calibration/capture-black": lambda controller, body: controller.calibration_command("capture-black", body),
+            "/api/calibration/confirm": lambda controller, body: controller.calibration_command("confirm", body),
+            "/api/calibration/cancel": lambda controller, body: controller.calibration_command("cancel", body),
         }
         recording_route = recording_routes.get(parsed.path)
         route = routes.get(parsed.path)
@@ -354,6 +438,19 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json(200, result)
 
+    def _send_calibration_state(self, query: dict[str, list[str]]) -> None:
+        controller = self.server.dashboard_controller
+        if controller is None:
+            self._send_json(404, {"ok": False, "error": {"message": "标定功能未启用"}})
+            return
+        force = query.get("refresh", ["0"])[0] == "1"
+        try:
+            result = controller.calibration_state(force=force)
+        except M6Error as exc:
+            self._send_json(503, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+            return
+        self._send_json(200, result)
+
     def _authorized(self, controller: DashboardController) -> bool:
         supplied = self.headers.get("X-M6-Control-Token", "")
         if not supplied or not secrets.compare_digest(supplied, controller.token):
@@ -445,6 +542,9 @@ def run_dashboard(
     buffer = DashboardBuffer(identity_data)
     controller = DashboardController(session, identity)
     session.subscribe(MONITOR_SUBSCRIPTIONS)
+    camera_capable = bool(
+        int(getattr(session, "capabilities", 0)) & int(Capability.VISION_UART_MONITOR)
+    )
     recording_manager = DashboardRecordingManager(
         session,
         identity_data,
@@ -454,6 +554,21 @@ def run_dashboard(
         sampling_periods={stream.name.lower(): period for stream, period in MONITOR_SUBSCRIPTIONS.items()},
     )
     recording_manager.start()
+    if camera_capable and callable(getattr(session, "set_vision_uart_monitor", None)):
+        try:
+            camera_status = session.set_vision_uart_monitor(True)
+        except (M6Error, OSError, ValueError) as exc:
+            buffer.set_camera_status(
+                None, available=True, message=f"UART1 监视启用失败：{exc}"
+            )
+        else:
+            buffer.set_camera_status(
+                camera_status, available=True, message="UART1 监视已启用，尚未收到数据"
+            )
+    else:
+        buffer.set_camera_status(
+            None, available=False, message="固件未协商 UART1 监视能力"
+        )
     server: DashboardHTTPServer | None = None
     server_thread: threading.Thread | None = None
     try:
@@ -508,6 +623,33 @@ def run_dashboard(
                 buffer.set_connected(True, message="车辆已重新连接")
                 recording_manager.update_identity(_identity_mapping(identity))
                 recording_manager.record_event("connection_restored", {"port": port_name})
+                camera_capable = bool(
+                    int(getattr(session, "capabilities", 0)) &
+                    int(Capability.VISION_UART_MONITOR)
+                )
+                if camera_capable and callable(
+                    getattr(session, "set_vision_uart_monitor", None)
+                ):
+                    try:
+                        camera_status = session.set_vision_uart_monitor(True)
+                    except (M6Error, OSError, ValueError) as exc:
+                        buffer.set_camera_status(
+                            None,
+                            available=True,
+                            message=f"UART1 监视恢复失败：{exc}",
+                        )
+                    else:
+                        buffer.set_camera_status(
+                            camera_status,
+                            available=True,
+                            message="UART1 监视已恢复，尚未收到新数据",
+                        )
+                else:
+                    buffer.set_camera_status(
+                        None,
+                        available=False,
+                        message="固件未协商 UART1 监视能力",
+                    )
                 last_sample_at = time.monotonic()
                 next_reconnect_at = last_sample_at
                 reconnect_announced = False
@@ -516,10 +658,21 @@ def run_dashboard(
             if sample is not None:
                 buffer.ingest(sample)
                 last_sample_at = time.monotonic()
+            if camera_capable and callable(getattr(session, "read_vision_uart", None)):
+                for _ in range(128):
+                    camera_chunk = session.read_vision_uart(timeout=0)
+                    if camera_chunk is None:
+                        break
+                    buffer.ingest_vision_uart(camera_chunk)
     except KeyboardInterrupt:
         return 0
     finally:
         buffer.set_connected(False, message="串口服务已停止")
+        if camera_capable and callable(getattr(session, "set_vision_uart_monitor", None)):
+            try:
+                session.set_vision_uart_monitor(False)
+            except Exception:
+                pass
         recording_manager.close()
         controller.close()
         try:

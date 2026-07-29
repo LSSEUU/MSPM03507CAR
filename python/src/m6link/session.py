@@ -32,6 +32,7 @@ from .models import (
     Breadcrumb,
     FaultEvent,
     GapEvent,
+    GrayscaleCalibrationStatus,
     Identity,
     LinkEvent,
     LinkStats,
@@ -46,6 +47,8 @@ from .models import (
     TaskStats,
     TelemetrySample,
     UartStats,
+    VisionUartChunk,
+    VisionUartStatus,
 )
 from .protocol.framing import Frame, FrameDecoder, encode_frame
 from .protocol.legacy_text import LegacyLineDecoder, encode_transaction
@@ -56,6 +59,7 @@ from .protocol.v2_binary import (
     decode_ready,
     decode_rpc_response,
     decode_telemetry,
+    decode_vision_uart_chunk,
     encode_hello,
     encode_rpc,
     pack_subscription,
@@ -68,8 +72,14 @@ from .registry import (
     ActionState,
     CAPABILITY_MASKS,
     Capability,
+    BulkKind,
     FrameFlag,
     FrameType,
+    GrayscaleCalibrationCommand,
+    GrayscaleCalibrationOwner,
+    GrayscaleCalibrationResult,
+    GrayscaleCalibrationSource,
+    GrayscaleCalibrationState,
     ManualDriveFlag,
     ManualDriveSource,
     ManualDriveStopReason,
@@ -181,6 +191,7 @@ class Session:
         self._line_events: queue.Queue[str] = queue.Queue()
         self._events: queue.Queue[object] = queue.Queue()
         self._telemetry: queue.Queue[TelemetrySample] = queue.Queue()
+        self._vision_uart: queue.Queue[VisionUartChunk] = queue.Queue()
         self._event_taps: set[queue.Queue[object]] = set()
         self._subscriptions: dict[TelemetryStream, int] = {}
         self._recording_thread: threading.Thread | None = None
@@ -476,7 +487,29 @@ class Session:
                 )
                 self._publish_event(event)
             else:
-                self._publish_event(frame)
+                if frame.payload and frame.payload[0] == int(BulkKind.VISION_UART_RX):
+                    values = decode_vision_uart_chunk(frame.payload)
+                    status_flags = int(values["status_flags"])
+                    chunk = VisionUartChunk(
+                        time_ms=int(values["time_ms"]),
+                        data=bytes(values["data"]),
+                        status_flags=status_flags,
+                        rx_bytes=int(values["rx_bytes"]),
+                        tx_bytes=int(values["tx_bytes"]),
+                        rx_overflow=int(values["rx_overflow"]),
+                        tx_overflow=int(values["tx_overflow"]),
+                        hardware_errors=int(values["hardware_errors"]),
+                        bridge_dropped=int(values["bridge_dropped"]),
+                        gap_before=gap or bool(status_flags & 0x0E),
+                        sequence=frame.sequence,
+                        wire_gap_before=wire_gap,
+                        sequence_gap_before=sequence_gap,
+                        expected_sequence=expected_sequence,
+                    )
+                    self._vision_uart.put(chunk)
+                    self._publish_event(chunk)
+                else:
+                    self._publish_event(frame)
         except IntegrityError as exc:
             self._publish_event(exc)
 
@@ -810,6 +843,129 @@ class Session:
             "manual_drive_snapshot_v1", self._rpc(RpcOpcode.MANUAL_DRIVE_GET)
         )
         return self._manual_drive_snapshot(values)
+
+    @staticmethod
+    def _vision_uart_status(values: Mapping[str, Any]) -> VisionUartStatus:
+        return VisionUartStatus(
+            enabled=bool(values["enabled"]),
+            receive_enabled=bool(values["receive_enabled"]),
+            rx_bytes=int(values["rx_bytes"]),
+            tx_bytes=int(values["tx_bytes"]),
+            rx_overflow=int(values["rx_overflow"]),
+            tx_overflow=int(values["tx_overflow"]),
+            hardware_errors=int(values["hardware_errors"]),
+            bridge_dropped=int(values["bridge_dropped"]),
+            rx_queued=int(values["rx_queued"]),
+            tx_queued=int(values["tx_queued"]),
+        )
+
+    def get_vision_uart_monitor(self) -> VisionUartStatus:
+        self.require_capability(Capability.VISION_UART_MONITOR)
+        values = decode_layout(
+            "vision_uart_monitor_status_v1",
+            self._rpc(RpcOpcode.VISION_UART_MONITOR_GET),
+        )
+        return self._vision_uart_status(values)
+
+    def set_vision_uart_monitor(self, enabled: bool) -> VisionUartStatus:
+        self.require_capability(Capability.VISION_UART_MONITOR)
+        identity = self._require_identity()
+        body = struct.pack("<IB3x", identity.boot_id, bool(enabled))
+        values = decode_layout(
+            "vision_uart_monitor_status_v1",
+            self._rpc(RpcOpcode.VISION_UART_MONITOR_SET, body),
+        )
+        return self._vision_uart_status(values)
+
+    @staticmethod
+    def _grayscale_calibration_status(
+        values: Mapping[str, Any],
+    ) -> GrayscaleCalibrationStatus:
+        def array(name: str) -> tuple[int, ...]:
+            raw = bytes(values[name])
+            if len(raw) != 16:
+                raise IntegrityError(f"{name} must contain eight u16 values")
+            return tuple(int(value) for value in struct.unpack("<8H", raw))
+
+        return GrayscaleCalibrationStatus(
+            state=_enum_or_int(GrayscaleCalibrationState, values["state"]),
+            owner=_enum_or_int(GrayscaleCalibrationOwner, values["owner"]),
+            active_source=_enum_or_int(GrayscaleCalibrationSource, values["active_source"]),
+            result=_enum_or_int(GrayscaleCalibrationResult, values["result"]),
+            progress=int(values["progress"]),
+            required=int(values["required"]),
+            generation=int(values["generation"]),
+            valid_mask=int(values["valid_mask"]),
+            polarity_fail_mask=int(values["polarity_fail_mask"]),
+            span_fail_mask=int(values["span_fail_mask"]),
+            noise_fail_mask=int(values["noise_fail_mask"]),
+            rail_fail_mask=int(values["rail_fail_mask"]),
+            failed_stage=int(values["failed_stage"]),
+            scan_error=bool(values["scan_error"]),
+            white_adc=array("white_adc"),
+            black_adc=array("black_adc"),
+            span_adc=array("span_adc"),
+            max_noise_adc=array("max_noise_adc"),
+        )
+
+    def get_grayscale_calibration(self) -> GrayscaleCalibrationStatus:
+        self.require_capability(Capability.GRAYSCALE_CALIBRATION)
+        values = decode_layout(
+            "grayscale_calibration_status_v1",
+            self._rpc(RpcOpcode.GRAYSCALE_CALIBRATION_GET),
+        )
+        return self._grayscale_calibration_status(values)
+
+    def grayscale_calibration_command(
+        self,
+        command: GrayscaleCalibrationCommand | int,
+        *,
+        expected_generation: int | None = None,
+    ) -> GrayscaleCalibrationStatus:
+        self.require_capability(Capability.GRAYSCALE_CALIBRATION)
+        identity = self._require_identity()
+        command = GrayscaleCalibrationCommand(int(command))
+        generation = identity.generation if expected_generation is None else int(expected_generation)
+        body = struct.pack("<IB3xI", identity.boot_id, int(command), generation)
+        values = decode_layout(
+            "grayscale_calibration_status_v1",
+            self._rpc(
+                RpcOpcode.GRAYSCALE_CALIBRATION_COMMAND,
+                body,
+                timeout=max(2.0, self.timeout) if command == GrayscaleCalibrationCommand.CONFIRM else None,
+            ),
+        )
+        status = self._grayscale_calibration_status(values)
+        if command == GrayscaleCalibrationCommand.CONFIRM:
+            self.identity = replace(identity, generation=status.generation)
+        return status
+
+    def start_grayscale_calibration(self) -> GrayscaleCalibrationStatus:
+        return self.grayscale_calibration_command(GrayscaleCalibrationCommand.START)
+
+    def capture_grayscale_white(self, *, expected_generation: int | None = None) -> GrayscaleCalibrationStatus:
+        return self.grayscale_calibration_command(
+            GrayscaleCalibrationCommand.CAPTURE_WHITE,
+            expected_generation=expected_generation,
+        )
+
+    def capture_grayscale_black(self, *, expected_generation: int | None = None) -> GrayscaleCalibrationStatus:
+        return self.grayscale_calibration_command(
+            GrayscaleCalibrationCommand.CAPTURE_BLACK,
+            expected_generation=expected_generation,
+        )
+
+    def confirm_grayscale_calibration(self, *, expected_generation: int | None = None) -> GrayscaleCalibrationStatus:
+        return self.grayscale_calibration_command(
+            GrayscaleCalibrationCommand.CONFIRM,
+            expected_generation=expected_generation,
+        )
+
+    def cancel_grayscale_calibration(self, *, expected_generation: int | None = None) -> GrayscaleCalibrationStatus:
+        return self.grayscale_calibration_command(
+            GrayscaleCalibrationCommand.CANCEL,
+            expected_generation=expected_generation,
+        )
 
     def set_manual_drive(
         self,
@@ -1294,6 +1450,12 @@ class Session:
         except queue.Empty:
             return None
 
+    def read_vision_uart(self, timeout: float | None = None) -> VisionUartChunk | None:
+        try:
+            return self._vision_uart.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
     def events(self, *, timeout: float = 0.1):
         while self.connected:
             event = self.read_event(timeout)
@@ -1354,6 +1516,7 @@ class Session:
             self._line_events = queue.Queue()
             self._events = queue.Queue()
             self._telemetry = queue.Queue()
+            self._vision_uart = queue.Queue()
             self._subscriptions.clear()
             self._outcome_unknown = None
             self._worker_error = None

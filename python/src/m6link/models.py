@@ -12,6 +12,10 @@ from .registry import (
     ActionReason,
     ActionState,
     Capability,
+    GrayscaleCalibrationOwner,
+    GrayscaleCalibrationResult,
+    GrayscaleCalibrationSource,
+    GrayscaleCalibrationState,
     ManualDriveSource,
     ManualDriveStopReason,
     ParameterSource,
@@ -94,6 +98,28 @@ class ManualDriveSnapshot:
     source: ManualDriveSource | int
     active: bool
     stop_reason: ManualDriveStopReason | int
+
+
+@dataclass(frozen=True, slots=True)
+class GrayscaleCalibrationStatus:
+    state: GrayscaleCalibrationState | int
+    owner: GrayscaleCalibrationOwner | int
+    active_source: GrayscaleCalibrationSource | int
+    result: GrayscaleCalibrationResult | int
+    progress: int
+    required: int
+    generation: int
+    valid_mask: int
+    polarity_fail_mask: int
+    span_fail_mask: int
+    noise_fail_mask: int
+    rail_fail_mask: int
+    failed_stage: int
+    scan_error: bool
+    white_adc: tuple[int, ...]
+    black_adc: tuple[int, ...]
+    span_adc: tuple[int, ...]
+    max_noise_adc: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +293,38 @@ class TelemetrySample:
     sample_id: int
     time_ms: int
     values: Mapping[str, Any]
+    gap_before: bool = False
+    sequence: int = 0
+    wire_gap_before: bool = False
+    sequence_gap_before: bool = False
+    expected_sequence: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class VisionUartStatus:
+    enabled: bool
+    receive_enabled: bool
+    rx_bytes: int
+    tx_bytes: int
+    rx_overflow: int
+    tx_overflow: int
+    hardware_errors: int
+    bridge_dropped: int
+    rx_queued: int
+    tx_queued: int
+
+
+@dataclass(frozen=True, slots=True)
+class VisionUartChunk:
+    time_ms: int
+    data: bytes
+    status_flags: int
+    rx_bytes: int
+    tx_bytes: int
+    rx_overflow: int
+    tx_overflow: int
+    hardware_errors: int
+    bridge_dropped: int
     gap_before: bool = False
     sequence: int = 0
     wire_gap_before: bool = False

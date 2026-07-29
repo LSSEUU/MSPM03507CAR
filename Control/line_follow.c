@@ -33,6 +33,38 @@ static uint8_t ambiguity_direction_samples;
 static int8_t position_direction_candidate;
 static uint8_t position_direction_samples;
 
+static void LineFollow_ResetLockState(void)
+{
+    memset(line.level, 0, sizeof(line.level));
+    memset(line.strength, 0, sizeof(line.strength));
+    line.line_valid = false;
+    line.ambiguous = false;
+    line.branch_direction_latched = false;
+    line.search_direction = 0;
+    line.active_mask = 0U;
+    line.active_count = 0U;
+    line.cluster_count = 0U;
+    line.raw_position = 0.0f;
+    line.position = 0.0f;
+    line.raw_derivative = 0.0f;
+    line.filtered_derivative = 0.0f;
+    line.confidence = 0.0f;
+    valid_samples = 0U;
+    invalid_samples = 0U;
+    previous_position = 0.0f;
+    previous_control_ms = 0U;
+    last_valid_position = 0.0f;
+    position_initialized = false;
+    derivative_initialized = false;
+    derivative_reset_pending = true;
+    previous_raw_valid = false;
+    branch_release_samples = 0U;
+    ambiguity_direction_candidate = 0;
+    ambiguity_direction_samples = 0U;
+    position_direction_candidate = 0;
+    position_direction_samples = 0U;
+}
+
 static float LineFollow_Abs(float value)
 {
     return (value < 0.0f) ? -value : value;
@@ -132,6 +164,7 @@ static void LineFollow_InitCalibration(void)
 
     line.calibration.compiled_verified =
         (GRAYSCALE_CALIBRATION_VERIFIED != 0U);
+    line.calibration.source = LINE_CALIBRATION_SOURCE_COMPILED;
     for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
         uint16_t white = configured_white_adc[i];
         uint16_t black = configured_black_adc[i];
@@ -152,6 +185,60 @@ static void LineFollow_InitCalibration(void)
         (valid_mask == 0xFFU);
 }
 
+bool LineFollow_ValidateCalibration(const LineCalibrationValues_t *values,
+                                    uint8_t *valid_mask)
+{
+    uint8_t mask = 0U;
+    uint32_t i;
+    if (values == NULL) return false;
+    for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
+        uint16_t white = values->white_adc[i];
+        uint16_t black = values->black_adc[i];
+        if ((white > black) &&
+            ((uint16_t)(white - black) >=
+             GRAYSCALE_CALIBRATION_MIN_SPAN_ADC))
+            mask |= (uint8_t)(1U << i);
+    }
+    if (valid_mask != NULL) *valid_mask = mask;
+    return mask == 0xFFU;
+}
+
+bool LineFollow_ApplyCalibration(const LineCalibrationValues_t *values,
+                                 LineCalibrationSource_t source)
+{
+    uint8_t mask;
+    uint32_t i;
+    if ((line.state != LINE_FOLLOW_IDLE) ||
+        !LineFollow_ValidateCalibration(values, &mask)) return false;
+    for (i = 0U; i < LINE_SENSOR_CHANNEL_COUNT; i++) {
+        uint16_t white = values->white_adc[i];
+        uint16_t black = values->black_adc[i];
+        line.calibration.white_adc[i] = white;
+        line.calibration.black_adc[i] = black;
+        line.calibration.enter_black_adc[i] = (uint16_t)(
+            ((2U * (uint32_t)black) + (uint32_t)white) / 3U);
+        line.calibration.exit_black_adc[i] = (uint16_t)(
+            ((uint32_t)black + (2U * (uint32_t)white)) / 3U);
+    }
+    line.calibration.valid_mask = mask;
+    line.calibration.source = source;
+    line.calibration.valid = true;
+    LineFollow_ResetLockState();
+    return true;
+}
+
+void LineFollow_GetCalibrationValues(LineCalibrationValues_t *values,
+                                     LineCalibrationSource_t *source)
+{
+    if (values != NULL) {
+        memcpy(values->white_adc, line.calibration.white_adc,
+               sizeof(values->white_adc));
+        memcpy(values->black_adc, line.calibration.black_adc,
+               sizeof(values->black_adc));
+    }
+    if (source != NULL) *source = line.calibration.source;
+}
+
 void LineFollow_Init(void)
 {
     memset(&line, 0, sizeof(line));
@@ -159,22 +246,7 @@ void LineFollow_Init(void)
     line.polarity = LINE_POLARITY_ACTIVE_HIGH;
     line.state = LINE_FOLLOW_IDLE;
     LineFollow_InitCalibration();
-    valid_samples = 0U;
-    invalid_samples = 0U;
-    previous_position = 0.0f;
-    previous_control_ms = 0U;
-    last_valid_position = 0.0f;
-    position_initialized = false;
-    derivative_initialized = false;
-    derivative_reset_pending = true;
-    previous_raw_valid = false;
-    line.search_direction = 0;
-    line.branch_direction_latched = false;
-    branch_release_samples = 0U;
-    ambiguity_direction_candidate = 0;
-    ambiguity_direction_samples = 0U;
-    position_direction_candidate = 0;
-    position_direction_samples = 0U;
+    LineFollow_ResetLockState();
 }
 
 static uint8_t LineFollow_CountClusters(uint8_t active_mask)

@@ -11,6 +11,7 @@
 #include "ir_receiver.h"
 #include "led.h"
 #include "line_trace.h"
+#include "line_follow.h"
 #include "m6_telemetry.h"
 #include "motor.h"
 #include "oled.h"
@@ -207,12 +208,14 @@ static void Diagnostics_RefreshReports(void)
                 DIAG_STATUS_OK : DIAG_STATUS_DEGRADED),
         gray.scan_count, gray.error_count,
         (gray.error_count > 0U) ? "ADC/address scan error" :
-            (!line_app.control.calibration.compiled_verified ?
-                "ADC ready; compile-time calibration locked" :
-                (!line_app.control.calibration.valid ?
-                    "ADC ready; calibration constants invalid" :
-                    ((gray.scan_count > 0U) ? "analog scan and calibration ready" :
-                                              "waiting for scheduled ADC scan"))));
+            (!line_app.control.calibration.valid ?
+                ((line_app.control.calibration.source ==
+                  LINE_CALIBRATION_SOURCE_COMPILED) &&
+                 !line_app.control.calibration.compiled_verified ?
+                    "ADC ready; compile fallback calibration locked" :
+                    "ADC ready; active calibration invalid") :
+                ((gray.scan_count > 0U) ? "analog scan and calibration ready" :
+                                          "waiting for scheduled ADC scan")));
     Diagnostics_Set(DIAG_OLED,
         !oled.present ? DIAG_STATUS_FAULT :
             ((oled.ack_errors > 0U || !oled_visual_passed) ?
@@ -404,7 +407,15 @@ static void Diagnostics_ServiceLineCalibrationReport(void)
     if (!line_calibration_report_pending) return;
 
     if (line_calibration_report_line == 0U) {
-        debug_printf("LINE CAL verified=%u valid=%u mask=0x%02X min_span=512\r\n",
+        ParameterStoreInfo_t store;
+        const char *source = "COMPILED";
+        ParameterStore_GetInfo(&store);
+        if (cal->source == LINE_CALIBRATION_SOURCE_PERSISTED)
+            source = "PERSISTED";
+        else if (cal->source == LINE_CALIBRATION_SOURCE_RUNTIME)
+            source = "RUNTIME";
+        debug_printf("LINE CAL source=%s generation=%lu verified=%u valid=%u mask=0x%02X min_span=512\r\n",
+            source, (unsigned long)store.generation,
             cal->compiled_verified, cal->valid,
             (unsigned int)cal->valid_mask);
     } else if (line_calibration_report_line == 1U) {
@@ -1145,8 +1156,15 @@ uint32_t Diagnostics_Get100msDropped(void)
 void Diagnostics_RunBootSelfTest(void)
 {
     ParameterStoreInfo_t store;
+    LineFollowSnapshot_t line;
+    const char *calibration_source = "COMPILED";
 
     ParameterStore_GetInfo(&store);
+    LineFollow_GetSnapshot(&line);
+    if (line.calibration.source == LINE_CALIBRATION_SOURCE_PERSISTED)
+        calibration_source = "PERSISTED";
+    else if (line.calibration.source == LINE_CALIBRATION_SOURCE_RUNTIME)
+        calibration_source = "RUNTIME";
     debug_println("\r\n=== MSPM0 CAR M6 RUNTIME TUNING ===");
     debug_printf("M6 READY fw=%s schema=%u revision=%lu source=%s "
                  "storage=%s generation=%lu\r\n",
@@ -1154,6 +1172,19 @@ void Diagnostics_RunBootSelfTest(void)
         (unsigned long)ControlParams_Revision(), ParameterStore_SourceName(),
         (store.health == PARAMETER_STORE_HEALTH_OK) ? "OK" : "DEGRADED",
         (unsigned long)store.generation);
+    debug_printf("GRAY CAL source=%s generation=%lu valid=%u mask=0x%02X "
+                 "white=[%u,%u,%u,%u,%u,%u,%u,%u] "
+                 "black=[%u,%u,%u,%u,%u,%u,%u,%u]\r\n",
+        calibration_source, (unsigned long)store.generation,
+        line.calibration.valid, (unsigned int)line.calibration.valid_mask,
+        line.calibration.white_adc[0], line.calibration.white_adc[1],
+        line.calibration.white_adc[2], line.calibration.white_adc[3],
+        line.calibration.white_adc[4], line.calibration.white_adc[5],
+        line.calibration.white_adc[6], line.calibration.white_adc[7],
+        line.calibration.black_adc[0], line.calibration.black_adc[1],
+        line.calibration.black_adc[2], line.calibration.black_adc[3],
+        line.calibration.black_adc[4], line.calibration.black_adc[5],
+        line.calibration.black_adc[6], line.calibration.black_adc[7]);
 #ifdef M2_FAULT_INJECTION_TEST
     debug_println("*** FAULT INJECTION BUILD - ZERO PWM TESTS ONLY ***");
 #endif
@@ -1170,6 +1201,7 @@ void Diagnostics_PrintHelp(void)
     debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
     debug_println("          g=heading z=calibrate u=+90 i=-90 w=straight; A=arm");
     debug_println("          r=line 1=calibration 3=arm line A=start 0=stop T=line trace");
+    debug_println("IR grayscale calibration: 5=start/restart OK=next/save 0=cancel (OLED required)");
     debug_println("          v=safety x=clear fault; S or space=immediate e-stop");
     debug_println("M6 transaction: :id,get/set/apply/revert/load/defaults/save/log,...");
 #ifdef M2_FAULT_INJECTION_TEST
@@ -1490,7 +1522,7 @@ void Diagnostics_Poll(void)
             Diagnostics_QueueLineCalibrationReport();
             break;
         case '2':
-            debug_println("M5 active-level fixed: black line is derived from compile-time ADC calibration.");
+            debug_println("M5 active-level fixed: black line is derived from active ADC calibration.");
             break;
         case '3':
         {
@@ -1501,7 +1533,7 @@ void Diagnostics_Poll(void)
                 (heading_diag_state != HEADING_DIAG_IDLE)) {
                 debug_println("M5 arm rejected: another action is active.");
             } else if (!line_app.control.calibration.valid) {
-                debug_println("M5 arm rejected: compile and verify analog calibration first.");
+                debug_println("M5 arm rejected: install or verify a valid analog calibration first.");
             } else if (AppLine_Arm(now_ms)) {
                 debug_println("Place car on line; type uppercase A within 10 s.");
             } else {

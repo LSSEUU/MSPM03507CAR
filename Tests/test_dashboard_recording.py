@@ -8,7 +8,7 @@ import zipfile
 import pytest
 
 from m6link.dashboard_recording import DashboardRecordingManager, FORMAT_VERSION
-from m6link.models import LinkEvent, TelemetrySample
+from m6link.models import LinkEvent, TelemetrySample, VisionUartChunk
 from m6link.registry import ActionState, EventCode, TelemetryStream
 
 
@@ -77,6 +77,20 @@ def test_manual_recording_writes_ai_friendly_session(tmp_path: Path) -> None:
         (TelemetryStream.HEALTH, {"task_missed": 0, "uart_rx_drop": 0}),
     ):
         recording.ingest(TelemetrySample(stream, 1, 40, values))
+    camera_bytes = b"target,12\n\x00\x7d\x7e\xff"
+    recording.ingest(VisionUartChunk(
+        time_ms=41,
+        data=camera_bytes,
+        status_flags=0x06,
+        rx_bytes=120,
+        tx_bytes=0,
+        rx_overflow=1,
+        tx_overflow=0,
+        hardware_errors=2,
+        bridge_dropped=5,
+        gap_before=True,
+        sequence=90,
+    ))
     recording.ingest(LinkEvent(
         int(EventCode.TELEMETRY_GAP), 1, 40, 1,
         {"stream_id": int(TelemetryStream.LINE), "reason": 1, "drop_delta": 4, "latest_sample_id": 8},
@@ -103,11 +117,17 @@ def test_manual_recording_writes_ai_friendly_session(tmp_path: Path) -> None:
     assert manifest["name"] == "直线测试"
     assert manifest["sampling"]["core"]["period_ms"] == 20
     assert manifest["complete"] is True
-    assert manifest["gaps"]["total"] == 5
+    assert manifest["gaps"]["total"] == 6
     assert set(("core", "wheel", "line", "health")) <= set(manifest["counts"])
     assert summary["faults"][0]["event"] == "SAFETY_FAULT"
     assert summary["markers"][0]["label"] == "进入直道"
     assert schema["streams"]["core"]["stream_id"] == 1
+    assert schema["uart_streams"]["vision_uart_rx"]["baud"] == 115200
+    uart_record = next(record for record in records if record["record_type"] == "uart_data")
+    assert uart_record["stream"] == "vision_uart_rx"
+    assert bytes.fromhex(uart_record["values"]["data_hex"]) == camera_bytes
+    assert uart_record["values"]["bridge_dropped"] == 5
+    assert uart_record["gap"] is True
     assert [record["record_index"] for record in records] == list(range(1, len(records) + 1))
     assert records[2]["values"]["speed_l_mm_s"] is None
     assert "NaN" not in (directory / "timeline.jsonl").read_text(encoding="utf-8")

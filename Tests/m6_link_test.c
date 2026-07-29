@@ -127,7 +127,7 @@ int main(void)
     assert(M6Link_BeginV2(UINT64_C(0x0123456789ABCDEF), 0U));
     M6Link_NotifyV1ReadyComplete(0U);
     memcpy(hello, m6_v2_hello_request_wire, hello_length);
-    /* Golden HELLO asks for capabilities not published by this r14 slice.
+    /* Golden HELLO asks for capabilities not published by this r15 slice.
      * Limit optional to the actual device mask and fix its CRC by encoding. */
     {
         M6Frame_t h;

@@ -21,7 +21,7 @@ from typing import Any
 import uuid
 import zipfile
 
-from .models import LinkEvent, TelemetrySample
+from .models import LinkEvent, TelemetrySample, VisionUartChunk
 from .registry import ActionState, EventCode, LAYOUTS, REGISTRY, TELEMETRY
 
 
@@ -134,14 +134,29 @@ def dashboard_schema() -> dict[str, Any]:
             "elapsed_ms": "milliseconds since the first record in this session",
             "host_time_utc": "ISO-8601 UTC",
             "device_time_ms": "device monotonic milliseconds, when available",
-            "record_type": "telemetry | device_event | dashboard_event",
-            "stream": "core | wheel | line | health, or null",
+            "record_type": "telemetry | uart_data | device_event | dashboard_event",
+            "stream": "core | wheel | line | health | vision_uart_rx, or null",
             "event": "stable event name, or null",
             "sample_id": "per-stream sample id, or null",
             "gap": "whether a transport/sample gap preceded this record",
             "values": "raw decoded protocol values",
         },
         "streams": streams,
+        "uart_streams": {
+            "vision_uart_rx": {
+                "transport": "UART1",
+                "direction": "camera-to-MCU RX",
+                "baud": 115200,
+                "format": "8N1",
+                "mcu_pin": "PB7",
+                "data_encoding": "lowercase hexadecimal in values.data_hex",
+                "fields": [
+                    "sequence", "status_flags", "rx_bytes", "tx_bytes",
+                    "rx_overflow", "tx_overflow", "hardware_errors",
+                    "bridge_dropped", "data_hex",
+                ],
+            }
+        },
         "events": events,
     }
 
@@ -636,6 +651,25 @@ class DashboardRecordingManager:
                 "sample_id": int(event.sample_id),
                 "values": _json_safe(event.values),
             }
+        if isinstance(event, VisionUartChunk):
+            return {
+                **common,
+                "record_type": "uart_data",
+                "stream": "vision_uart_rx",
+                "event": None,
+                "values": {
+                    "direction": "rx",
+                    "sequence": int(event.sequence),
+                    "status_flags": int(event.status_flags),
+                    "rx_bytes": int(event.rx_bytes),
+                    "tx_bytes": int(event.tx_bytes),
+                    "rx_overflow": int(event.rx_overflow),
+                    "tx_overflow": int(event.tx_overflow),
+                    "hardware_errors": int(event.hardware_errors),
+                    "bridge_dropped": int(event.bridge_dropped),
+                    "data_hex": event.data.hex(),
+                },
+            }
         if isinstance(event, LinkEvent):
             try:
                 name = EventCode(int(event.code)).name
@@ -814,7 +848,8 @@ This directory is one self-contained UTF-8 telemetry session.
 
 For AI analysis, read `manifest.json` and `schema.json` first, use `summary.json` for orientation,
 then stream only the required time range from `timeline.jsonl`. Raw integer protocol values are
-preserved; apply the scale declared in `schema.json` when engineering units are needed.
+preserved; apply the scale declared in `schema.json` when engineering units are needed. UART1
+camera bytes use `record_type: "uart_data"` and lossless lowercase HEX in `values.data_hex`.
 """
 
 

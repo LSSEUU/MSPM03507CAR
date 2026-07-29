@@ -1,10 +1,18 @@
 #ifndef LINE_FOLLOW_H
 #define LINE_FOLLOW_H
 
+#include "grayscale_calibration_types.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
 #define LINE_SENSOR_CHANNEL_COUNT 8U
+
+typedef enum {
+    LINE_CALIBRATION_SOURCE_COMPILED = 0,
+    LINE_CALIBRATION_SOURCE_PERSISTED = 1,
+    LINE_CALIBRATION_SOURCE_RUNTIME = 2
+} LineCalibrationSource_t;
 
 typedef enum {
     LINE_POLARITY_ACTIVE_LOW = 0,
@@ -37,6 +45,7 @@ typedef struct {
     uint16_t enter_black_adc[LINE_SENSOR_CHANNEL_COUNT];
     uint16_t exit_black_adc[LINE_SENSOR_CHANNEL_COUNT];
     uint8_t valid_mask;
+    LineCalibrationSource_t source;
     bool compiled_verified;
     bool valid;
 } LineCalibration_t;
@@ -76,6 +85,12 @@ void LineFollow_Init(void);
 void LineFollow_GetDefaultConfig(LineFollowConfig_t *config);
 void LineFollow_GetConfig(LineFollowConfig_t *config);
 bool LineFollow_ApplyConfig(const LineFollowConfig_t *config);
+bool LineFollow_ValidateCalibration(const LineCalibrationValues_t *values,
+                                    uint8_t *valid_mask);
+bool LineFollow_ApplyCalibration(const LineCalibrationValues_t *values,
+                                 LineCalibrationSource_t source);
+void LineFollow_GetCalibrationValues(LineCalibrationValues_t *values,
+                                     LineCalibrationSource_t *source);
 void LineFollow_ProcessSample(const uint16_t adc[LINE_SENSOR_CHANNEL_COUNT],
                               uint32_t scan_id, uint32_t now_ms);
 bool LineFollow_Start(uint32_t now_ms);

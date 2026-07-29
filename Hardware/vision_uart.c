@@ -65,6 +65,7 @@ void VisionUart_Init(void)
     receive_enabled = 1U;
     DL_UART_enableInterrupt(UART_1_INST,
         DL_UART_INTERRUPT_RX |
+        DL_UART_INTERRUPT_RX_TIMEOUT_ERROR |
         DL_UART_INTERRUPT_OVERRUN_ERROR |
         DL_UART_INTERRUPT_FRAMING_ERROR |
         DL_UART_INTERRUPT_PARITY_ERROR |
@@ -79,9 +80,11 @@ void VisionUart_SetReceiveEnabled(uint8_t enabled)
     __disable_irq();
     receive_enabled = (enabled != 0U) ? 1U : 0U;
     if (receive_enabled != 0U) {
-        DL_UART_enableInterrupt(UART_1_INST, DL_UART_INTERRUPT_RX);
+        DL_UART_enableInterrupt(UART_1_INST,
+            DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_RX_TIMEOUT_ERROR);
     } else {
-        DL_UART_disableInterrupt(UART_1_INST, DL_UART_INTERRUPT_RX);
+        DL_UART_disableInterrupt(UART_1_INST,
+            DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_RX_TIMEOUT_ERROR);
         rx_read = rx_write = 0U;
         DrainRxFifo();
     }
@@ -148,6 +151,11 @@ void UART1_IRQHandler(void)
             case DL_UART_IIDX_RX:
                 DrainRxFifo();
                 break;
+            case DL_UART_IIDX_RX_TIMEOUT_ERROR:
+                /* A timeout is the normal way to flush a partial FIFO when
+                 * the threshold is above one byte; it is not a line error. */
+                DrainRxFifo();
+                break;
             case DL_UART_IIDX_TX:
                 FillTxFifo();
                 break;
@@ -155,7 +163,6 @@ void UART1_IRQHandler(void)
             case DL_UART_IIDX_BREAK_ERROR:
             case DL_UART_IIDX_PARITY_ERROR:
             case DL_UART_IIDX_FRAMING_ERROR:
-            case DL_UART_IIDX_RX_TIMEOUT_ERROR:
             case DL_UART_IIDX_NOISE_ERROR:
                 uart_stats.hardware_errors++;
                 DrainRxFifo();

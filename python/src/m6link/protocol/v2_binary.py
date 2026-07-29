@@ -206,6 +206,31 @@ def decode_telemetry(payload: bytes) -> tuple[int, int, dict[str, Any]]:
     return stream_id, sample_id, decode_layout(str(spec["body_layout"]), body)
 
 
+def decode_vision_uart_chunk(payload: bytes) -> dict[str, Any]:
+    """Decode the variable-length VISION_UART_RX P3 payload."""
+
+    if not 32 <= len(payload) <= 96:
+        raise IntegrityError("vision UART chunk length is outside 32..96 bytes")
+    kind, schema, flags = struct.unpack_from("<BBH", payload)
+    if kind != 2 or schema != 1:
+        raise IntegrityError("unsupported vision UART bulk prefix")
+    (
+        time_ms, rx_bytes, tx_bytes, rx_overflow, tx_overflow,
+        hardware_errors, bridge_dropped,
+    ) = struct.unpack_from("<IIIIIII", payload, 4)
+    return {
+        "status_flags": flags,
+        "time_ms": time_ms,
+        "rx_bytes": rx_bytes,
+        "tx_bytes": tx_bytes,
+        "rx_overflow": rx_overflow,
+        "tx_overflow": tx_overflow,
+        "hardware_errors": hardware_errors,
+        "bridge_dropped": bridge_dropped,
+        "data": bytes(payload[32:]),
+    }
+
+
 def decode_event(payload: bytes) -> tuple[dict[str, Any], dict[str, Any]]:
     if len(payload) < 12:
         raise IntegrityError("event payload is shorter than its common prefix")
