@@ -1,0 +1,16 @@
+id: ball1
+name: ball1
+version: 1.2.2
+author: '1'
+icon: ''
+desc: ball
+files:
+  - models\yolo26_ball_2.cvimodel
+  - models\yolo26_ball_2.mud
+  - app.yaml
+  - ball坐标+置信度.py
+  - demo.py
+  - main.py
+  - yolo26_ball_2_tensor_info.txt
+  - yolo26_ball_2.cvimodel
+  - yolo26_ball_2.mud
