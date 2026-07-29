@@ -82,6 +82,10 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
             "ENC_B_E2B_PIN                                            (DL_GPIO_PIN_8)",
             "OLED_SDA_PIN                                            (DL_GPIO_PIN_28)",
             "OLED_SCL_PIN                                            (DL_GPIO_PIN_31)",
+            "KEY1_PIN                                                (DL_GPIO_PIN_18)",
+            "KEY1_IOMUX                                              (IOMUX_PINCM44)",
+            "BUZZER_PIN                                              (DL_GPIO_PIN_12)",
+            "BUZZER_IOMUX                                            (IOMUX_PINCM34)",
             "BOARD_STATUS_LED_COUNT                                             (0U)",
         ]
         for invariant in expected:
@@ -151,6 +155,8 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("../Hardware/vision_uart.c", paths)
         self.assertIn("../Hardware/zdt_stepper_uart.c", paths)
         self.assertIn("../Hardware/zdt_stepper.c", paths)
+        self.assertIn("../Hardware/key.c", paths)
+        self.assertIn("../Hardware/buzzer.c", paths)
         self.assertIn("../App/app_manual_drive.c", paths)
         self.assertIn("../Control/pid.c", paths)
         self.assertIn("../Control/filter.c", paths)
@@ -204,6 +210,57 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("ZdtStepper_EmergencyStop(true)",
                       (ROOT / "System" / "zdt_stepper_test.c").read_text(
                           encoding="utf-8"))
+
+    def test_key1_drives_active_high_buzzer_for_board_validation(self):
+        header = HEADER.read_text(encoding="utf-8")
+        key_header = (ROOT / "Hardware" / "key.h").read_text(encoding="utf-8")
+        key_driver = (ROOT / "Hardware" / "key.c").read_text(encoding="utf-8")
+        buzzer_header = (ROOT / "Hardware" / "buzzer.h").read_text(
+            encoding="utf-8")
+        buzzer_driver = (ROOT / "Hardware" / "buzzer.c").read_text(
+            encoding="utf-8")
+        main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")
+
+        self.assertIn("FROZEN_BOARD_CONFIG_REVISION                         (20260729U)", header)
+        self.assertRegex(header, r"#define\s+KEY1_PORT\s+\(GPIOB\)")
+        self.assertRegex(header, r"#define\s+KEY1_PIN\s+\(DL_GPIO_PIN_18\)")
+        self.assertRegex(header, r"#define\s+KEY1_IOMUX\s+\(IOMUX_PINCM44\)")
+        self.assertRegex(header, r"#define\s+BUZZER_PORT\s+\(GPIOA\)")
+        self.assertRegex(header, r"#define\s+BUZZER_PIN\s+\(DL_GPIO_PIN_12\)")
+        self.assertRegex(header, r"#define\s+BUZZER_IOMUX\s+\(IOMUX_PINCM34\)")
+
+        self.assertIn("void Key_Init(void);", key_header)
+        self.assertIn("bool Key1_IsPressed(void);", key_header)
+        self.assertIn("DL_GPIO_initDigitalInput(KEY1_IOMUX)", key_driver)
+        self.assertIn("DL_GPIO_readPins(KEY1_PORT, KEY1_PIN)", key_driver)
+        self.assertNotIn("DL_GPIO_RESISTOR", key_driver)
+
+        for declaration in (
+            "void Buzzer_Init(void);", "void Buzzer_On(void);",
+            "void Buzzer_Off(void);",
+        ):
+            self.assertIn(declaration, buzzer_header)
+        preload = buzzer_driver.index(
+            "DL_GPIO_clearPins(BUZZER_PORT, BUZZER_PIN);")
+        configure = buzzer_driver.index(
+            "DL_GPIO_initDigitalOutput(BUZZER_IOMUX);")
+        enable = buzzer_driver.index(
+            "DL_GPIO_enableOutput(BUZZER_PORT, BUZZER_PIN);")
+        self.assertLess(preload, configure)
+        self.assertLess(configure, enable)
+        self.assertIn("DL_GPIO_setPins(BUZZER_PORT, BUZZER_PIN);",
+                      buzzer_driver)
+
+        syscfg = main.index("SYSCFG_DL_init();")
+        buzzer_init = main.index("Buzzer_Init();")
+        key_init = main.index("Key_Init();")
+        checkpoint = main.index(
+            "ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_INIT);")
+        self.assertLess(syscfg, buzzer_init)
+        self.assertLess(buzzer_init, key_init)
+        self.assertLess(key_init, checkpoint)
+        self.assertIn("if (Key1_IsPressed()) Buzzer_On();", main)
+        self.assertIn("else                  Buzzer_Off();", main)
 
     def test_watchdog_and_scheduler_clock_start_after_boot_diagnostics(self):
         main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")

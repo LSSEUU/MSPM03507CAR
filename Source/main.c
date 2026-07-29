@@ -3,6 +3,7 @@
 #include "app_line.h"
 #include "app_remote.h"
 #include "app_manual_drive.h"
+#include "buzzer.h"
 #include "control_params.h"
 #include "control_protocol.h"
 #include "control_runtime.h"
@@ -12,6 +13,7 @@
 #include "grayscale_calibration.h"
 #include "gyro.h"
 #include "heading.h"
+#include "key.h"
 #include "led.h"
 #include "motor.h"
 #include "m6_telemetry.h"
@@ -93,6 +95,8 @@ int main(void)
 
     ResetDiag_EarlyInit(reset_cause);
     SYSCFG_DL_init();
+    Buzzer_Init();
+    Key_Init();
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_INIT);
     Motor_Init();
 
@@ -148,6 +152,11 @@ int main(void)
             Safety_RaiseFault(SAFETY_FAULT_SCHEDULER_DEADLINE,
                               SystemTime_Now());
         }
+
+        /* Temporary board-level validation: follow the raw KEY1 level. The
+         * carrier provides RC filtering; no edge/debounce state is needed. */
+        if (Key1_IsPressed()) Buzzer_On();
+        else                  Buzzer_Off();
 
         AppRemote_Poll();
         Diagnostics_Poll();

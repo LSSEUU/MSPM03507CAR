@@ -450,6 +450,16 @@
               <FilePath>../Hardware/led.c</FilePath>
             </File>
             <File>
+              <FileName>key.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/key.c</FilePath>
+            </File>
+            <File>
+              <FileName>buzzer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/buzzer.c</FilePath>
+            </File>
+            <File>
               <FileName>oled.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Hardware/oled.c</FilePath>

@@ -165,6 +165,16 @@ extern "C" {
 #define OLED_SCL_PIN                                            (DL_GPIO_PIN_31)
 #define OLED_SCL_IOMUX                                          (IOMUX_PINCM6)
 
+/* Carrier KEY1: external 4.7 kOhm pull-down, pressed level is high. */
+#define KEY1_PORT                                                       (GPIOB)
+#define KEY1_PIN                                                (DL_GPIO_PIN_18)
+#define KEY1_IOMUX                                              (IOMUX_PINCM44)
+
+/* Latest populated carrier routes the active-high buzzer SIG to PA12. */
+#define BUZZER_PORT                                                     (GPIOA)
+#define BUZZER_PIN                                              (DL_GPIO_PIN_12)
+#define BUZZER_IOMUX                                            (IOMUX_PINCM34)
+
 /* No MCU-controlled status LED is populated on the verified carrier. */
 #define BOARD_STATUS_LED_COUNT                                             (0U)
 
