@@ -1,0 +1,15 @@
+#ifndef M6_ZDT_STEPPER_EXT_H
+#define M6_ZDT_STEPPER_EXT_H
+
+/* Generated from Tests/vectors/m6_zdt_stepper_ext_v1.json.
+ * registry-sha256: 94400935573dd65d58b28147e7be3995239fa40b87223f1910fed246143edaa6 */
+#define M6_CAP_ZDT_STEPPER_CONTROL       (UINT64_C(1) << 28)
+#define M6_RPC_ZDT_STEPPER_STATUS_GET    0x000EU
+#define M6_RPC_ZDT_STEPPER_COMMAND       0x8308U
+#define M6_ZDT_STEPPER_RESOURCE          9U
+#define M6_ZDT_STEPPER_RETRY_MS          20U
+#define M6_ZDT_STEPPER_STATUS_REQUEST_SIZE 4U
+#define M6_ZDT_STEPPER_COMMAND_REQUEST_SIZE 24U
+#define M6_ZDT_STEPPER_SNAPSHOT_SIZE     88U
+
+#endif

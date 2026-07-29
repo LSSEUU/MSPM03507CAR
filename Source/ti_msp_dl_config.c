@@ -8,6 +8,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_UART_0_init();
     SYSCFG_DL_UART_1_init();
     SYSCFG_DL_UART_2_init();
+    SYSCFG_DL_UART_3_init();
     SYSCFG_DL_GRAY_ADC_init();
     SYSCFG_DL_PWM_0_init();
     SYSCFG_DL_IR_CAPTURE_init();
@@ -22,6 +23,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_UART_Main_reset(UART_0_INST);
     DL_UART_Main_reset(UART_1_INST);
     DL_UART_Main_reset(UART_2_INST);
+    DL_UART_Main_reset(UART_3_INST);
     DL_ADC12_reset(GRAY_ADC_INST);
     DL_TimerG_reset(IR_CAPTURE_INST);
 
@@ -30,6 +32,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_UART_Main_enablePower(UART_0_INST);
     DL_UART_Main_enablePower(UART_1_INST);
     DL_UART_Main_enablePower(UART_2_INST);
+    DL_UART_Main_enablePower(UART_3_INST);
     DL_ADC12_enablePower(GRAY_ADC_INST);
     DL_TimerA_enablePower(PWM_0_INST);
     DL_TimerG_enablePower(IR_CAPTURE_INST);
@@ -46,6 +49,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
         GPIO_UART_1_TX_IOMUX, GPIO_UART_1_TX_IOMUX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_UART_1_RX_IOMUX, GPIO_UART_1_RX_IOMUX_FUNC);
+    DL_GPIO_initPeripheralOutputFunction(
+        GPIO_UART_3_TX_IOMUX, GPIO_UART_3_TX_IOMUX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_UART_3_RX_IOMUX, GPIO_UART_3_RX_IOMUX_FUNC);
 
     DL_GPIO_initDigitalOutput(AIN_AIN1_IOMUX);
     DL_GPIO_initDigitalOutput(AIN_AIN2_IOMUX);
@@ -192,6 +199,37 @@ SYSCONFIG_WEAK void SYSCFG_DL_UART_2_init(void)
     DL_UART_Main_setRXFIFOThreshold(UART_2_INST,
         DL_UART_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_enable(UART_2_INST);
+}
+
+static const DL_UART_Main_ClockConfig gUART_3ClockConfig = {
+    .clockSel    = DL_UART_MAIN_CLOCK_BUSCLK,
+    .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
+};
+
+static const DL_UART_Main_Config gUART_3Config = {
+    .mode        = DL_UART_MAIN_MODE_NORMAL,
+    .direction   = DL_UART_MAIN_DIRECTION_TX_RX,
+    .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
+    .parity      = DL_UART_MAIN_PARITY_NONE,
+    .wordLength  = DL_UART_MAIN_WORD_LENGTH_8_BITS,
+    .stopBits    = DL_UART_MAIN_STOP_BITS_ONE
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_UART_3_init(void)
+{
+    DL_UART_Main_setClockConfig(UART_3_INST,
+        (DL_UART_Main_ClockConfig *)&gUART_3ClockConfig);
+    DL_UART_Main_init(UART_3_INST,
+        (DL_UART_Main_Config *)&gUART_3Config);
+    DL_UART_Main_setOversampling(UART_3_INST,
+        DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setBaudRateDivisor(UART_3_INST,
+        UART_3_IBRD_32_MHZ_115200_BAUD,
+        UART_3_FBRD_32_MHZ_115200_BAUD);
+    DL_UART_Main_enableFIFOs(UART_3_INST);
+    DL_UART_Main_setRXFIFOThreshold(UART_3_INST,
+        DL_UART_RX_FIFO_LEVEL_1_2_FULL);
+    DL_UART_Main_enable(UART_3_INST);
 }
 
 static const DL_ADC12_ClockConfig gGrayADCClockConfig = {

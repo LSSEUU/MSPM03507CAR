@@ -435,6 +435,16 @@
               <FilePath>../Hardware/vision_uart.c</FilePath>
             </File>
             <File>
+              <FileName>zdt_stepper_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/zdt_stepper_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>zdt_stepper.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Hardware/zdt_stepper.c</FilePath>
+            </File>
+            <File>
               <FileName>led.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Hardware/led.c</FilePath>
@@ -558,6 +568,11 @@
               <FileName>m6_rpc.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/m6_rpc.c</FilePath>
+            </File>
+            <File>
+              <FileName>zdt_stepper_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/zdt_stepper_test.c</FilePath>
             </File>
             <File>
               <FileName>m6_vision_uart.c</FileName>

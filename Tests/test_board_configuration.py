@@ -74,6 +74,8 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
             "GPIO_UART_1_RX_PIN                                         DL_GPIO_PIN_7",
             "GPIO_UART_2_TX_PIN                                        DL_GPIO_PIN_21",
             "GPIO_UART_2_RX_PIN                                        DL_GPIO_PIN_22",
+            "GPIO_UART_3_TX_PIN                                        DL_GPIO_PIN_12",
+            "GPIO_UART_3_RX_PIN                                        DL_GPIO_PIN_13",
             "ENC_A_E1A_PIN                                            (DL_GPIO_PIN_8)",
             "ENC_A_E1B_PIN                                            (DL_GPIO_PIN_9)",
             "ENC_B_E2A_PIN                                            (DL_GPIO_PIN_9)",
@@ -147,6 +149,8 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("../System/m6_action_validate.c", paths)
         self.assertIn("../Hardware/watchdog.c", paths)
         self.assertIn("../Hardware/vision_uart.c", paths)
+        self.assertIn("../Hardware/zdt_stepper_uart.c", paths)
+        self.assertIn("../Hardware/zdt_stepper.c", paths)
         self.assertIn("../App/app_manual_drive.c", paths)
         self.assertIn("../Control/pid.c", paths)
         self.assertIn("../Control/filter.c", paths)
@@ -171,6 +175,35 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("VISION_UART_RX_BUFFER_SIZE 256U", driver)
         self.assertIn("VISION_UART_TX_BUFFER_SIZE 256U", driver)
         self.assertNotIn("AppManualDrive", driver)
+
+    def test_uart3_is_reserved_for_zdt_stepper_transport(self):
+        header = HEADER.read_text(encoding="utf-8")
+        config = CONFIG_SOURCE.read_text(encoding="utf-8")
+        transport = (ROOT / "Hardware" / "zdt_stepper_uart.c").read_text(
+            encoding="utf-8")
+        protocol = (ROOT / "Hardware" / "zdt_stepper.c").read_text(
+            encoding="utf-8")
+        main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")
+
+        self.assertIn("FROZEN_BOARD_CONFIG_REVISION                         (20260729U)", header)
+        self.assertIn("IOMUX_PINCM29_PF_UART3_TX", header)
+        self.assertIn("IOMUX_PINCM30_PF_UART3_RX", header)
+        self.assertIn("UART_3_BAUD_RATE", header)
+        self.assertIn("UART_3_IBRD_32_MHZ_115200_BAUD", header)
+        self.assertIn("DL_UART_Main_reset(UART_3_INST)", config)
+        self.assertIn("DL_UART_Main_enablePower(UART_3_INST)", config)
+        self.assertIn("DL_UART_MAIN_DIRECTION_TX_RX", config)
+        self.assertIn("DL_UART_RX_FIFO_LEVEL_1_2_FULL", config)
+        self.assertIn("void UART3_IRQHandler(void)", transport)
+        self.assertIn("DL_UART_INTERRUPT_RX_TIMEOUT_ERROR", transport)
+        self.assertNotIn("while (DL_UART_isBusy", transport)
+        self.assertIn("ZdtStepperUart_WriteEmergencyBatch", transport)
+        self.assertIn("ZdtStepperUart_Write(frame, length)", protocol)
+        self.assertIn("ZdtStepperTest_Init(SystemTime_Now());", main)
+        self.assertIn("ZdtStepperTest_Poll(SystemTime_Now());", main)
+        self.assertIn("ZdtStepper_EmergencyStop(true)",
+                      (ROOT / "System" / "zdt_stepper_test.c").read_text(
+                          encoding="utf-8"))
 
     def test_watchdog_and_scheduler_clock_start_after_boot_diagnostics(self):
         main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")

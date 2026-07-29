@@ -43,6 +43,7 @@ from .models import (
     ResetEvent,
     ResetInfo,
     Status,
+    StepperSnapshot,
     Subscription,
     TaskStats,
     TelemetrySample,
@@ -94,6 +95,8 @@ from .registry import (
     RpcResult,
     TelemetryStream,
 )
+from .stepper_registry import CAPABILITY_MASK as STEPPER_CAPABILITY_MASK
+from .stepper_registry import RPC as STEPPER_RPC, StepperCommand, StepperRefresh
 
 
 BAUD_RATE = 115200
@@ -182,6 +185,7 @@ class Session:
         self._next_legacy_id = 1
         self._next_sequence = 1
         self._next_manual_command_id = 1
+        self._next_stepper_command_id = 1
         self._session_id = 0
         self._outcome_unknown: OutcomeUnknown | None = None
         self._pending_lines: dict[int, _PendingLine] = {}
@@ -658,7 +662,8 @@ class Session:
         self._route_mode = "v2"
         self.mode = "v2-armed"
         required = int(CAPABILITY_MASKS["HANDSHAKE_REQUIRED"])
-        optional = int(CAPABILITY_MASKS["HELLO_OPTIONAL"]) & ~required
+        optional = (int(CAPABILITY_MASKS["HELLO_OPTIONAL"]) |
+                    STEPPER_CAPABILITY_MASK) & ~required
         payload = encode_hello(challenge, required, optional)
         frame = encode_frame(Frame(2, int(FrameType.HELLO), 0, 0, 0, payload))
         pending: queue.Queue[Frame] = queue.Queue(maxsize=1)
@@ -766,6 +771,95 @@ class Session:
     def require_capability(self, capability: Capability) -> None:
         if self.capabilities & capability != capability:
             raise UnsupportedCapability(capability)
+
+    def _require_stepper_capability(self) -> None:
+        if int(self.capabilities) & STEPPER_CAPABILITY_MASK != STEPPER_CAPABILITY_MASK:
+            raise UnsupportedCapability(STEPPER_CAPABILITY_MASK)
+
+    @staticmethod
+    def _decode_stepper(body: bytes) -> StepperSnapshot:
+        if len(body) != 88:
+            raise IntegrityError(f"ZDT stepper snapshot has {len(body)} bytes; expected 88")
+        u32 = lambda offset: struct.unpack_from("<I", body, offset)[0]
+        return StepperSnapshot(
+            time_ms=u32(0), response_sequence=u32(4), response_age_ms=u32(8),
+            last_function=body[12], last_response=body[13],
+            valid_flags=struct.unpack_from("<H", body, 14)[0],
+            speed_rpm=struct.unpack_from("<h", body, 16)[0],
+            motor_status=body[18], homing_status=body[19],
+            position_raw=struct.unpack_from("<q", body, 20)[0],
+            tx_bytes=u32(28), rx_bytes=u32(32), tx_overflow=u32(36),
+            rx_overflow=u32(40), hardware_errors=u32(44),
+            invalid_frames=u32(48), checksum_errors=u32(52),
+            discarded_rx_bytes=u32(56), preempted_frames=u32(60),
+            command_id=u32(64), test_id=u32(68), remaining_ms=u32(72),
+            state=body[76], kind=body[77], direction=body[78],
+            acceleration=body[79],
+            requested_speed_rpm=struct.unpack_from("<H", body, 80)[0],
+            position_mode=body[82], stop_reason=body[83], pulses=u32(84),
+        )
+
+    def get_stepper(self, refresh_mask: int | StepperRefresh = 0) -> StepperSnapshot:
+        self._require_stepper_capability()
+        mask = int(refresh_mask)
+        if mask & ~0x0F:
+            raise ValueError("stepper refresh mask must use bits 0..3")
+        return self._decode_stepper(self._rpc(
+            int(STEPPER_RPC["ZDT_STEPPER_STATUS_GET"]), struct.pack("<B3x", mask)
+        ))
+
+    def _stepper_command(
+        self, command: StepperCommand, *, confirmed: bool = False,
+        direction: int = 0, acceleration: int = 0, speed_rpm: int = 0,
+        duration_or_timeout_ms: int = 0, pulses: int = 0,
+        position_mode: int = 0,
+    ) -> StepperSnapshot:
+        self._require_stepper_capability()
+        identity = self._require_identity()
+        command_id = self._next_stepper_command_id
+        self._next_stepper_command_id = 1 if command_id >= 0xFFFFFFFF else command_id + 1
+        body = struct.pack(
+            "<IIBBBBHHIB3x", identity.boot_id, command_id, int(command),
+            int(bool(confirmed)), int(direction), int(acceleration),
+            int(speed_rpm), int(duration_or_timeout_ms), int(pulses),
+            int(position_mode),
+        )
+        return self._decode_stepper(
+            self._rpc(int(STEPPER_RPC["ZDT_STEPPER_COMMAND"]), body)
+        )
+
+    def enable_stepper(self) -> StepperSnapshot:
+        return self._stepper_command(StepperCommand.ENABLE, confirmed=True)
+
+    def stop_stepper(self) -> StepperSnapshot:
+        return self._stepper_command(StepperCommand.STOP)
+
+    def disable_stepper(self) -> StepperSnapshot:
+        return self._stepper_command(StepperCommand.DISABLE)
+
+    def start_stepper_velocity_test(
+        self, *, direction: int, speed_rpm: int, acceleration: int,
+        duration_ms: int,
+    ) -> StepperSnapshot:
+        if direction not in (0, 1) or not 1 <= speed_rpm <= 300 or not 0 <= acceleration <= 255 or not 100 <= duration_ms <= 5000:
+            raise ValueError("invalid stepper velocity-test parameters")
+        return self._stepper_command(
+            StepperCommand.VELOCITY_TEST, confirmed=True, direction=direction,
+            speed_rpm=speed_rpm, acceleration=acceleration,
+            duration_or_timeout_ms=duration_ms,
+        )
+
+    def start_stepper_position_test(
+        self, *, direction: int, speed_rpm: int, acceleration: int,
+        pulses: int, timeout_ms: int,
+    ) -> StepperSnapshot:
+        if direction not in (0, 1) or not 1 <= speed_rpm <= 300 or not 0 <= acceleration <= 255 or not 1 <= pulses <= 3200 or not 500 <= timeout_ms <= 10000:
+            raise ValueError("invalid stepper position-test parameters")
+        return self._stepper_command(
+            StepperCommand.POSITION_TEST, confirmed=True, direction=direction,
+            speed_rpm=speed_rpm, acceleration=acceleration,
+            duration_or_timeout_ms=timeout_ms, pulses=pulses, position_mode=2,
+        )
 
     def get_identity(self) -> Identity:
         if self.mode == "legacy":
@@ -1523,6 +1617,7 @@ class Session:
             self._last_async_sequence = 0
             self._next_sequence = 1
             self._next_manual_command_id = 1
+            self._next_stepper_command_id = 1
             self._next_legacy_id = 1
             self._session_id = 0
             self.identity = None

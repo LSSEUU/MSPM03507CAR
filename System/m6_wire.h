@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "m6_zdt_stepper_ext.h"
+
 /* Generated contract constants: Tests/vectors/m6_v2_wire_v1.json
  * registry-sha256: 724d64dfd91a613b5ed7a6e297730623623a69859b047a4a72433abf0a0d410d */
 #define M6_WIRE_VERSION                 2U
@@ -60,7 +62,8 @@
     M6_CAP_LINE_ACTION | \
     M6_CAP_HEADING_CALIBRATION | M6_CAP_CONFIGURABLE_TURN | \
     M6_CAP_HEADING_RATE_ACTION | M6_CAP_MANUAL_DRIVE | \
-    M6_CAP_VISION_UART_MONITOR | M6_CAP_GRAYSCALE_CALIBRATION)
+    M6_CAP_VISION_UART_MONITOR | M6_CAP_GRAYSCALE_CALIBRATION | \
+    M6_CAP_ZDT_STEPPER_CONTROL)
 
 typedef enum {
     M6_FRAME_HELLO = 0x01,

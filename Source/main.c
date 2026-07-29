@@ -28,6 +28,7 @@
 #include "vehicle_config.h"
 #include "watchdog.h"
 #include "wheel_speed.h"
+#include "zdt_stepper_test.h"
 
 static void Main_EmergencyStopCallback(void)
 {
@@ -105,6 +106,7 @@ int main(void)
 
     debug_init();
     VisionUart_Init();
+    ZdtStepperTest_Init(SystemTime_Now());
     debug_set_emergency_callback(Main_EmergencyStopCallback);
     Encoder_Init();
     WheelSpeed_Init();
@@ -149,6 +151,7 @@ int main(void)
 
         AppRemote_Poll();
         Diagnostics_Poll();
+        ZdtStepperTest_Poll(SystemTime_Now());
 
         if (Scheduler_Take(SCHEDULER_TASK_5MS)) {
             uint32_t started = SystemTime_Now();

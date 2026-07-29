@@ -45,6 +45,10 @@ const playback = {
   after: 0, hasMore: false, loading: false, currentMs: 0, durationMs: 0,
   speed: 1, playing: false, lastFrame: 0, generation: 0,
 };
+const stepperView = {
+  available: false, snapshot: null, fetching: false, busy: false,
+  samples: [], lastSequence: -1,
+};
 
 const ACTION_LABELS = {
   WHEEL_SPEED_TEST: "轮速测试",
@@ -463,6 +467,107 @@ async function pollControl() {
     $("armButton").disabled = true;
   } finally {
     controlFetching = false;
+  }
+}
+
+function updateStepperControls() {
+  const disabled = playback.active || !stepperView.available || stepperView.busy || !controlToken;
+  document.querySelectorAll("#stepperTest button, #stepperTest input, #stepperTest select")
+    .forEach((control) => { control.disabled = disabled; });
+}
+
+function renderStepper(state) {
+  stepperView.available = Boolean(state?.available);
+  const snapshot = state?.snapshot || null;
+  stepperView.snapshot = snapshot;
+  const capability = $("stepperCapabilityBadge");
+  if (!stepperView.available) {
+    capability.className = "badge bad";
+    capability.textContent = "固件不支持";
+    $("stepperLinkBadge").className = "badge bad";
+    $("stepperLinkBadge").textContent = "不可用";
+    $("stepperControlMessage").textContent = state?.error || "当前固件未协商步进扩展，车辆功能不受影响。";
+    updateStepperControls();
+    return;
+  }
+  capability.className = "badge ok";
+  capability.textContent = "UART3 能力已协商";
+  if (!snapshot) {
+    $("stepperLinkBadge").className = "badge waiting";
+    $("stepperLinkBadge").textContent = "等待首个应答";
+    $("stepperControlMessage").textContent = state?.error || "等待步进电机串口应答。";
+    updateStepperControls();
+    return;
+  }
+  const link = snapshot.link_state || "offline";
+  const linkBadge = $("stepperLinkBadge");
+  linkBadge.className = `badge ${link === "online" ? "ok" : link === "stale" ? "waiting" : "bad"}`;
+  linkBadge.textContent = link === "online" ? "在线" : link === "stale" ? "状态陈旧" : "离线 / 无应答";
+  const speedValid = Boolean(numeric(snapshot.valid_flags) & 1);
+  const positionValid = Boolean(numeric(snapshot.valid_flags) & 2);
+  $("stepperRpm").textContent = speedValid ? String(numeric(snapshot.speed_rpm)) : "—";
+  $("stepperPositionRaw").textContent = positionValid ? String(numeric(snapshot.position_raw)) : "—";
+  $("stepperRevolutions").textContent = positionValid ? fixed(snapshot.position_revolutions, 5) : "—";
+  $("stepperDegrees").textContent = positionValid ? fixed(snapshot.position_degrees, 2) : "—";
+  const stateLabels = {idle:"空闲", waiting_ack:"等待应答", running:"运行中", completed:"已完成", error:"错误"};
+  const kindLabels = {none:"无", velocity:"速度测试", position:"位置测试"};
+  $("stepperRunState").textContent = `${stateLabels[snapshot.state_name] || snapshot.state_name} / ${kindLabels[snapshot.kind_name] || snapshot.kind_name}`;
+  $("stepperRemaining").textContent = [1, 2].includes(numeric(snapshot.state)) ? `${numeric(snapshot.remaining_ms)} ms` : "—";
+  $("stepperMotorFlags").textContent = snapshot.motor_flags?.length ? snapshot.motor_flags.join("、") : (numeric(snapshot.valid_flags) & 4 ? "无已置位状态" : "未读取");
+  $("stepperHomingFlags").textContent = snapshot.homing_flags?.length ? snapshot.homing_flags.join("、") : (numeric(snapshot.valid_flags) & 8 ? "无已置位状态" : "未读取");
+  $("stepperLastResponse").textContent = numeric(snapshot.response_age_ms) === 0xFFFFFFFF
+    ? "尚无应答" : `功能 0x${numeric(snapshot.last_function).toString(16).padStart(2, "0").toUpperCase()} / 类型 ${numeric(snapshot.last_response)} / ${numeric(snapshot.response_age_ms)} ms 前`;
+  const errors = numeric(snapshot.tx_overflow) + numeric(snapshot.rx_overflow) + numeric(snapshot.hardware_errors) + numeric(snapshot.invalid_frames) + numeric(snapshot.checksum_errors);
+  $("stepperErrors").textContent = `${errors}（TX拥塞 ${numeric(snapshot.tx_overflow)} / RX溢出 ${numeric(snapshot.rx_overflow)} / 硬件 ${numeric(snapshot.hardware_errors)} / 格式 ${numeric(snapshot.invalid_frames)} / 校验 ${numeric(snapshot.checksum_errors)}）`;
+  $("stepperTxRx").textContent = `${numeric(snapshot.tx_bytes)} / ${numeric(snapshot.rx_bytes)} bytes · 抢占 ${numeric(snapshot.preempted_frames)} 帧`;
+  $("stepperStopReason").textContent = snapshot.stop_reason_name || "—";
+  $("stepperControlMessage").className = `stepper-control-message${state?.error || snapshot.state_name === "error" ? " error" : ""}`;
+  $("stepperControlMessage").textContent = state?.error || (snapshot.state_name === "running"
+    ? `${kindLabels[snapshot.kind_name]}正在固件内运行；车辆急停不会停止它。`
+    : `命令 ${numeric(snapshot.command_id)} · 测试 ${numeric(snapshot.test_id)} · ${stateLabels[snapshot.state_name] || snapshot.state_name}`);
+  if (numeric(snapshot.response_sequence) !== stepperView.lastSequence && (speedValid || positionValid)) {
+    stepperView.lastSequence = numeric(snapshot.response_sequence);
+    stepperView.samples.push({at: performance.now(), speed: numeric(snapshot.speed_rpm), position: numeric(snapshot.position_raw)});
+  }
+  const cutoff = performance.now() - 10000;
+  stepperView.samples = stepperView.samples.filter((sample) => sample.at >= cutoff);
+  $("stepperSpeedTrendText").textContent = speedValid ? `${numeric(snapshot.speed_rpm)} RPM` : "暂无数据";
+  $("stepperPositionTrendText").textContent = positionValid ? `${numeric(snapshot.position_raw)} counts` : "暂无数据";
+  dirty = true;
+  updateStepperControls();
+}
+
+async function pollStepper() {
+  if (stepperView.fetching || playback.active) return;
+  stepperView.fetching = true;
+  try {
+    const response = await fetch("/api/stepper?refresh=1", {cache:"no-store"});
+    const state = await response.json();
+    if (!response.ok || !state.ok) throw new Error(state.error?.message || `HTTP ${response.status}`);
+    renderStepper(state);
+  } catch (error) {
+    $("stepperLinkBadge").className = "badge bad";
+    $("stepperLinkBadge").textContent = "状态接口不可用";
+    $("stepperControlMessage").className = "stepper-control-message error";
+    $("stepperControlMessage").textContent = error.message;
+  } finally { stepperView.fetching = false; }
+}
+
+async function stepperCommand(path, body, button, successMessage) {
+  stepperView.busy = true;
+  updateStepperControls();
+  try {
+    const result = await command(path, body, button);
+    renderStepper({available:true, snapshot:result.snapshot});
+    showToast(successMessage);
+    await pollStepper();
+  } catch (error) {
+    showToast(error.message, true);
+    $("stepperControlMessage").className = "stepper-control-message error";
+    $("stepperControlMessage").textContent = error.message;
+  } finally {
+    stepperView.busy = false;
+    updateStepperControls();
   }
 }
 
@@ -948,6 +1053,49 @@ function canvasSetup(canvas) {
   return { ctx, width: rect.width, height: rect.height };
 }
 
+function drawStepperTrend(canvasId, key, color) {
+  const canvas = $(canvasId);
+  const {ctx, width, height} = canvasSetup(canvas);
+  const now = performance.now();
+  const points = stepperView.samples.filter((sample) => sample.at >= now - 10000);
+  ctx.clearRect(0, 0, width, height);
+  const pad = {left:48, right:10, top:12, bottom:24};
+  const plotW = Math.max(1, width - pad.left - pad.right);
+  const plotH = Math.max(1, height - pad.top - pad.bottom);
+  let minimum = Math.min(0, ...points.map((point) => point[key]));
+  let maximum = Math.max(0, ...points.map((point) => point[key]));
+  if (minimum === maximum) { minimum -= 1; maximum += 1; }
+  const margin = Math.max(1, (maximum - minimum) * .08);
+  minimum -= margin; maximum += margin;
+  ctx.font = "9px ui-monospace, Consolas, monospace";
+  ctx.textBaseline = "middle";
+  for (let index = 0; index <= 3; index += 1) {
+    const y = pad.top + plotH * index / 3;
+    const value = maximum - (maximum - minimum) * index / 3;
+    ctx.strokeStyle = "#1c2a3d"; ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(width - pad.right, y); ctx.stroke();
+    ctx.fillStyle = "#728096"; ctx.textAlign = "right"; ctx.fillText(formatAxis(value), pad.left - 6, y);
+  }
+  for (let seconds = 0; seconds <= 10; seconds += 5) {
+    const x = width - pad.right - seconds / 10 * plotW;
+    ctx.fillStyle = "#728096"; ctx.textAlign = "center"; ctx.fillText(seconds ? `-${seconds}s` : "现在", x, height - 9);
+  }
+  if (minimum < 0 && maximum > 0) {
+    const y = pad.top + maximum / (maximum - minimum) * plotH;
+    ctx.strokeStyle = "#475569"; ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(width - pad.right, y); ctx.stroke();
+  }
+  if (!points.length) {
+    ctx.fillStyle = "#64748b"; ctx.textAlign = "center"; ctx.fillText("等待步进反馈", pad.left + plotW / 2, pad.top + plotH / 2);
+    return;
+  }
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+  points.forEach((point, index) => {
+    const x = pad.left + clamp((point.at - (now - 10000)) / 10000, 0, 1) * plotW;
+    const y = pad.top + (maximum - point[key]) / (maximum - minimum) * plotH;
+    if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+}
+
 function collectSeries(definition, startMs) {
   const result = [];
   const events = history[definition.stream] || [];
@@ -1187,6 +1335,7 @@ function formatAxis(value) {
 function applyPlaybackLock(locked) {
   const selectors = [
     "#vehicleControl button", "#vehicleControl input", "#vehicleControl select",
+    "#stepperTest button", "#stepperTest input", "#stepperTest select",
     "#parameterDialog button", "#parameterDialog input", "#parameterDialog select",
   ];
   document.querySelectorAll(selectors.join(",")).forEach((control) => { control.disabled = locked; });
@@ -1196,6 +1345,7 @@ function applyPlaybackLock(locked) {
     updateActionFields();
     updateArmButton();
     if (controlState) renderFaultDetails(controlState.fault_details || [], numeric(controlState.status?.fault_bits), controlState.status_error);
+    updateStepperControls();
   }
 }
 
@@ -1404,6 +1554,7 @@ async function openPlayback(sessionId) {
     return;
   }
   if (["ARMED", "RUNNING", "RAMP_DOWN"].includes(actionState)) { showToast("车辆动作进行中，不能进入只读回放", true); return; }
+  if ([1, 2].includes(numeric(stepperView.snapshot?.state))) { showToast("步进电机测试正在运行，不能进入历史回放；请先等待完成或按步进立即停止", true); return; }
   try {
     if (manualDrive.enabled) await disableManualDrive("已进入历史回放");
     if (playback.active) exitPlayback();
@@ -1458,7 +1609,7 @@ function exitPlayback() {
   applyPlaybackLock(false);
   clearHistory(true);
   counts = {}; gaps = {}; lastServerOk = 0;
-  poll(); pollControl();
+  poll(); pollControl(); pollStepper();
   showToast("已退出回放并恢复实时数据");
 }
 
@@ -1502,6 +1653,8 @@ function render(frameNow) {
   ], hostNow);
   drawLineVisual("lineChart", hostNow);
   drawGyroVisual("gyroChart", hostNow);
+  drawStepperTrend("stepperSpeedChart", "speed", COLORS.amber);
+  drawStepperTrend("stepperPositionChart", "position", COLORS.cyan);
   requestAnimationFrame(render);
 }
 
@@ -1512,6 +1665,7 @@ $("pauseButton").addEventListener("click", () => {
   if (!paused) dirty = true;
 });
 $("clearButton").addEventListener("click", () => clearHistory(false));
+$("stepperNavLink").addEventListener("click", () => setLayoutMode("scroll"));
 $("cameraPauseButton").addEventListener("click", () => {
   cameraView.autoScrollPaused = !cameraView.autoScrollPaused;
   const button = $("cameraPauseButton");
@@ -1712,6 +1866,43 @@ $("estopButton").addEventListener("click", async () => {
     showToast("急停指令已进入高优先级队列"); await pollControl();
   } catch (error) { showToast(`急停请求失败：${error.message}`, true); }
 });
+$("stepperStopButton").addEventListener("click", () =>
+  stepperCommand("/api/stepper/stop", {}, $("stepperStopButton"), "步进停止已在帧边界优先发送"));
+$("stepperDisableButton").addEventListener("click", () =>
+  stepperCommand("/api/stepper/disable", {}, $("stepperDisableButton"), "步进停止并失能批次已发送"));
+$("stepperEnableButton").addEventListener("click", () => {
+  if (!window.confirm("将使能地址 1 的 ZDT 步进电机。\n车辆急停和车辆 Safety 不会停止此电机；确认测试区域安全并可使用红色“步进立即停止”按钮吗？")) return;
+  stepperCommand("/api/stepper/enable", {confirm:"ENABLE_ZDT_STEPPER"}, $("stepperEnableButton"), "步进使能命令已发送");
+});
+$("stepperVelocityForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!event.currentTarget.reportValidity()) return;
+  const body = {
+    direction:numeric($("stepperVelocityDirection").value),
+    speed_rpm:numeric($("stepperVelocitySpeed").value),
+    acceleration:numeric($("stepperVelocityAcceleration").value),
+    duration_ms:numeric($("stepperVelocityDuration").value),
+    confirm:"START_ZDT_VELOCITY_TEST",
+  };
+  const direction = body.direction ? "CCW 逆时针" : "CW 顺时针";
+  if (!window.confirm(`即将执行速度测试：${direction}，${body.speed_rpm} RPM，加速度 ${body.acceleration}，持续 ${body.duration_ms} ms。\n车辆急停不会停止步进电机；确认直接执行吗？`)) return;
+  stepperCommand("/api/stepper/velocity", body, $("stepperVelocityButton"), "定时速度测试已启动");
+});
+$("stepperPositionForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!event.currentTarget.reportValidity()) return;
+  const body = {
+    direction:numeric($("stepperPositionDirection").value),
+    speed_rpm:numeric($("stepperPositionSpeed").value),
+    acceleration:numeric($("stepperPositionAcceleration").value),
+    pulses:numeric($("stepperPositionPulses").value),
+    timeout_ms:numeric($("stepperPositionTimeout").value),
+    confirm:"START_ZDT_POSITION_TEST",
+  };
+  const direction = body.direction ? "CCW 逆时针" : "CW 顺时针";
+  if (!window.confirm(`即将执行相对当前位置运动：${direction}，${body.pulses} 脉冲，${body.speed_rpm} RPM，加速度 ${body.acceleration}，超时 ${body.timeout_ms} ms。\n车辆急停不会停止步进电机；确认直接执行吗？`)) return;
+  stepperCommand("/api/stepper/position", body, $("stepperPositionButton"), "相对位置测试已启动");
+});
 $("clearFaultButton").addEventListener("click", async () => {
   const faults = numeric(controlState?.status?.fault_bits);
   if (!faults) return;
@@ -1752,6 +1943,7 @@ setManualMode("action");
 $("autoRecording").checked = autoRecordingEnabled();
 setInterval(poll, 50);
 setInterval(pollControl, 1000);
+setInterval(pollStepper, 250);
 setInterval(() => {
   if ($("calibrationDialog").open || calibrationState.active) pollCalibration(true);
 }, 250);
@@ -1768,6 +1960,7 @@ setInterval(() => {
 }, 500);
 poll();
 pollControl();
+pollStepper();
 pollCalibration(true);
 pollRecordingStatus();
 requestAnimationFrame(render);

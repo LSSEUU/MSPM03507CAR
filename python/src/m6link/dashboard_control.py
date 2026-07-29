@@ -18,6 +18,8 @@ from .registry import (
     GrayscaleCalibrationState,
     REGISTRY,
 )
+from .stepper_registry import CAPABILITY_MASK as STEPPER_CAPABILITY_MASK
+from .stepper_registry import StepperRefresh
 
 
 _DASHBOARD_ACTIONS = {
@@ -69,6 +71,8 @@ class DashboardController:
         self._status_at = float("-inf")
         self._parameters: Any = None
         self._calibration: Any = None
+        self._stepper: Any = None
+        self._stepper_at = float("-inf")
         self._manual_lock = threading.Lock()
         self._manual_condition = threading.Condition(self._manual_lock)
         self._manual_controller_id: str | None = None
@@ -470,7 +474,7 @@ class DashboardController:
         return {"ok": True, "action": _object_payload(status)}
 
     def emergency_stop(self) -> dict[str, Any]:
-        """Queue the raw stop without waiting behind an in-progress RPC operation."""
+        """Queue the vehicle-only raw stop without touching the stepper."""
 
         self.session.emergency_stop()
         with self._armed_lock:
@@ -481,6 +485,120 @@ class DashboardController:
             self._manual_driving = False
             self._manual_target = (0, 0)
         return {"ok": True, "accepted": True}
+
+    def _stepper_available(self) -> bool:
+        return bool(int(self.capabilities) & STEPPER_CAPABILITY_MASK)
+
+    @staticmethod
+    def _stepper_payload(snapshot: Any) -> dict[str, Any]:
+        payload = _object_payload(snapshot)
+        age = int(getattr(snapshot, "response_age_ms", 0xFFFFFFFF))
+        payload["position_revolutions"] = float(snapshot.position_revolutions)
+        payload["position_degrees"] = float(snapshot.position_degrees)
+        payload["link_state"] = (
+            "offline" if age == 0xFFFFFFFF or age > 3000 else
+            "stale" if age > 1000 else "online"
+        )
+        state_names = ("idle", "waiting_ack", "running", "completed", "error")
+        kind_names = ("none", "velocity", "position")
+        stop_names = (
+            "none", "user", "disabled", "duration", "position_reached",
+            "timeout", "communication", "device_rejected", "startup",
+        )
+        payload["state_name"] = state_names[snapshot.state] if 0 <= snapshot.state < len(state_names) else "unknown"
+        payload["kind_name"] = kind_names[snapshot.kind] if 0 <= snapshot.kind < len(kind_names) else "unknown"
+        payload["stop_reason_name"] = stop_names[snapshot.stop_reason] if 0 <= snapshot.stop_reason < len(stop_names) else "unknown"
+        motor_labels = (
+            (0x01, "已使能"), (0x02, "已到位"), (0x04, "堵转"),
+            (0x08, "堵转保护"), (0x10, "左限位"), (0x20, "右限位"),
+            (0x80, "掉电"),
+        )
+        home_labels = (
+            (0x01, "编码器就绪"), (0x02, "校准就绪"), (0x04, "回零中"),
+            (0x08, "回零失败"), (0x10, "过温"), (0x20, "过流"),
+        )
+        payload["motor_flags"] = [label for bit, label in motor_labels if snapshot.motor_status & bit]
+        payload["homing_flags"] = [label for bit, label in home_labels if snapshot.homing_status & bit]
+        return payload
+
+    def stepper_state(self, *, force: bool = False, refresh: bool = False) -> dict[str, Any]:
+        if not self._stepper_available():
+            return {"ok": True, "available": False, "safety_independent": True,
+                    "snapshot": None, "error": "当前固件未协商步进电机能力"}
+        error: str | None = None
+        with self._operation_lock:
+            now = self._clock()
+            if force or refresh or self._stepper is None or now - self._stepper_at >= 0.2:
+                try:
+                    mask = StepperRefresh(0x0F) if refresh else StepperRefresh(0)
+                    self._stepper = self.session.get_stepper(mask)
+                    self._stepper_at = now
+                except M6Error as exc:
+                    error = str(exc)
+            snapshot = self._stepper
+        return {
+            "ok": True,
+            "available": True,
+            "safety_independent": True,
+            "snapshot": self._stepper_payload(snapshot) if snapshot is not None else None,
+            "error": error,
+        }
+
+    def _stepper_call(self, method: str, request: Mapping[str, Any]) -> dict[str, Any]:
+        if not self._stepper_available():
+            raise ValueError("当前固件未协商步进电机能力")
+        with self._operation_lock:
+            if method == "enable":
+                if request.get("confirm") != "ENABLE_ZDT_STEPPER":
+                    raise ValueError("使能步进电机需要明确确认")
+                snapshot = self.session.enable_stepper()
+            elif method == "stop":
+                snapshot = self.session.stop_stepper()
+            elif method == "disable":
+                snapshot = self.session.disable_stepper()
+            elif method in ("velocity", "position"):
+                expected = "START_ZDT_VELOCITY_TEST" if method == "velocity" else "START_ZDT_POSITION_TEST"
+                if request.get("confirm") != expected:
+                    raise ValueError("启动步进测试需要明确确认")
+                try:
+                    direction = int(request["direction"])
+                    speed = int(request["speed_rpm"])
+                    acceleration = int(request["acceleration"])
+                    if method == "velocity":
+                        snapshot = self.session.start_stepper_velocity_test(
+                            direction=direction, speed_rpm=speed,
+                            acceleration=acceleration,
+                            duration_ms=int(request["duration_ms"]),
+                        )
+                    else:
+                        snapshot = self.session.start_stepper_position_test(
+                            direction=direction, speed_rpm=speed,
+                            acceleration=acceleration, pulses=int(request["pulses"]),
+                            timeout_ms=int(request["timeout_ms"]),
+                        )
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ValueError("步进测试参数无效或超出允许范围") from exc
+            else:
+                raise ValueError("未知步进电机命令")
+            self._stepper = snapshot
+            self._stepper_at = self._clock()
+        return {"ok": True, "available": True,
+                "snapshot": self._stepper_payload(snapshot)}
+
+    def stepper_enable(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self._stepper_call("enable", request)
+
+    def stepper_stop(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self._stepper_call("stop", request)
+
+    def stepper_disable(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self._stepper_call("disable", request)
+
+    def stepper_velocity(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self._stepper_call("velocity", request)
+
+    def stepper_position(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self._stepper_call("position", request)
 
     def clear_fault(self, request: Mapping[str, Any]) -> dict[str, Any]:
         if request.get("confirm") != "CLEAR_OBSERVED_FAULTS":
@@ -519,6 +637,8 @@ class DashboardController:
             self._status = None
             self._parameters = None
             self._calibration = None
+            self._stepper = None
+            self._stepper_at = float("-inf")
             self._status_at = float("-inf")
         with self._armed_lock:
             self._armed = None

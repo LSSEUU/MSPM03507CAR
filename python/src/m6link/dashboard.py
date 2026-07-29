@@ -240,6 +240,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/control":
             self._send_controller_state()
             return
+        if parsed.path == "/api/stepper":
+            self._send_stepper_state(parse_qs(parsed.query))
+            return
         if parsed.path == "/api/parameters":
             self._send_parameter_state(parse_qs(parsed.query))
             return
@@ -286,6 +289,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/control/manual/enable": lambda controller, _body: controller.manual_enable(),
             "/api/control/manual/command": lambda controller, body: controller.manual_command(body),
             "/api/control/manual/disable": lambda controller, body: controller.manual_disable(body),
+            "/api/stepper/enable": lambda controller, body: controller.stepper_enable(body),
+            "/api/stepper/stop": lambda controller, body: controller.stepper_stop(body),
+            "/api/stepper/disable": lambda controller, body: controller.stepper_disable(body),
+            "/api/stepper/velocity": lambda controller, body: controller.stepper_velocity(body),
+            "/api/stepper/position": lambda controller, body: controller.stepper_position(body),
             "/api/parameters/stage": lambda controller, body: controller.parameter_command("stage", body),
             "/api/parameters/apply": lambda controller, body: controller.parameter_command("apply", body),
             "/api/parameters/revert": lambda controller, body: controller.parameter_command("revert", body),
@@ -322,7 +330,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 if parsed.path.startswith("/api/parameters/"):
                     previous_revision = controller.parameter_state().get("summary", {})
                 result = route(controller, body)
-                if manager is not None:
+                if manager is not None and not parsed.path.startswith("/api/stepper/"):
                     event_name = {
                         "/api/control/arm": "control_arm",
                         "/api/control/confirm": "control_confirm",
@@ -433,6 +441,19 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         force = query.get("refresh", ["0"])[0] == "1"
         try:
             result = controller.parameter_state(force=force)
+        except M6Error as exc:
+            self._send_json(503, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+            return
+        self._send_json(200, result)
+
+    def _send_stepper_state(self, query: dict[str, list[str]]) -> None:
+        controller = self.server.dashboard_controller
+        if controller is None:
+            self._send_json(404, {"ok": False, "error": {"message": "步进控制功能未启用"}})
+            return
+        refresh = query.get("refresh", ["0"])[0] == "1"
+        try:
+            result = controller.stepper_state(force=refresh, refresh=refresh)
         except M6Error as exc:
             self._send_json(503, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
             return

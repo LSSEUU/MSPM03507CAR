@@ -333,6 +333,48 @@ class VisionUartChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class StepperSnapshot:
+    time_ms: int
+    response_sequence: int
+    response_age_ms: int
+    last_function: int
+    last_response: int
+    valid_flags: int
+    speed_rpm: int
+    motor_status: int
+    homing_status: int
+    position_raw: int
+    tx_bytes: int
+    rx_bytes: int
+    tx_overflow: int
+    rx_overflow: int
+    hardware_errors: int
+    invalid_frames: int
+    checksum_errors: int
+    discarded_rx_bytes: int
+    preempted_frames: int
+    command_id: int
+    test_id: int
+    remaining_ms: int
+    state: int
+    kind: int
+    direction: int
+    acceleration: int
+    requested_speed_rpm: int
+    position_mode: int
+    stop_reason: int
+    pulses: int
+
+    @property
+    def position_revolutions(self) -> float:
+        return self.position_raw / 65536.0
+
+    @property
+    def position_degrees(self) -> float:
+        return self.position_revolutions * 360.0
+
+
+@dataclass(frozen=True, slots=True)
 class LinkEvent:
     code: int
     severity: int

@@ -1,0 +1,92 @@
+{
+  "name": "m6-zdt-stepper-ext-v1",
+  "version": 1,
+  "base_contract": "m6-v2-wire-v1",
+  "capability": {"name": "ZDT_STEPPER_CONTROL", "bit": 28},
+  "rpc_opcodes": {
+    "ZDT_STEPPER_STATUS_GET": 14,
+    "ZDT_STEPPER_COMMAND": 33544
+  },
+  "commands": {
+    "ENABLE": 1,
+    "DISABLE": 2,
+    "STOP": 3,
+    "VELOCITY_TEST": 4,
+    "POSITION_TEST": 5
+  },
+  "refresh_bits": {"SPEED": 0, "POSITION": 1, "MOTOR_STATUS": 2, "HOMING_STATUS": 3},
+  "busy": {"resource": 9, "retry_after_ms": 20},
+  "layouts": [
+    {
+      "name": "zdt_stepper_status_request",
+      "size": 4,
+      "fields": [
+        {"name": "refresh_mask", "offset": 0, "size": 1, "type": "u8"},
+        {"name": "reserved", "offset": 1, "size": 3, "type": "bytes"}
+      ]
+    },
+    {
+      "name": "zdt_stepper_command_request",
+      "size": 24,
+      "fields": [
+        {"name": "boot_id", "offset": 0, "size": 4, "type": "u32"},
+        {"name": "command_id", "offset": 4, "size": 4, "type": "u32"},
+        {"name": "command", "offset": 8, "size": 1, "type": "u8"},
+        {"name": "flags", "offset": 9, "size": 1, "type": "u8"},
+        {"name": "direction", "offset": 10, "size": 1, "type": "u8"},
+        {"name": "acceleration", "offset": 11, "size": 1, "type": "u8"},
+        {"name": "speed_rpm", "offset": 12, "size": 2, "type": "u16"},
+        {"name": "duration_or_timeout_ms", "offset": 14, "size": 2, "type": "u16"},
+        {"name": "pulses", "offset": 16, "size": 4, "type": "u32"},
+        {"name": "position_mode", "offset": 20, "size": 1, "type": "u8"},
+        {"name": "reserved", "offset": 21, "size": 3, "type": "bytes"}
+      ]
+    },
+    {
+      "name": "zdt_stepper_snapshot",
+      "size": 88,
+      "fields": [
+        {"name": "time_ms", "offset": 0, "size": 4, "type": "u32"},
+        {"name": "response_sequence", "offset": 4, "size": 4, "type": "u32"},
+        {"name": "response_age_ms", "offset": 8, "size": 4, "type": "u32"},
+        {"name": "last_function", "offset": 12, "size": 1, "type": "u8"},
+        {"name": "last_response", "offset": 13, "size": 1, "type": "u8"},
+        {"name": "valid_flags", "offset": 14, "size": 2, "type": "u16"},
+        {"name": "speed_rpm", "offset": 16, "size": 2, "type": "i16"},
+        {"name": "motor_status", "offset": 18, "size": 1, "type": "u8"},
+        {"name": "homing_status", "offset": 19, "size": 1, "type": "u8"},
+        {"name": "position_raw", "offset": 20, "size": 8, "type": "i64"},
+        {"name": "tx_bytes", "offset": 28, "size": 4, "type": "u32"},
+        {"name": "rx_bytes", "offset": 32, "size": 4, "type": "u32"},
+        {"name": "tx_overflow", "offset": 36, "size": 4, "type": "u32"},
+        {"name": "rx_overflow", "offset": 40, "size": 4, "type": "u32"},
+        {"name": "hardware_errors", "offset": 44, "size": 4, "type": "u32"},
+        {"name": "invalid_frames", "offset": 48, "size": 4, "type": "u32"},
+        {"name": "checksum_errors", "offset": 52, "size": 4, "type": "u32"},
+        {"name": "discarded_rx_bytes", "offset": 56, "size": 4, "type": "u32"},
+        {"name": "preempted_frames", "offset": 60, "size": 4, "type": "u32"},
+        {"name": "command_id", "offset": 64, "size": 4, "type": "u32"},
+        {"name": "test_id", "offset": 68, "size": 4, "type": "u32"},
+        {"name": "remaining_ms", "offset": 72, "size": 4, "type": "u32"},
+        {"name": "state", "offset": 76, "size": 1, "type": "u8"},
+        {"name": "kind", "offset": 77, "size": 1, "type": "u8"},
+        {"name": "direction", "offset": 78, "size": 1, "type": "u8"},
+        {"name": "acceleration", "offset": 79, "size": 1, "type": "u8"},
+        {"name": "speed_rpm_requested", "offset": 80, "size": 2, "type": "u16"},
+        {"name": "position_mode", "offset": 82, "size": 1, "type": "u8"},
+        {"name": "stop_reason", "offset": 83, "size": 1, "type": "u8"},
+        {"name": "pulses", "offset": 84, "size": 4, "type": "u32"}
+      ]
+    }
+  ],
+  "semantics": {
+    "confirmed_flag": 1,
+    "position_counts_per_revolution": 65536,
+    "speed_rpm": [1, 300],
+    "velocity_duration_ms": [100, 5000],
+    "position_pulses": [1, 3200],
+    "position_timeout_ms": [500, 10000],
+    "command_timeout_ms": 500,
+    "feedback_timeout_ms": 500
+  }
+}

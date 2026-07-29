@@ -9,7 +9,7 @@
  * Do not overwrite it from an unrelated LaunchPad .syscfg file.  Pin and
  * peripheral invariants are guarded by Tests/test_board_configuration.py.
  */
-#define FROZEN_BOARD_CONFIG_REVISION                         (20260727U)
+#define FROZEN_BOARD_CONFIG_REVISION                         (20260729U)
 
 #define CONFIG_LP_MSPM0G3507
 #define CONFIG_MSPM0G3507
@@ -81,6 +81,23 @@ extern "C" {
 #define UART_2_BAUD_RATE                                                  (9600)
 #define UART_2_IBRD_32_MHZ_9600_BAUD                                       (208)
 #define UART_2_FBRD_32_MHZ_9600_BAUD                                       (21)
+
+/* Dedicated ZDT closed-loop stepper link: PB12 MCU_TX, PB13 MCU_RX. */
+#define UART_3_INST                                                        UART3
+#define UART_3_INST_FREQUENCY                                           32000000
+#define UART_3_INST_IRQHandler                                  UART3_IRQHandler
+#define UART_3_INST_INT_IRQN                                      UART3_INT_IRQn
+#define GPIO_UART_3_TX_PORT                                                GPIOB
+#define GPIO_UART_3_TX_PIN                                        DL_GPIO_PIN_12
+#define GPIO_UART_3_TX_IOMUX                                      (IOMUX_PINCM29)
+#define GPIO_UART_3_TX_IOMUX_FUNC                      IOMUX_PINCM29_PF_UART3_TX
+#define GPIO_UART_3_RX_PORT                                                GPIOB
+#define GPIO_UART_3_RX_PIN                                        DL_GPIO_PIN_13
+#define GPIO_UART_3_RX_IOMUX                                      (IOMUX_PINCM30)
+#define GPIO_UART_3_RX_IOMUX_FUNC                      IOMUX_PINCM30_PF_UART3_RX
+#define UART_3_BAUD_RATE                                                (115200)
+#define UART_3_IBRD_32_MHZ_115200_BAUD                                      (17)
+#define UART_3_FBRD_32_MHZ_115200_BAUD                                      (23)
 
 #define PWM_0_INST                                                         TIMA1
 #define PWM_0_INST_IRQHandler                                   TIMA1_IRQHandler
@@ -176,6 +193,7 @@ void SYSCFG_DL_SYSCTL_init(void);
 void SYSCFG_DL_UART_0_init(void);
 void SYSCFG_DL_UART_1_init(void);
 void SYSCFG_DL_UART_2_init(void);
+void SYSCFG_DL_UART_3_init(void);
 void SYSCFG_DL_GRAY_ADC_init(void);
 void SYSCFG_DL_PWM_0_init(void);
 void SYSCFG_DL_IR_CAPTURE_init(void);

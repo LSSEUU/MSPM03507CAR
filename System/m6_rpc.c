@@ -21,6 +21,7 @@
 #include "system_time.h"
 #include "uart_debug.h"
 #include "wheel_speed.h"
+#include "zdt_stepper_test.h"
 
 #include <math.h>
 #include <string.h>
@@ -100,6 +101,28 @@ static void p32(uint8_t *p, uint32_t v)
 static void p64(uint8_t *p, uint64_t v)
 {
     for (uint8_t i = 0U; i < 8U; i++) p[i] = (uint8_t)(v >> (8U * i));
+}
+
+static void fill_zdt_stepper(uint8_t *out)
+{
+    ZdtStepperTestSnapshot_t s;
+    ZdtStepperTest_GetSnapshot(&s, SystemTime_Now());
+    memset(out, 0, M6_ZDT_STEPPER_SNAPSHOT_SIZE);
+    p32(&out[0], s.time_ms); p32(&out[4], s.device.response_sequence);
+    p32(&out[8], s.response_age_ms); out[12] = s.device.last_function;
+    out[13] = (uint8_t)s.device.last_response; p16(&out[14], s.valid_flags);
+    p16(&out[16], (uint16_t)s.speed_rpm); out[18] = s.device.motor_status;
+    out[19] = s.device.homing_status; p64(&out[20], (uint64_t)s.position_raw);
+    p32(&out[28], s.device.stats.tx_bytes); p32(&out[32], s.device.stats.rx_bytes);
+    p32(&out[36], s.device.stats.tx_overflow); p32(&out[40], s.device.stats.rx_overflow);
+    p32(&out[44], s.device.stats.hardware_errors); p32(&out[48], s.device.stats.invalid_frames);
+    p32(&out[52], s.device.stats.checksum_errors); p32(&out[56], s.device.stats.discarded_rx_bytes);
+    p32(&out[60], s.device.stats.preempted_frames); p32(&out[64], s.command_id);
+    p32(&out[68], s.test_id); p32(&out[72], s.remaining_ms);
+    out[76] = (uint8_t)s.state; out[77] = (uint8_t)s.kind;
+    out[78] = (uint8_t)s.direction; out[79] = s.acceleration;
+    p16(&out[80], s.requested_speed_rpm); out[82] = (uint8_t)s.position_mode;
+    out[83] = (uint8_t)s.stop_reason; p32(&out[84], s.pulses);
 }
 
 static int16_t round_i16(float value)
@@ -449,6 +472,18 @@ static M6Result_t execute_read(uint16_t opcode, const uint8_t *body,
                                uint16_t *out_length, uint32_t *detail)
 {
     (void)detail;
+    if (opcode == M6_RPC_ZDT_STEPPER_STATUS_GET) {
+        if ((M6Link_EnabledCapabilities() & M6_CAP_ZDT_STEPPER_CONTROL) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != M6_ZDT_STEPPER_STATUS_REQUEST_SIZE)
+            return M6_RESULT_BAD_LENGTH;
+        if ((body[1] | body[2] | body[3]) != 0U) return M6_RESULT_MALFORMED;
+        if ((body[0] & (uint8_t)~ZDT_STEPPER_REFRESH_ALL) != 0U)
+            return M6_RESULT_INVALID_ARGUMENT;
+        ZdtStepperTest_RequestRefresh(body[0]);
+        fill_zdt_stepper(out); *out_length = M6_ZDT_STEPPER_SNAPSHOT_SIZE;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_PING) {
         if (length != 4U) return M6_RESULT_BAD_LENGTH;
         memcpy(out, body, 4U); p32(&out[4], SystemTime_Now());
@@ -693,6 +728,68 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
     ControlParamsResult_t pr;
     *detail = 0U;
     ParameterStore_GetInfo(&store);
+    if (opcode == M6_RPC_ZDT_STEPPER_COMMAND) {
+        ZdtStepperTestRequest_t request;
+        ZdtStepperResult_t result;
+        uint8_t command;
+        if ((M6Link_EnabledCapabilities() & M6_CAP_ZDT_STEPPER_CONTROL) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != M6_ZDT_STEPPER_COMMAND_REQUEST_SIZE)
+            return M6_RESULT_BAD_LENGTH;
+        if (u32(body) != s_boot_id) return M6_RESULT_INVALID_ARGUMENT;
+        if ((body[21] | body[22] | body[23]) != 0U) return M6_RESULT_MALFORMED;
+        if ((body[9] & 0xFEU) != 0U) return M6_RESULT_INVALID_ARGUMENT;
+        command = body[8];
+        if ((command < ZDT_TEST_COMMAND_ENABLE) ||
+            (command > ZDT_TEST_COMMAND_POSITION))
+            return M6_RESULT_INVALID_ARGUMENT;
+        memset(&request, 0, sizeof(request));
+        request.command_id = u32(&body[4]);
+        request.command = (ZdtStepperTestCommand_t)command;
+        request.confirmed = (body[9] & 1U) != 0U;
+        request.direction = (ZdtStepperDirection_t)body[10];
+        request.acceleration = body[11];
+        request.speed_rpm = u16(&body[12]);
+        request.duration_or_timeout_ms = u16(&body[14]);
+        request.pulses = u32(&body[16]);
+        request.position_mode = (ZdtStepperPositionMode_t)body[20];
+        if ((command == ZDT_TEST_COMMAND_ENABLE) &&
+            (!request.confirmed || (body[10] | body[11] | body[12] |
+             body[13] | body[14] | body[15] | body[16] | body[17] |
+             body[18] | body[19] | body[20]) != 0U))
+            return M6_RESULT_INVALID_ARGUMENT;
+        if (((command == ZDT_TEST_COMMAND_STOP) ||
+             (command == ZDT_TEST_COMMAND_DISABLE)) &&
+            ((body[9] | body[10] | body[11] | body[12] | body[13] |
+              body[14] | body[15] | body[16] | body[17] | body[18] |
+              body[19] | body[20]) != 0U))
+            return M6_RESULT_INVALID_ARGUMENT;
+        if ((command == ZDT_TEST_COMMAND_VELOCITY) &&
+            (!request.confirmed || (request.direction > ZDT_STEPPER_DIRECTION_CCW) ||
+             (request.speed_rpm < 1U) || (request.speed_rpm > 300U) ||
+             (request.duration_or_timeout_ms < 100U) ||
+             (request.duration_or_timeout_ms > 5000U) ||
+             (request.pulses != 0U) ||
+             (request.position_mode != ZDT_STEPPER_POSITION_RELATIVE_LAST_TARGET)))
+            return M6_RESULT_OUT_OF_RANGE;
+        if ((command == ZDT_TEST_COMMAND_POSITION) &&
+            (!request.confirmed || (request.direction > ZDT_STEPPER_DIRECTION_CCW) ||
+             (request.speed_rpm < 1U) || (request.speed_rpm > 300U) ||
+             (request.duration_or_timeout_ms < 500U) ||
+             (request.duration_or_timeout_ms > 10000U) ||
+             (request.pulses < 1U) || (request.pulses > 3200U) ||
+             (request.position_mode != ZDT_STEPPER_POSITION_RELATIVE_CURRENT)))
+            return M6_RESULT_OUT_OF_RANGE;
+        result = ZdtStepperTest_Command(&request, SystemTime_Now());
+        if (result == ZDT_STEPPER_TX_FULL) {
+            *detail = ((uint32_t)M6_ZDT_STEPPER_RESOURCE << 24) |
+                M6_ZDT_STEPPER_RETRY_MS;
+            return M6_RESULT_BUSY;
+        }
+        if (result != ZDT_STEPPER_OK) return M6_RESULT_WRONG_STATE;
+        fill_zdt_stepper(out); *out_length = M6_ZDT_STEPPER_SNAPSHOT_SIZE;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_SESSION_CLOSE) {
         if (length != 0U) return M6_RESULT_BAD_LENGTH;
         return action_base_safe() ? M6_RESULT_OK : M6_RESULT_WRONG_STATE;
