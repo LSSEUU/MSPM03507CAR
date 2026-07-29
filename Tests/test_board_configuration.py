@@ -207,9 +207,11 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("ZdtStepperUart_Write(frame, length)", protocol)
         self.assertIn("ZdtStepperTest_Init(SystemTime_Now());", main)
         self.assertIn("ZdtStepperTest_Poll(SystemTime_Now());", main)
-        self.assertIn("ZdtStepper_EmergencyStop(true)",
-                      (ROOT / "System" / "zdt_stepper_test.c").read_text(
-                          encoding="utf-8"))
+        stepper_test = (ROOT / "System" / "zdt_stepper_test.c").read_text(
+            encoding="utf-8")
+        self.assertIn("ZdtStepper_EmergencyStop(false)", stepper_test)
+        self.assertIn("ZdtStepper_EmergencyDisable()", stepper_test)
+        self.assertIn("EMERGENCY_DISABLE_GAP_MS 5U", stepper_test)
 
     def test_key1_drives_active_high_buzzer_for_board_validation(self):
         header = HEADER.read_text(encoding="utf-8")

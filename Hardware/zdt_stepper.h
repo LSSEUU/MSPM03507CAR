@@ -104,6 +104,7 @@ ZdtStepperResult_t ZdtStepper_Enable(bool enabled);
 ZdtStepperResult_t ZdtStepper_Stop(void);
 /* Emergency operations preempt normal frames at the next frame boundary. */
 ZdtStepperResult_t ZdtStepper_EmergencyStop(bool disable_after_stop);
+ZdtStepperResult_t ZdtStepper_EmergencyDisable(void);
 /* speed_rpm: 0..3000; acceleration: 0..255 (0 starts directly). */
 ZdtStepperResult_t ZdtStepper_RunVelocity(ZdtStepperDirection_t direction,
                                           uint16_t speed_rpm,

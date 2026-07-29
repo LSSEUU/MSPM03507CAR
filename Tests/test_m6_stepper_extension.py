@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "python" / "src"))
 from m6link.models import StepperSnapshot
 from m6link.registry import Capability
 from m6link.session import Session
-from m6link.stepper_registry import CAPABILITY_MASK, EXTENSION_SHA256
+from m6link.stepper_registry import CAPABILITY_MASK, EXTENSION_SHA256, StepperNotReady
 
 
 def canonical(value: object) -> str:
@@ -29,6 +29,9 @@ class M6StepperExtensionTests(unittest.TestCase):
         self.assertEqual(canonical(base), "724d64dfd91a613b5ed7a6e297730623623a69859b047a4a72433abf0a0d410d")
         self.assertEqual(canonical(extension), EXTENSION_SHA256)
         self.assertEqual(CAPABILITY_MASK, 1 << 28)
+        self.assertEqual(int(StepperNotReady.NO_MOTOR_STATUS), 1 << 0)
+        self.assertEqual(int(StepperNotReady.MOTOR_STATUS_STALE), 1 << 1)
+        self.assertEqual(int(StepperNotReady.INTERNAL_REJECT), 1 << 8)
 
     def test_generated_binding_checker(self) -> None:
         result = subprocess.run([sys.executable, "scripts/check_m6_stepper_extension.py"], cwd=ROOT, capture_output=True, text=True)

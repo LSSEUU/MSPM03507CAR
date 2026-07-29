@@ -6,10 +6,7 @@
 #define COMMAND_TIMEOUT_MS       500U
 #define FEEDBACK_TIMEOUT_MS      500U
 #define ACTIVE_QUERY_PERIOD_MS   100U
-#define MOTOR_UNSAFE_MASK (ZDT_STEPPER_MOTOR_STALLED | \
-    ZDT_STEPPER_MOTOR_STALL_PROTECTION | ZDT_STEPPER_MOTOR_LEFT_LIMIT | \
-    ZDT_STEPPER_MOTOR_RIGHT_LIMIT | ZDT_STEPPER_MOTOR_POWER_LOSS)
-
+#define EMERGENCY_DISABLE_GAP_MS 5U
 typedef struct {
     ZdtStepperTestSnapshot_t snapshot;
     uint32_t seen_sequence;
@@ -21,10 +18,12 @@ typedef struct {
     uint32_t deadline_ms;
     uint32_t next_query_ms;
     uint32_t next_test_id;
+    uint32_t last_reject_detail;
     uint8_t expected_function;
     uint8_t refresh_pending;
     uint8_t query_function;
     bool query_inflight;
+    bool disable_pending;
 } Controller_t;
 
 static Controller_t s_controller;
@@ -101,7 +100,8 @@ static void QueueNextQuery(uint32_t now_ms)
 {
     ZdtStepperResult_t result = ZDT_STEPPER_OK;
     uint8_t bit = 0U;
-    if (s_controller.expected_function != 0U) return;
+    if ((s_controller.expected_function != 0U) ||
+        s_controller.disable_pending) return;
     if (s_controller.query_inflight) {
         if (Reached(now_ms, s_controller.query_sent_ms +
                              COMMAND_TIMEOUT_MS))
@@ -143,7 +143,9 @@ void ZdtStepperTest_Init(uint32_t now_ms)
     s_controller.snapshot.state = ZDT_TEST_STATE_IDLE;
     s_controller.snapshot.kind = ZDT_TEST_KIND_NONE;
     s_controller.snapshot.stop_reason = ZDT_TEST_STOP_STARTUP;
-    (void)ZdtStepper_EmergencyStop(true);
+    (void)ZdtStepper_EmergencyStop(false);
+    s_controller.disable_pending = true;
+    s_controller.deadline_ms = now_ms + EMERGENCY_DISABLE_GAP_MS;
 }
 
 void ZdtStepperTest_RequestRefresh(uint8_t mask)
@@ -155,6 +157,12 @@ void ZdtStepperTest_Poll(uint32_t now_ms)
 {
     ZdtStepper_Poll();
     ObserveResponse(now_ms);
+
+    if (s_controller.disable_pending &&
+        Reached(now_ms, s_controller.deadline_ms)) {
+        if (ZdtStepper_EmergencyDisable() == ZDT_STEPPER_OK)
+            s_controller.disable_pending = false;
+    }
 
     if ((s_controller.snapshot.state == ZDT_TEST_STATE_WAITING_ACK) &&
         Reached(now_ms, s_controller.command_sent_ms + COMMAND_TIMEOUT_MS)) {
@@ -180,15 +188,32 @@ void ZdtStepperTest_Poll(uint32_t now_ms)
     QueueNextQuery(now_ms);
 }
 
-static bool MotorReady(uint32_t now_ms)
+static uint32_t MotorNotReadyDetail(uint32_t now_ms)
 {
     ZdtStepperSnapshot_t device;
+    uint32_t detail = 0U;
     ZdtStepper_GetSnapshot(&device);
-    return device.motor_status_valid &&
-        (s_controller.motor_ms != UINT32_MAX) &&
-        !Reached(now_ms, s_controller.motor_ms + FEEDBACK_TIMEOUT_MS + 1U) &&
-        ((device.motor_status & ZDT_STEPPER_MOTOR_ENABLED) != 0U) &&
-        ((device.motor_status & MOTOR_UNSAFE_MASK) == 0U);
+    if (s_controller.disable_pending)
+        detail |= ZDT_STEPPER_NOT_READY_DISABLED;
+    if (!device.motor_status_valid ||
+        (s_controller.motor_ms == UINT32_MAX))
+        detail |= ZDT_STEPPER_NOT_READY_NO_STATUS;
+    else if (Reached(now_ms,
+                     s_controller.motor_ms + FEEDBACK_TIMEOUT_MS + 1U))
+        detail |= ZDT_STEPPER_NOT_READY_STATUS_STALE;
+    if ((device.motor_status & ZDT_STEPPER_MOTOR_ENABLED) == 0U)
+        detail |= ZDT_STEPPER_NOT_READY_DISABLED;
+    if ((device.motor_status & ZDT_STEPPER_MOTOR_STALLED) != 0U)
+        detail |= ZDT_STEPPER_NOT_READY_STALLED;
+    if ((device.motor_status & ZDT_STEPPER_MOTOR_STALL_PROTECTION) != 0U)
+        detail |= ZDT_STEPPER_NOT_READY_STALL_PROTECTION;
+    if ((device.motor_status & ZDT_STEPPER_MOTOR_LEFT_LIMIT) != 0U)
+        detail |= ZDT_STEPPER_NOT_READY_LEFT_LIMIT;
+    if ((device.motor_status & ZDT_STEPPER_MOTOR_RIGHT_LIMIT) != 0U)
+        detail |= ZDT_STEPPER_NOT_READY_RIGHT_LIMIT;
+    if ((device.motor_status & ZDT_STEPPER_MOTOR_POWER_LOSS) != 0U)
+        detail |= ZDT_STEPPER_NOT_READY_POWER_LOSS;
+    return detail;
 }
 
 ZdtStepperResult_t ZdtStepperTest_Command(
@@ -196,6 +221,7 @@ ZdtStepperResult_t ZdtStepperTest_Command(
 {
     ZdtStepperResult_t result;
     if (request == NULL) return ZDT_STEPPER_INVALID_ARGUMENT;
+    s_controller.last_reject_detail = 0U;
     if ((request->command < ZDT_TEST_COMMAND_ENABLE) ||
         (request->command > ZDT_TEST_COMMAND_POSITION))
         return ZDT_STEPPER_INVALID_ARGUMENT;
@@ -206,9 +232,12 @@ ZdtStepperResult_t ZdtStepperTest_Command(
 
     if (request->command == ZDT_TEST_COMMAND_STOP ||
         request->command == ZDT_TEST_COMMAND_DISABLE) {
-        result = ZdtStepper_EmergencyStop(
-            request->command == ZDT_TEST_COMMAND_DISABLE);
+        result = ZdtStepper_EmergencyStop(false);
         if (result != ZDT_STEPPER_OK) return result;
+        s_controller.disable_pending =
+            request->command == ZDT_TEST_COMMAND_DISABLE;
+        if (s_controller.disable_pending)
+            s_controller.deadline_ms = now_ms + EMERGENCY_DISABLE_GAP_MS;
         s_controller.snapshot.command_id = request->command_id;
         s_controller.snapshot.kind = ZDT_TEST_KIND_NONE;
         s_controller.snapshot.state = ZDT_TEST_STATE_IDLE;
@@ -220,15 +249,27 @@ ZdtStepperResult_t ZdtStepperTest_Command(
     }
 
     if (request->command == ZDT_TEST_COMMAND_ENABLE) {
+        s_controller.disable_pending = false;
         result = ZdtStepper_Enable(true);
         if (result != ZDT_STEPPER_OK) return result;
         s_controller.snapshot.kind = ZDT_TEST_KIND_NONE;
     } else {
+        uint32_t ready_detail;
         if ((request->direction != ZDT_STEPPER_DIRECTION_CW) &&
             (request->direction != ZDT_STEPPER_DIRECTION_CCW))
             return ZDT_STEPPER_INVALID_ARGUMENT;
-        if ((request->speed_rpm < 1U) || (request->speed_rpm > 300U) ||
-            !MotorReady(now_ms)) return ZDT_STEPPER_INVALID_ARGUMENT;
+        if ((request->speed_rpm < 1U) || (request->speed_rpm > 300U))
+            return ZDT_STEPPER_INVALID_ARGUMENT;
+        /* Consume a status response that may have arrived after the regular
+         * background poll but before this RPC was dispatched. */
+        ZdtStepper_Poll();
+        ObserveResponse(now_ms);
+        ready_detail = MotorNotReadyDetail(now_ms);
+        if (ready_detail != 0U) {
+            s_controller.last_reject_detail = ready_detail;
+            s_controller.refresh_pending |= ZDT_STEPPER_REFRESH_MOTOR;
+            return ZDT_STEPPER_INVALID_ARGUMENT;
+        }
         if (request->command == ZDT_TEST_COMMAND_VELOCITY) {
             if ((request->duration_or_timeout_ms < 100U) ||
                 (request->duration_or_timeout_ms > 5000U) ||
@@ -268,6 +309,11 @@ ZdtStepperResult_t ZdtStepperTest_Command(
     s_controller.expected_function = CommandFunction(request->command);
     s_controller.command_sent_ms = now_ms;
     return ZDT_STEPPER_OK;
+}
+
+uint32_t ZdtStepperTest_GetLastRejectDetail(void)
+{
+    return s_controller.last_reject_detail;
 }
 
 void ZdtStepperTest_GetSnapshot(ZdtStepperTestSnapshot_t *snapshot,

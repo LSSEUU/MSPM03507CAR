@@ -131,6 +131,8 @@ static void test_command_frames(void)
     assert(memcmp(tx_data, stop, sizeof(stop)) == 0);
     assert(memcmp(tx_data + sizeof(stop), disable, sizeof(disable)) == 0);
     reset_tx();
+    assert(ZdtStepper_EmergencyDisable() == ZDT_STEPPER_OK);
+    assert_frame(disable, sizeof(disable));
     assert(ZdtStepper_RunVelocity(ZDT_STEPPER_DIRECTION_CCW, 3000U, 255U) ==
            ZDT_STEPPER_OK);
     assert_frame(velocity, sizeof(velocity));

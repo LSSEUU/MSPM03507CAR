@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "M6 ZDT stepper extension",
   "type": "object",
-  "required": ["name", "version", "base_contract", "capability", "rpc_opcodes", "commands", "refresh_bits", "busy", "layouts", "semantics"],
+  "required": ["name", "version", "base_contract", "capability", "rpc_opcodes", "commands", "refresh_bits", "wrong_state_detail_bits", "busy", "layouts", "semantics"],
   "properties": {
     "name": {"const": "m6-zdt-stepper-ext-v1"},
     "version": {"const": 1},
@@ -11,6 +11,7 @@
     "rpc_opcodes": {"type": "object"},
     "commands": {"type": "object"},
     "refresh_bits": {"type": "object"},
+    "wrong_state_detail_bits": {"type": "object"},
     "busy": {"type": "object"},
     "layouts": {"type": "array", "minItems": 3},
     "semantics": {"type": "object"}

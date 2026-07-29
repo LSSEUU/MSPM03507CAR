@@ -311,6 +311,18 @@ ZdtStepperResult_t ZdtStepper_EmergencyStop(bool disable_after_stop)
         ZDT_STEPPER_OK : ZDT_STEPPER_TX_FULL;
 }
 
+ZdtStepperResult_t ZdtStepper_EmergencyDisable(void)
+{
+    static const uint8_t disable[] = {
+        ZDT_STEPPER_ADDRESS, ZDT_FUNCTION_ENABLE, 0xABU, 0x00U, 0x00U,
+        ZDT_STEPPER_CHECK_BYTE
+    };
+    const uint8_t *frames[1] = {disable};
+    const uint8_t lengths[1] = {(uint8_t)sizeof(disable)};
+    return ZdtStepperUart_WriteEmergencyBatch(frames, lengths, 1U) ?
+        ZDT_STEPPER_OK : ZDT_STEPPER_TX_FULL;
+}
+
 ZdtStepperResult_t ZdtStepper_RunVelocity(ZdtStepperDirection_t direction,
                                           uint16_t speed_rpm,
                                           uint8_t acceleration)

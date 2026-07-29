@@ -159,8 +159,8 @@ int main(void)
         else                  Buzzer_Off();
 
         AppRemote_Poll();
-        Diagnostics_Poll();
         ZdtStepperTest_Poll(SystemTime_Now());
+        Diagnostics_Poll();
 
         if (Scheduler_Take(SCHEDULER_TASK_5MS)) {
             uint32_t started = SystemTime_Now();

@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any, Callable, Mapping
 
-from .errors import M6Error
+from .errors import DeviceRejected, M6Error
 from .faults import decode_safety_faults
 from .models import ActionSpec, ArmedAction
 from .registry import (
@@ -17,9 +17,10 @@ from .registry import (
     GrayscaleCalibrationOwner,
     GrayscaleCalibrationState,
     REGISTRY,
+    RpcResult,
 )
 from .stepper_registry import CAPABILITY_MASK as STEPPER_CAPABILITY_MASK
-from .stepper_registry import StepperRefresh
+from .stepper_registry import StepperNotReady, StepperRefresh
 
 
 _DASHBOARD_ACTIONS = {
@@ -30,6 +31,26 @@ _DASHBOARD_ACTIONS = {
     ActionKind.LINE_FOLLOW,
 }
 _MAX_DASHBOARD_ACTION_MS = 10_000
+_STEPPER_MOTION_PREFLIGHT_S = 0.050
+
+
+def _stepper_not_ready_message(detail: int) -> str:
+    labels = (
+        (StepperNotReady.NO_MOTOR_STATUS, "尚未收到电机状态"),
+        (StepperNotReady.MOTOR_STATUS_STALE, "电机状态超过 500 ms 未更新"),
+        (StepperNotReady.MOTOR_DISABLED, "电机未使能"),
+        (StepperNotReady.STALLED, "检测到堵转"),
+        (StepperNotReady.STALL_PROTECTION, "堵转保护已触发"),
+        (StepperNotReady.LEFT_LIMIT, "左限位输入有效"),
+        (StepperNotReady.RIGHT_LIMIT, "右限位输入有效"),
+        (StepperNotReady.POWER_LOSS, "掉电标志已置位"),
+        (StepperNotReady.INTERNAL_REJECT, "驱动参数被内部校验拒绝"),
+    )
+    flags = StepperNotReady(detail)
+    reasons = [label for bit, label in labels if flags & bit]
+    if not reasons:
+        reasons.append("固件未提供就绪原因，请确认已烧录 r16 或更新版本")
+    return f"步进运动条件不满足：{'；'.join(reasons)}（detail=0x{detail:08X}）"
 
 
 def _enum_name(value: Any) -> str:
@@ -564,6 +585,14 @@ class DashboardController:
                     direction = int(request["direction"])
                     speed = int(request["speed_rpm"])
                     acceleration = int(request["acceleration"])
+                    # Browser timers are throttled in background tabs. Refresh
+                    # the safety-critical 0x3A status inside this serialized
+                    # POST so a newly focused page cannot race the 500 ms
+                    # firmware freshness check.
+                    self.session.get_stepper(StepperRefresh.MOTOR_STATUS)
+                    time.sleep(_STEPPER_MOTION_PREFLIGHT_S)
+                    self._stepper = self.session.get_stepper(StepperRefresh(0))
+                    self._stepper_at = self._clock()
                     if method == "velocity":
                         snapshot = self.session.start_stepper_velocity_test(
                             direction=direction, speed_rpm=speed,
@@ -576,6 +605,10 @@ class DashboardController:
                             acceleration=acceleration, pulses=int(request["pulses"]),
                             timeout_ms=int(request["timeout_ms"]),
                         )
+                except DeviceRejected as exc:
+                    if exc.result == int(RpcResult.WRONG_STATE):
+                        raise M6Error(_stepper_not_ready_message(exc.detail)) from exc
+                    raise
                 except (KeyError, TypeError, ValueError) as exc:
                     raise ValueError("步进测试参数无效或超出允许范围") from exc
             else:

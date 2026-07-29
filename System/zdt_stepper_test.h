@@ -12,6 +12,17 @@
 #define ZDT_STEPPER_REFRESH_HOMING       (1U << 3)
 #define ZDT_STEPPER_REFRESH_ALL          (0x0FU)
 
+/* WRONG_STATE detail bits for rejected motion commands. */
+#define ZDT_STEPPER_NOT_READY_NO_STATUS          (1UL << 0)
+#define ZDT_STEPPER_NOT_READY_STATUS_STALE       (1UL << 1)
+#define ZDT_STEPPER_NOT_READY_DISABLED           (1UL << 2)
+#define ZDT_STEPPER_NOT_READY_STALLED            (1UL << 3)
+#define ZDT_STEPPER_NOT_READY_STALL_PROTECTION   (1UL << 4)
+#define ZDT_STEPPER_NOT_READY_LEFT_LIMIT         (1UL << 5)
+#define ZDT_STEPPER_NOT_READY_RIGHT_LIMIT        (1UL << 6)
+#define ZDT_STEPPER_NOT_READY_POWER_LOSS         (1UL << 7)
+#define ZDT_STEPPER_NOT_READY_INTERNAL            (1UL << 8)
+
 typedef enum {
     ZDT_TEST_COMMAND_ENABLE = 1,
     ZDT_TEST_COMMAND_DISABLE = 2,
@@ -83,6 +94,7 @@ void ZdtStepperTest_Poll(uint32_t now_ms);
 void ZdtStepperTest_RequestRefresh(uint8_t mask);
 ZdtStepperResult_t ZdtStepperTest_Command(
     const ZdtStepperTestRequest_t *request, uint32_t now_ms);
+uint32_t ZdtStepperTest_GetLastRejectDetail(void);
 void ZdtStepperTest_GetSnapshot(ZdtStepperTestSnapshot_t *snapshot,
                                 uint32_t now_ms);
 

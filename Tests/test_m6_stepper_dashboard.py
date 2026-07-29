@@ -14,9 +14,10 @@ sys.path.insert(0, str(ROOT / "python" / "src"))
 
 from m6link.dashboard import DashboardBuffer, create_dashboard_server
 from m6link.dashboard_control import DashboardController
+from m6link.errors import DeviceRejected, M6Error
 from m6link.models import StepperSnapshot
-from m6link.registry import Capability
-from m6link.stepper_registry import CAPABILITY_MASK
+from m6link.registry import Capability, RpcResult
+from m6link.stepper_registry import CAPABILITY_MASK, StepperNotReady
 
 
 def snapshot(**changes: int) -> StepperSnapshot:
@@ -89,6 +90,13 @@ def test_stepper_controller_is_safety_independent_and_requires_confirmation() ->
             "confirm": "START_ZDT_VELOCITY_TEST", "direction": 0,
             "speed_rpm": 60, "acceleration": 20, "duration_ms": 1000,
         })
+        velocity_index = next(
+            index for index, call in enumerate(session.calls)
+            if call[0] == "velocity"
+        )
+        assert session.calls[velocity_index - 2:velocity_index] == [
+            ("get", int(4)), ("get", 0),
+        ]
         before = list(session.calls)
         controller.emergency_stop()
         assert session.estops == 1
@@ -163,12 +171,41 @@ def test_missing_capability_only_disables_stepper_panel() -> None:
         controller.close()
 
 
+def test_wrong_state_detail_is_translated_for_the_dashboard() -> None:
+    session = FakeStepperSession()
+    controller = DashboardController(
+        session, SimpleNamespace(enabled_capabilities=session.capabilities)
+    )
+    detail = int(
+        StepperNotReady.MOTOR_STATUS_STALE | StepperNotReady.MOTOR_DISABLED
+    )
+
+    def reject(**_values):
+        raise DeviceRejected(
+            int(RpcResult.WRONG_STATE), detail, opcode=0x8308,
+            name="WRONG_STATE",
+        )
+
+    session.start_stepper_velocity_test = reject
+    try:
+        with unittest.TestCase().assertRaisesRegex(
+            M6Error, "超过 500 ms 未更新.*电机未使能.*00000006"
+        ):
+            controller.stepper_velocity({
+                "confirm": "START_ZDT_VELOCITY_TEST", "direction": 0,
+                "speed_rpm": 60, "acceleration": 20, "duration_ms": 1000,
+            })
+    finally:
+        controller.close()
+
+
 def load_tests(_loader, _tests, _pattern):
     suite = unittest.TestSuite()
     for function in (
         test_stepper_controller_is_safety_independent_and_requires_confirmation,
         test_stepper_http_auth_origin_and_endpoints,
         test_missing_capability_only_disables_stepper_panel,
+        test_wrong_state_detail_is_translated_for_the_dashboard,
     ):
         suite.addTest(unittest.FunctionTestCase(function))
     return suite

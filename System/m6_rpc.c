@@ -26,6 +26,15 @@
 #include <math.h>
 #include <string.h>
 
+_Static_assert(ZDT_STEPPER_NOT_READY_NO_STATUS ==
+               M6_ZDT_NOT_READY_NO_MOTOR_STATUS, "ZDT ready detail mismatch");
+_Static_assert(ZDT_STEPPER_NOT_READY_STATUS_STALE ==
+               M6_ZDT_NOT_READY_MOTOR_STATUS_STALE, "ZDT ready detail mismatch");
+_Static_assert(ZDT_STEPPER_NOT_READY_DISABLED ==
+               M6_ZDT_NOT_READY_MOTOR_DISABLED, "ZDT ready detail mismatch");
+_Static_assert(ZDT_STEPPER_NOT_READY_INTERNAL ==
+               M6_ZDT_NOT_READY_INTERNAL_REJECT, "ZDT ready detail mismatch");
+
 typedef struct {
     uint8_t state;
     uint8_t kind;
@@ -786,7 +795,11 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
                 M6_ZDT_STEPPER_RETRY_MS;
             return M6_RESULT_BUSY;
         }
-        if (result != ZDT_STEPPER_OK) return M6_RESULT_WRONG_STATE;
+        if (result != ZDT_STEPPER_OK) {
+            *detail = ZdtStepperTest_GetLastRejectDetail();
+            if (*detail == 0U) *detail = ZDT_STEPPER_NOT_READY_INTERNAL;
+            return M6_RESULT_WRONG_STATE;
+        }
         fill_zdt_stepper(out); *out_length = M6_ZDT_STEPPER_SNAPSHOT_SIZE;
         return M6_RESULT_OK;
     }

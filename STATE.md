@@ -6,7 +6,7 @@
 
 ## 1. 当前基线
 
-- 平台为 MSPM0G3507-64P 两轮差速小车，32 MHz，Keil ARM Compiler 6.22；入口为 `Source/main.c`，冻结板级配置修订号 `20260729`，当前固件标识为 `M6-runtime-20260728-r15`。
+- 平台为 MSPM0G3507-64P 两轮差速小车，32 MHz，Keil ARM Compiler 6.22；入口为 `Source/main.c`，冻结板级配置修订号 `20260729`，当前固件标识为 `M6-runtime-20260729-r16`。
 - `m6link.Session` 是 UART0/DAPLink 的唯一主机串口所有者。网页仪表盘、控制、参数、录制和回放均复用该会话。
 - M6 V2 冻结 registry 已加入 `MANUAL_DRIVE` bit 25、`VISION_UART_MONITOR` bit 26 和 `GRAYSCALE_CALIBRATION` bit 27，以及对应 RPC、状态与批量数据合同；旧固件仍可连接，但不得启用未协商能力。
 - 参数 Flash 双槽记录当前使用 208 字节 V2，同时接受 168 字节 V1；V2 在控制参数后携带八路白底/黑线标定和有效标志。

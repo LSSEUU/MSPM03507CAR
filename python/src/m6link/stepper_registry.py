@@ -12,7 +12,7 @@ from .errors import IntegrityError
 from .registry import canonical_digest
 
 
-EXTENSION_SHA256 = "94400935573dd65d58b28147e7be3995239fa40b87223f1910fed246143edaa6"
+EXTENSION_SHA256 = "98f0a1ea092623d9429438d3aec7b1c54dab7e67e6383617e95fed8966c63797"
 
 
 def _find() -> Path | None:
@@ -55,6 +55,10 @@ StepperCommand = IntEnum("StepperCommand", EXTENSION["commands"])  # type: ignor
 StepperRefresh = IntFlag(
     "StepperRefresh",
     {name: 1 << int(bit) for name, bit in EXTENSION["refresh_bits"].items()},  # type: ignore[union-attr]
+)
+StepperNotReady = IntFlag(
+    "StepperNotReady",
+    {name: 1 << int(bit) for name, bit in EXTENSION["wrong_state_detail_bits"].items()},  # type: ignore[union-attr]
 )
 ZDT_STEPPER_CONTROL = CAPABILITY_MASK
 ZDT_STEPPER_STATUS_GET = int(RPC["ZDT_STEPPER_STATUS_GET"])
