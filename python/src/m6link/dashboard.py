@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import secrets
 import threading
 import time
@@ -17,7 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .dashboard_control import DashboardController
 from .dashboard_recording import DashboardRecordingManager
-from .errors import M6Error
+from .errors import Disconnected, M6Error
 from .monitor import MONITOR_SUBSCRIPTIONS
 from .models import TelemetrySample, VisionUartChunk, VisionUartStatus
 from .registry import Capability
@@ -69,6 +70,9 @@ class DashboardBuffer:
         self._reconnecting = False
         self._connection_message = "串口数据在线"
         self._reconnect_count = 0
+        self._reconnect_attempt = 0
+        self._reconnect_started_at: float | None = None
+        self._last_reconnect_error = ""
         self._camera: dict[str, Any] = {
             "available": False,
             "enabled": False,
@@ -174,6 +178,28 @@ class DashboardBuffer:
         with self._lock:
             self._connected = connected
             self._reconnecting = reconnecting
+            if connected or not reconnecting:
+                self._reconnect_started_at = None
+                self._reconnect_attempt = 0
+            if connected:
+                self._last_reconnect_error = ""
+            if message is not None:
+                self._connection_message = message
+
+    def begin_reconnect(self, attempt: int, *, message: str | None = None) -> None:
+        with self._lock:
+            self._connected = False
+            self._reconnecting = True
+            self._reconnect_attempt = max(1, int(attempt))
+            self._reconnect_started_at = self._clock()
+            if message is not None:
+                self._connection_message = message
+
+    def fail_reconnect(self, error: str, *, message: str | None = None) -> None:
+        with self._lock:
+            self._connected = False
+            self._reconnecting = True
+            self._last_reconnect_error = str(error)
             if message is not None:
                 self._connection_message = message
 
@@ -186,6 +212,7 @@ class DashboardBuffer:
     def read_since(self, after: int = 0, *, limit: int = 2_000) -> dict[str, Any]:
         limit = min(max(limit, 1), 10_000)
         with self._lock:
+            now = self._clock()
             earliest = self._events[0]["cursor"] if self._events else self._cursor + 1
             reset = after < earliest - 1 or after > self._cursor
             if reset:
@@ -202,7 +229,13 @@ class DashboardBuffer:
                 "reconnecting": self._reconnecting,
                 "connection_message": self._connection_message,
                 "reconnect_count": self._reconnect_count,
-                "uptime_ms": round((self._clock() - self._started_at) * 1000),
+                "reconnect_attempt": self._reconnect_attempt,
+                "reconnect_elapsed_ms": (
+                    max(0, round((now - self._reconnect_started_at) * 1000))
+                    if self._reconnect_started_at is not None else 0
+                ),
+                "last_reconnect_error": self._last_reconnect_error,
+                "uptime_ms": round((now - self._started_at) * 1000),
                 "identity": self._identity,
                 "counts": dict(self._counts),
                 "gaps": dict(self._gaps),
@@ -361,6 +394,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                             result["recording_error"] = str(exc)
         except (ValueError, KeyError, TypeError) as exc:
             self._send_json(400, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+            return
+        except Disconnected as exc:
+            self._send_json(503, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
             return
         except M6Error as exc:
             self._send_json(409, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
@@ -545,6 +581,27 @@ def _identity_mapping(identity: Any) -> dict[str, Any]:
     return {field: getattr(identity, field) for field in fields if hasattr(identity, field)}
 
 
+def _reconnect_worker(
+    controller: DashboardController,
+    subscriptions: Mapping[Any, int],
+    results: queue.SimpleQueue[tuple[str, Any]],
+    stopping: threading.Event,
+) -> None:
+    try:
+        identity = controller.reconnect(subscriptions, stopping=stopping)
+    except Exception as exc:
+        if not stopping.is_set():
+            results.put(("error", exc))
+        return
+    if stopping.is_set():
+        try:
+            controller.session.close(clean=False)
+        except Exception:
+            pass
+        return
+    results.put(("ok", identity))
+
+
 def run_dashboard(
     session: Any,
     identity: Any,
@@ -592,6 +649,9 @@ def run_dashboard(
         )
     server: DashboardHTTPServer | None = None
     server_thread: threading.Thread | None = None
+    reconnect_thread: threading.Thread | None = None
+    reconnect_results: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
+    reconnect_stopping = threading.Event()
     try:
         server = create_dashboard_server(
             buffer, port=http_port, controller=controller, recording_manager=recording_manager
@@ -611,12 +671,14 @@ def run_dashboard(
         last_sample_at = started_at
         next_reconnect_at = started_at
         reconnect_announced = False
+        reconnect_attempt = 0
         while duration_s is None or time.monotonic() - started_at < duration_s:
             now = time.monotonic()
             transport_alive = bool(getattr(session, "connected", True))
             silent = now - last_sample_at >= _RECONNECT_SILENCE_S
             if not transport_alive or silent:
                 if not reconnect_announced:
+                    controller.link_lost()
                     recording_manager.record_event(
                         "connection_lost",
                         {"transport_alive": transport_alive, "silence_ms": round((now - last_sample_at) * 1000)},
@@ -627,53 +689,102 @@ def run_dashboard(
                     reconnecting=True,
                     message="车辆无数据，正在等待重新上电并自动连接…",
                 )
+                if reconnect_thread is not None:
+                    try:
+                        reconnect_result, reconnect_value = reconnect_results.get_nowait()
+                    except queue.Empty:
+                        if reconnect_thread.is_alive():
+                            time.sleep(0.05)
+                            continue
+                        reconnect_result = "error"
+                        reconnect_value = RuntimeError(
+                            "reconnect worker exited without reporting a result"
+                        )
+                    reconnect_thread = None
+                    if reconnect_result == "error":
+                        error = f"{type(reconnect_value).__name__}: {reconnect_value}"
+                        buffer.fail_reconnect(
+                            error,
+                            message=f"自动重连失败：{error}；1 秒后重试",
+                        )
+                        recording_manager.record_event(
+                            "reconnect_failed",
+                            {
+                                "port": port_name,
+                                "attempt": reconnect_attempt,
+                                "error": error,
+                            },
+                        )
+                        next_reconnect_at = time.monotonic() + _RECONNECT_RETRY_S
+                        continue
+
+                    identity = reconnect_value
+                    restored_identity = _identity_mapping(identity)
+                    if port_name:
+                        restored_identity["port"] = port_name
+                    buffer.set_identity(restored_identity, reconnected=True)
+                    buffer.set_connected(True, message="车辆已重新连接")
+                    recording_manager.update_identity(restored_identity)
+                    recording_manager.record_event(
+                        "connection_restored",
+                        {"port": port_name, "attempt": reconnect_attempt},
+                    )
+                    camera_capable = bool(
+                        int(getattr(session, "capabilities", 0)) &
+                        int(Capability.VISION_UART_MONITOR)
+                    )
+                    if camera_capable and callable(
+                        getattr(session, "set_vision_uart_monitor", None)
+                    ):
+                        try:
+                            camera_status = session.set_vision_uart_monitor(True)
+                        except (M6Error, OSError, ValueError) as exc:
+                            buffer.set_camera_status(
+                                None,
+                                available=True,
+                                message=f"UART1 监视恢复失败：{exc}",
+                            )
+                        else:
+                            buffer.set_camera_status(
+                                camera_status,
+                                available=True,
+                                message="UART1 监视已恢复，尚未收到新数据",
+                            )
+                    else:
+                        buffer.set_camera_status(
+                            None,
+                            available=False,
+                            message="固件未协商 UART1 监视能力",
+                        )
+                    last_sample_at = time.monotonic()
+                    next_reconnect_at = last_sample_at
+                    reconnect_announced = False
+                    continue
+
                 if now < next_reconnect_at:
                     time.sleep(min(0.05, next_reconnect_at - now))
                     continue
-                try:
-                    identity = controller.reconnect(MONITOR_SUBSCRIPTIONS)
-                except (M6Error, OSError, ValueError) as exc:
-                    buffer.set_connected(
-                        False,
-                        reconnecting=True,
-                        message=f"自动重连等待中：{exc}",
-                    )
-                    next_reconnect_at = time.monotonic() + _RECONNECT_RETRY_S
-                    continue
-                buffer.set_identity(_identity_mapping(identity), reconnected=True)
-                buffer.set_connected(True, message="车辆已重新连接")
-                recording_manager.update_identity(_identity_mapping(identity))
-                recording_manager.record_event("connection_restored", {"port": port_name})
-                camera_capable = bool(
-                    int(getattr(session, "capabilities", 0)) &
-                    int(Capability.VISION_UART_MONITOR)
+                reconnect_attempt += 1
+                buffer.begin_reconnect(
+                    reconnect_attempt,
+                    message=f"正在重连 {port_name or '原串口'}",
                 )
-                if camera_capable and callable(
-                    getattr(session, "set_vision_uart_monitor", None)
-                ):
-                    try:
-                        camera_status = session.set_vision_uart_monitor(True)
-                    except (M6Error, OSError, ValueError) as exc:
-                        buffer.set_camera_status(
-                            None,
-                            available=True,
-                            message=f"UART1 监视恢复失败：{exc}",
-                        )
-                    else:
-                        buffer.set_camera_status(
-                            camera_status,
-                            available=True,
-                            message="UART1 监视已恢复，尚未收到新数据",
-                        )
-                else:
-                    buffer.set_camera_status(
-                        None,
-                        available=False,
-                        message="固件未协商 UART1 监视能力",
-                    )
-                last_sample_at = time.monotonic()
-                next_reconnect_at = last_sample_at
-                reconnect_announced = False
+                recording_manager.record_event(
+                    "reconnect_attempt",
+                    {"port": port_name, "attempt": reconnect_attempt},
+                )
+                reconnect_thread = threading.Thread(
+                    target=_reconnect_worker,
+                    args=(
+                        controller,
+                        MONITOR_SUBSCRIPTIONS,
+                        reconnect_results,
+                        reconnect_stopping,
+                    ),
+                    name="m6-dashboard-reconnect",
+                    daemon=True,
+                )
+                reconnect_thread.start()
                 continue
             sample = session.read_telemetry(timeout=0.1)
             if sample is not None:
@@ -688,18 +799,28 @@ def run_dashboard(
     except KeyboardInterrupt:
         return 0
     finally:
+        reconnect_stopping.set()
         buffer.set_connected(False, message="串口服务已停止")
-        if camera_capable and callable(getattr(session, "set_vision_uart_monitor", None)):
+        reconnect_in_flight = bool(
+            reconnect_thread is not None and reconnect_thread.is_alive()
+        )
+        if (
+            not reconnect_in_flight
+            and controller.link_available
+            and camera_capable
+            and callable(getattr(session, "set_vision_uart_monitor", None))
+        ):
             try:
                 session.set_vision_uart_monitor(False)
             except Exception:
                 pass
         recording_manager.close()
         controller.close()
-        try:
-            session.subscribe({})
-        except Exception:
-            pass
+        if not reconnect_in_flight and controller.link_available:
+            try:
+                session.subscribe({})
+            except Exception:
+                pass
         if server is not None:
             if server_thread is not None and server_thread.is_alive():
                 server.shutdown()

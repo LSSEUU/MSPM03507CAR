@@ -47,11 +47,24 @@ class M6ParameterStoreTests(unittest.TestCase):
         self.assertIn("final 64-bit commit word is last", source)
         self.assertIn("PARAMETER_STORE_FLASH_POLL_LIMIT", source)
         loop = source.index("for (word_index")
-        reprotect = source.index("unprotect_parameter_group_from_ram();", loop)
-        program = source.index("FLASHCTL->GEN.CMDTYPE =", reprotect)
-        self.assertLess(reprotect, program)
+        clear_status = source.index("clear_flash_status_from_ram();", loop)
+        unprotect = source.index("unprotect_parameter_group_from_ram();", loop)
+        program = source.index("FLASHCTL->GEN.CMDTYPE =", unprotect)
+        execute = source.index("FLASHCTL->GEN.CMDEXEC =", program)
+        wait = source.index("do {", execute)
+        self.assertLess(clear_status, unprotect)
+        self.assertLess(unprotect, program)
+        self.assertLess(program, execute)
+        self.assertLess(execute, wait)
         self.assertIn("DL_FlashCTL_unprotectSector", source)
         self.assertIn("DL_FlashCTL_protectSector", source)
+
+    def test_parameter_slots_map_to_cmdweprotb_bit_11(self):
+        source = (ROOT / "System" / "parameter_store.c").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("PARAMETER_STORE_MAIN_SECTOR(address) - 32U", source)
+        self.assertEqual(source.count("(1UL << 11U)"), 2)
 
     def test_boot_report_exposes_degraded_storage_without_a_motion_fault(self):
         diagnostics = (ROOT / "System" / "diagnostics.c").read_text(

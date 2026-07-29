@@ -12,6 +12,7 @@ let paused = false;
 let dirty = true;
 let fetching = false;
 let lastServerOk = 0;
+let vehicleConnected = false;
 let counts = {};
 let gaps = {};
 let controlToken = "";
@@ -23,6 +24,7 @@ let parameterData = [];
 let toastTimer = 0;
 let controlFetching = false;
 let parametersLoading = false;
+let parameterLevel = "basic";
 let calibrationState = { available: false, active: false };
 let calibrationFetching = false;
 let recordingState = { recording: false };
@@ -58,6 +60,55 @@ const ACTION_LABELS = {
   LINE_FOLLOW: "循迹运行",
   MOTOR_SELF_TEST: "电机自检",
 };
+
+const PARAMETER_GROUP_LABELS = Object.freeze({
+  wheel: "轮速控制", heading: "航向控制", line: "循迹控制", remote: "遥控速度",
+});
+
+const PARAMETER_UNIT_LABELS = Object.freeze({
+  TUNING_GAIN: "增益", RATIO: "比例", MM_PER_S: "mm/s", MM_PER_S2: "mm/s²",
+  MM_PER_S3: "mm/s³", PWM: "PWM", PWM_PER_MM_PER_S: "PWM/(mm/s)", DEGREE: "°", BOOL: "开关",
+});
+
+// PARAMETER_GUIDE_BEGIN — host-only help; keys mirror the frozen wire registry.
+const PARAMETER_GUIDE = Object.freeze({
+  "wheel.left.kp": {name:"左轮比例增益 Kp", purpose:"修正左轮当前速度误差，主要决定响应有多快。", increase:"跟随目标更快，但过大会抖动或超调。", decrease:"动作更柔和，但加速和抗负载会变慢。", caution:"先小步调整，并让左右轮 Kp 尽量接近。", level:"basic"},
+  "wheel.left.ki": {name:"左轮积分增益 Ki", purpose:"消除左轮长时间存在的速度偏差。", increase:"更快消除残余误差，但可能积累过多并超调。", decrease:"更稳定，但带载时可能长期偏慢。", caution:"通常先调 Kp，再逐步增加 Ki。", level:"basic"},
+  "wheel.right.kp": {name:"右轮比例增益 Kp", purpose:"修正右轮当前速度误差，主要决定响应有多快。", increase:"跟随目标更快，但过大会抖动或超调。", decrease:"动作更柔和，但加速和抗负载会变慢。", caution:"先小步调整，并让左右轮 Kp 尽量接近。", level:"basic"},
+  "wheel.right.ki": {name:"右轮积分增益 Ki", purpose:"消除右轮长时间存在的速度偏差。", increase:"更快消除残余误差，但可能积累过多并超调。", decrease:"更稳定，但带载时可能长期偏慢。", caution:"通常先调 Kp，再逐步增加 Ki。", level:"basic"},
+  "wheel.filter_alpha": {name:"轮速滤波响应", purpose:"控制编码器轮速新数据占比。", increase:"读数更灵敏，噪声和瞬时跳动也更明显。", decrease:"速度更平滑，但控制响应会有延迟。", caution:"出现速度毛刺时减小，明显迟钝时再增大。", level:"basic"},
+  "wheel.accel": {name:"加速斜率", purpose:"限制目标轮速每秒允许增加多少。", increase:"起步和提速更快。", decrease:"起步更平顺，对电源和轮胎更温和。", caution:"过大可能打滑、过流或导致航向摆动。", level:"advanced"},
+  "wheel.decel": {name:"减速斜率", purpose:"限制目标轮速每秒允许下降多少。", increase:"停车和降速更迅速。", decrease:"减速更平顺，但停车距离更长。", caution:"需结合场地空间和急停测试判断。", level:"advanced"},
+  "wheel.jerk": {name:"加速度变化率 Jerk", purpose:"限制加速度变化的快慢，影响启停冲击。", increase:"速度指令更干脆，冲击也更明显。", decrease:"启停更丝滑，但达到目标速度更慢。", caution:"过低会让加减速显得拖沓。", level:"advanced"},
+  "wheel.left.ks": {name:"左轮静摩擦前馈 Ks", purpose:"补偿电机刚开始转动所需的基础 PWM。", increase:"更容易克服死区和静摩擦。", decrease:"低速更柔和，减少自行爬动。", caution:"必须与左轮 Kv 一起满足前馈上限。", level:"advanced"},
+  "wheel.left.kv": {name:"左轮速度前馈 Kv", purpose:"按目标速度预先给左轮增加 PWM。", increase:"高速下更容易达到目标，但输出余量变小。", decrease:"更多依赖 PI 调节，响应可能变慢。", caution:"必须与左轮 Ks 一起满足前馈上限。", level:"advanced"},
+  "wheel.right.ks": {name:"右轮静摩擦前馈 Ks", purpose:"补偿电机刚开始转动所需的基础 PWM。", increase:"更容易克服死区和静摩擦。", decrease:"低速更柔和，减少自行爬动。", caution:"必须与右轮 Kv 一起满足前馈上限。", level:"advanced"},
+  "wheel.right.kv": {name:"右轮速度前馈 Kv", purpose:"按目标速度预先给右轮增加 PWM。", increase:"高速下更容易达到目标，但输出余量变小。", decrease:"更多依赖 PI 调节，响应可能变慢。", caution:"必须与右轮 Ks 一起满足前馈上限。", level:"advanced"},
+  "wheel.diag_target": {name:"轮速诊断目标", purpose:"设置轮速诊断使用的方向和目标速度。", increase:"目标向更大的正向速度移动。", decrease:"目标向更小或反向速度移动。", caution:"只用于诊断流程，测试前确保车轮安全悬空或场地清空。", level:"advanced"},
+  "heading.straight.kp": {name:"直行航向比例 Kp", purpose:"直行时按当前角度偏差修正左右轮差速。", increase:"偏航拉回更快，但可能左右摆动。", decrease:"行驶更柔和，但抗干扰和回正变慢。", caution:"小车蛇形摆动时优先减小。", level:"basic"},
+  "heading.straight.kd": {name:"直行航向微分 Kd", purpose:"利用转动趋势抑制直行回正时的摆动。", increase:"制动偏航更强，通常能减少超调。", decrease:"转向更直接，但可能来回摆动。", caution:"过大会放大陀螺仪噪声。", level:"basic"},
+  "heading.turn.kp": {name:"转向比例 Kp", purpose:"定角转向时按剩余角度决定修正强度。", increase:"更快接近目标角度，但更容易冲过头。", decrease:"转向更稳，但收尾较慢。", caution:"先在低转向速度下调整。", level:"basic"},
+  "heading.turn.kd": {name:"转向微分 Kd", purpose:"根据角速度为定角转向提供刹车作用。", increase:"更早减速，减少转向超调。", decrease:"转向更利落，但可能越过目标角。", caution:"过大会导致接近目标时抖动。", level:"basic"},
+  "heading.rate_alpha": {name:"角速度滤波响应", purpose:"控制新角速度数据在滤波结果中的占比。", increase:"转向检测更灵敏，但噪声更明显。", decrease:"角速度更平滑，但修正会滞后。", caution:"与航向 Kd 联动，修改后重新观察摆动。", level:"advanced"},
+  "heading.correction_limit": {name:"航向修正限幅", purpose:"限制航向控制可叠加到左右轮的最大差速。", increase:"纠偏能力更强，急转也更明显。", decrease:"动作更温和，但大偏差可能拉不回来。", caution:"过大会使单侧轮速饱和或车辆突然甩动。", level:"basic"},
+  "heading.turn_speed": {name:"定角转向速度", purpose:"设置定角转向动作使用的基础轮速。", increase:"转向更快、测试时间更短。", decrease:"更容易观察和调稳，转向更慢。", caution:"新手应从低速开始验证。", level:"basic"},
+  "heading.smooth_zone": {name:"转向平滑区", purpose:"接近目标角度时逐步降低转向强度。", increase:"更早减速，收尾更平滑。", decrease:"保持力度更久，转向更利落。", caution:"过大可能很慢才到位，过小容易超调。", level:"basic"},
+  "line.speed_min": {name:"循迹最低速度", purpose:"弯道或大误差时允许降到的最低行驶速度。", increase:"全程更快，但急弯容错降低。", decrease:"过弯和重新捕线更稳，但圈速下降。", caution:"不能高于循迹最高速度。", level:"basic"},
+  "line.speed_max": {name:"循迹最高速度", purpose:"直线和小误差时允许达到的最高行驶速度。", increase:"直线速度和整体圈速提高。", decrease:"更容易稳定循迹和调试。", caution:"不能低于循迹最低速度；先低速调稳再增加。", level:"basic"},
+  "line.position_alpha": {name:"循迹位置滤波响应", purpose:"控制灰度位置新测量值的占比。", increase:"更快跟随轨迹变化，也更容易受噪声影响。", decrease:"位置更平滑，但进入弯道时响应变慢。", caution:"传感器噪声明显时再适度减小。", level:"advanced"},
+  "line.derivative_alpha": {name:"循迹微分滤波响应", purpose:"控制循迹误差变化率的滤波程度。", increase:"Kd 对变化更敏感，但可能抖动。", decrease:"微分项更平滑，但抑制突变变慢。", caution:"需与循迹 Kd 一起观察。", level:"advanced"},
+  "line.kp": {name:"循迹比例增益 Kp", purpose:"按车辆偏离黑线中心的距离进行纠偏。", increase:"回线更快、转弯更积极，但容易蛇形。", decrease:"行驶更平稳，但可能转不过急弯。", caution:"先用低速逐步增加到刚好能跟住弯道。", level:"basic"},
+  "line.kd": {name:"循迹微分增益 Kd", purpose:"根据偏差变化趋势抑制循迹摆动。", increase:"提前刹住纠偏，减少蛇形。", decrease:"纠偏更直接，但出弯可能摆动。", caution:"过大会放大灰度噪声并造成高频抖动。", level:"basic"},
+  "line.correction_limit": {name:"循迹修正限幅", purpose:"限制循迹控制产生的最大左右轮差速。", increase:"急弯纠偏能力更强。", decrease:"转向更柔和，但可能在大偏差时丢线。", caution:"过大可能使一侧轮速饱和。", level:"basic"},
+  "line.correction_slew": {name:"循迹修正变化率", purpose:"限制循迹差速修正每秒变化的速度。", increase:"转向响应更快、更直接。", decrease:"修正更平滑，减少突兀甩动。", caution:"过低可能来不及进入急弯。", level:"advanced"},
+  "line.curve_gain": {name:"弯道速度增益", purpose:"根据弯道程度调整循迹速度策略。", increase:"弯道速度变化更明显。", decrease:"速度更接近固定值，行为更容易预测。", caution:"先把基础循迹调稳，再启用此补偿。", level:"advanced"},
+  "line.lost_search_speed": {name:"丢线搜索速度", purpose:"灰度失去轨迹后用于寻找黑线的行驶速度。", increase:"搜索更快，但越界和冲出赛道风险增大。", decrease:"找线更谨慎，但重新捕线耗时更长。", caution:"必须结合场地边界和丢线保护验证。", level:"basic"},
+  "remote.speed_low": {name:"遥控低速档", purpose:"设置遥控低速档的最大轮速。", increase:"低速档更快。", decrease:"细调和近距离操作更容易。", caution:"必须满足低速档 ≤ 中速档。", level:"basic"},
+  "remote.speed_medium": {name:"遥控中速档", purpose:"设置遥控常用档的最大轮速。", increase:"常用驾驶速度更快。", decrease:"转向和定位更容易控制。", caution:"必须位于低速档和高速档之间。", level:"basic"},
+  "remote.speed_high": {name:"遥控高速档", purpose:"设置遥控高速档的最大轮速。", increase:"最高遥控速度更快。", decrease:"高速驾驶风险和停车距离降低。", caution:"必须满足中速档 ≤ 高速档；先确认场地安全。", level:"basic"},
+  "remote.heading_hold": {name:"遥控航向保持", purpose:"遥控直行时自动用陀螺仪修正偏航。", increase:"开启后直行更容易保持方向。", decrease:"关闭后完全按遥控差速输出。", caution:"陀螺仪未稳定或需要原始差速手感时关闭。", level:"basic"},
+});
+// PARAMETER_GUIDE_END
 
 const $ = (id) => document.getElementById(id);
 const numeric = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -405,12 +456,18 @@ async function poll() {
 function updateConnection(state) {
   const connected = Boolean(state && state.connected);
   const reconnecting = Boolean(state && state.reconnecting);
+  vehicleConnected = connected;
   $("connectionDot").className = `status-dot ${connected ? "ok" : (reconnecting ? "waiting" : "bad")}`;
-  $("connectionText").textContent = connected
+  let connectionMessage = connected
     ? (state.connection_message || "串口数据在线")
     : (state ? (state.connection_message || "串口已断开") : "本地服务不可达");
   if (state) {
     const id = state.identity || {};
+    if (reconnecting && numeric(state.reconnect_attempt) > 0) {
+      const elapsedSeconds = (numeric(state.reconnect_elapsed_ms) / 1000).toFixed(1);
+      connectionMessage = `正在重连 ${id.port || "原串口"}，第 ${numeric(state.reconnect_attempt)} 次，已等待 ${elapsedSeconds} 秒`;
+      if (state.last_reconnect_error) connectionMessage += `；最近错误：${state.last_reconnect_error}`;
+    }
     const bootId = id.boot_id ?? null;
     if (manualDrive.lastBootId !== null && bootId !== null && bootId !== manualDrive.lastBootId && manualDrive.enabled)
       disableManualDrive("车辆已重启，请重新启用", false);
@@ -420,6 +477,7 @@ function updateConnection(state) {
     $("sampleCount").textContent = Object.values(counts).reduce((a, b) => a + numeric(b), 0).toLocaleString();
     $("gapCount").textContent = Object.values(gaps).reduce((a, b) => a + numeric(b), 0).toLocaleString();
   }
+  $("connectionText").textContent = connectionMessage;
   if (!connected && manualDrive.enabled) disableManualDrive("连接中断，固件租约将停车", false);
 }
 
@@ -434,6 +492,7 @@ function showToast(message, error = false) {
 
 async function command(path, body = {}, button = null) {
   if (playback.active && !path.startsWith("/api/recordings/")) throw new Error("历史回放为只读模式，请先退出回放");
+  if (!vehicleConnected && !path.startsWith("/api/recordings/")) throw new Error("车辆正在重连，设备操作暂不可用");
   if (!controlToken) throw new Error("控制服务尚未就绪");
   const previousText = button?.textContent;
   if (button) { button.disabled = true; button.textContent = "处理中…"; }
@@ -471,7 +530,7 @@ async function pollControl() {
 }
 
 function updateStepperControls() {
-  const disabled = playback.active || !stepperView.available || stepperView.busy || !controlToken;
+  const disabled = playback.active || !vehicleConnected || !stepperView.available || stepperView.busy || !controlToken;
   document.querySelectorAll("#stepperTest button, #stepperTest input, #stepperTest select")
     .forEach((control) => { control.disabled = disabled; });
 }
@@ -537,11 +596,11 @@ function renderStepper(state) {
   updateStepperControls();
 }
 
-async function pollStepper() {
-  if (stepperView.fetching || playback.active) return;
+async function pollStepper(force = false) {
+  if (stepperView.fetching || playback.active || !vehicleConnected) return;
   stepperView.fetching = true;
   try {
-    const response = await fetch("/api/stepper?refresh=1", {cache:"no-store"});
+    const response = await fetch(`/api/stepper?refresh=${force ? 1 : 0}`, {cache:"no-store"});
     const state = await response.json();
     if (!response.ok || !state.ok) throw new Error(state.error?.message || `HTTP ${response.status}`);
     renderStepper(state);
@@ -720,7 +779,7 @@ function renderCalibration(state) {
 }
 
 async function pollCalibration(force = false) {
-  if (calibrationFetching) return;
+  if (calibrationFetching || !vehicleConnected) return;
   calibrationFetching = true;
   try {
     const response = await fetch(`/api/calibration${force ? "?refresh=1" : ""}`, {cache: "no-store"});
@@ -886,6 +945,10 @@ function updateCountdown() {
 
 async function loadParameters(force = false) {
   if (parametersLoading) return;
+  if (!vehicleConnected) {
+    showToast("车辆正在重连，参数读取暂不可用", true);
+    return;
+  }
   parametersLoading = true;
   const button = $("loadParametersButton");
   const prior = button.textContent;
@@ -918,13 +981,67 @@ function sameValue(left, right) {
   return Math.abs(numeric(left) - numeric(right)) < 1e-6;
 }
 
+function parameterGuide(parameter) {
+  return PARAMETER_GUIDE[parameter.key] || {
+    name: parameter.key, purpose: "固件参数。", increase: "数值增大。", decrease: "数值减小。",
+    caution: "修改后先应用并低速验证。", level: "advanced",
+  };
+}
+
+function parameterUnit(unit) {
+  return PARAMETER_UNIT_LABELS[unit] || unit || "无单位";
+}
+
+function parameterRelation(relation) {
+  if (relation.includes("line.speed_min")) return "约束：循迹最低速度不能高于最高速度";
+  if (relation.includes("remote.speed_low")) return "约束：遥控速度必须满足低速 ≤ 中速 ≤ 高速";
+  if (relation.includes("wheel.left.ks")) return "约束：左轮 Ks + Kv × 400 不能超过 680 PWM";
+  if (relation.includes("wheel.right.ks")) return "约束：右轮 Ks + Kv × 400 不能超过 680 PWM";
+  return `约束：${relation}`;
+}
+
+function parameterFineStep(parameter) {
+  const span = Math.abs(numeric(parameter.maximum) - numeric(parameter.minimum));
+  if (!(span > 0)) return 1;
+  const raw = span / 100;
+  const exponent = 10 ** Math.floor(Math.log10(raw));
+  const normalized = raw / exponent;
+  const nice = [1, 2, 5, 10].reduce((best, item) =>
+    Math.abs(item - normalized) < Math.abs(best - normalized) ? item : best, 1);
+  return nice * exponent;
+}
+
+function parameterStepPrecision(step) {
+  return Math.max(0, Math.min(6, -Math.floor(Math.log10(Math.abs(step) || 1))));
+}
+
+function parameterInputValue(parameter, input) {
+  return parameter.type === "BOOL" ? input.checked : Number(input.value);
+}
+
+function setParameterInputValue(parameter, input, value) {
+  if (parameter.type === "BOOL") input.checked = Boolean(value);
+  else input.value = formatParameter(value);
+}
+
+function updateParameterDirtySummary() {
+  const count = parameterData.filter((parameter) => !sameValue(parameter.active, parameter.staged)).length;
+  const hasDirty = count > 0;
+  $("dirtyState").className = `badge ${hasDirty ? "bad" : "ok"}`;
+  $("dirtyState").textContent = hasDirty ? "存在未应用暂存值" : "Active 与 Stage 一致";
+  $("parameterDirtyCount").textContent = `已暂存修改 ${count} 项`;
+}
+
 function renderParameters(summary) {
   $("activeRevision").textContent = summary.active_revision;
   $("stageRevision").textContent = summary.stage_revision;
   $("generation").textContent = summary.generation;
-  const dirty = parameterData.some((parameter) => !sameValue(parameter.active, parameter.staged));
-  $("dirtyState").className = `badge ${dirty ? "bad" : "ok"}`;
-  $("dirtyState").textContent = dirty ? "存在未应用暂存值" : "Active 与 Stage 一致";
+  $("parameterSource").textContent = ({DEFAULTS:"编译默认", PERSISTED:"Flash", RUNTIME:"运行时"})[summary.active_source] || summary.active_source || "—";
+  const slot = ({0:"无槽位", 1:"Flash A", 2:"Flash B"})[numeric(summary.slot)] || `槽位 ${summary.slot}`;
+  $("parameterStorage").textContent = numeric(summary.storage_health) === 0
+    ? `${slot} · 正常`
+    : `${slot} · 降级（失败 ${numeric(summary.save_failures)} 次）`;
+  updateParameterDirtySummary();
   const body = $("parameterRows");
   body.replaceChildren();
   parameterData.forEach((parameter) => body.appendChild(parameterRow(parameter)));
@@ -932,50 +1049,112 @@ function renderParameters(summary) {
 }
 
 function parameterRow(parameter) {
+  const guide = parameterGuide(parameter);
   const row = document.createElement("tr");
   row.dataset.key = parameter.key;
   row.dataset.group = parameter.group;
+  row.dataset.level = guide.level;
+  row.dataset.search = [parameter.key, parameter.group, PARAMETER_GROUP_LABELS[parameter.group], guide.name,
+    guide.purpose, guide.increase, guide.decrease, guide.caution].join(" ").toLowerCase();
   row.classList.toggle("dirty", !sameValue(parameter.active, parameter.staged));
-  const cells = ["参数", "当前值", "暂存值", "范围 / 单位", "操作"].map((label) => {
+  const cells = ["参数与调节说明", "当前运行", "待暂存值", "范围 / 默认值", "操作"].map((label) => {
     const cell = document.createElement("td"); cell.dataset.label = label; row.appendChild(cell); return cell;
   });
-  const key = document.createElement("div"); key.className = "parameter-key";
-  const keyName = document.createElement("strong"); keyName.textContent = parameter.key; key.appendChild(keyName);
-  if (parameter.relations.length) { const relation = document.createElement("small"); relation.textContent = parameter.relations.join("；"); key.appendChild(relation); }
+
+  const key = document.createElement("div"); key.className = "parameter-guide";
+  const title = document.createElement("div"); title.className = "parameter-guide-title";
+  const keyName = document.createElement("strong"); keyName.textContent = guide.name;
+  const level = document.createElement("span"); level.className = `parameter-level ${guide.level}`; level.textContent = guide.level === "basic" ? "常用" : "高级";
+  title.append(keyName, level);
+  const rawKey = document.createElement("code"); rawKey.textContent = parameter.key;
+  const purpose = document.createElement("p"); purpose.textContent = guide.purpose;
+  const effects = document.createElement("div"); effects.className = "parameter-effects";
+  const increase = document.createElement("span"); increase.innerHTML = `<b>调大</b>${escapeText(guide.increase)}`;
+  const decrease = document.createElement("span"); decrease.innerHTML = `<b>调小</b>${escapeText(guide.decrease)}`;
+  effects.append(increase, decrease);
+  const caution = document.createElement("small"); caution.className = "parameter-caution"; caution.textContent = `注意：${guide.caution}`;
+  key.append(title, rawKey, purpose, effects, caution);
+  parameter.relations.forEach((item) => {
+    const relation = document.createElement("small"); relation.className = "parameter-relation"; relation.textContent = parameterRelation(item); key.appendChild(relation);
+  });
   cells[0].appendChild(key);
-  cells[1].className = "active-value"; cells[1].textContent = formatParameter(parameter.active);
+
+  cells[1].className = "active-value";
+  const active = document.createElement("strong"); active.textContent = formatParameter(parameter.active);
+  const activeLabel = document.createElement("small"); activeLabel.textContent = parameterUnit(parameter.unit);
+  cells[1].append(active, activeLabel);
+
   let input;
+  const inputGroup = document.createElement("div"); inputGroup.className = "parameter-input-group";
   if (parameter.type === "BOOL") {
-    input = document.createElement("select");
-    input.innerHTML = '<option value="true">true</option><option value="false">false</option>';
-    input.value = String(Boolean(parameter.staged));
+    const toggle = document.createElement("label"); toggle.className = "parameter-switch";
+    input = document.createElement("input"); input.type = "checkbox"; input.checked = Boolean(parameter.staged); input.setAttribute("role", "switch");
+    const track = document.createElement("span"); track.className = "parameter-switch-track"; track.setAttribute("aria-hidden", "true");
+    const state = document.createElement("span"); state.className = "parameter-switch-state";
+    const updateSwitch = () => { state.textContent = input.checked ? "已开启" : "已关闭"; };
+    input.addEventListener("change", updateSwitch); updateSwitch();
+    toggle.append(input, track, state); inputGroup.appendChild(toggle);
   } else {
     input = document.createElement("input"); input.type = "number";
     input.min = parameter.minimum; input.max = parameter.maximum;
-    input.step = Math.abs(numeric(parameter.maximum) - numeric(parameter.minimum)) <= 20 ? "0.01" : "1";
+    const fineStep = parameterFineStep(parameter);
+    input.step = String(fineStep); input.dataset.fineStep = String(fineStep);
     input.value = parameter.staged;
+    const minus = document.createElement("button"); minus.type = "button"; minus.className = "secondary parameter-nudge"; minus.textContent = "−";
+    minus.setAttribute("aria-label", `${guide.name} 减小 ${formatParameter(fineStep)}`);
+    const plus = document.createElement("button"); plus.type = "button"; plus.className = "secondary parameter-nudge"; plus.textContent = "+";
+    plus.setAttribute("aria-label", `${guide.name} 增大 ${formatParameter(fineStep)}`);
+    const adjust = (direction) => {
+      const precision = parameterStepPrecision(fineStep);
+      const next = clamp(numeric(input.value, parameter.staged) + direction * fineStep, numeric(parameter.minimum), numeric(parameter.maximum));
+      input.value = String(Number(next.toFixed(precision)));
+      input.dispatchEvent(new Event("input", {bubbles:true}));
+    };
+    minus.addEventListener("click", () => adjust(-1)); plus.addEventListener("click", () => adjust(1));
+    inputGroup.append(minus, input, plus);
   }
-  input.setAttribute("aria-label", `${parameter.key} 暂存值`);
-  cells[2].appendChild(input);
-  const range = document.createElement("span"); range.className = "range-text";
-  range.textContent = `${formatParameter(parameter.minimum)} … ${formatParameter(parameter.maximum)} · ${parameter.unit}`;
-  cells[3].appendChild(range);
-  const stage = document.createElement("button"); stage.type = "button"; stage.className = "secondary"; stage.textContent = "暂存";
+  input.setAttribute("aria-label", `${guide.name} 待暂存值`);
+  const delta = document.createElement("small"); delta.className = "parameter-delta";
+  cells[2].append(inputGroup, delta);
+
+  const range = document.createElement("div"); range.className = "range-text";
+  const rangeValue = document.createElement("strong"); rangeValue.textContent = `${formatParameter(parameter.minimum)} ～ ${formatParameter(parameter.maximum)}`;
+  const rangeMeta = document.createElement("span"); rangeMeta.textContent = `${parameterUnit(parameter.unit)} · 默认 ${formatParameter(parameter.default)}`;
+  range.append(rangeValue, rangeMeta); cells[3].appendChild(range);
+
+  const operation = document.createElement("div"); operation.className = "parameter-row-action";
+  const stage = document.createElement("button"); stage.type = "button"; stage.className = "secondary"; stage.textContent = "暂存此项";
+  const stageHelp = document.createElement("small"); stageHelp.textContent = "暂存后仍不会立即生效";
+  operation.append(stage, stageHelp); cells[4].appendChild(operation);
+
+  const updateLocalState = () => {
+    const value = parameterInputValue(parameter, input);
+    const draft = !sameValue(value, parameter.staged);
+    row.classList.toggle("draft", draft);
+    if (parameter.type === "BOOL") delta.textContent = sameValue(value, parameter.active) ? "与当前运行一致" : `将${value ? "开启" : "关闭"}`;
+    else {
+      const difference = numeric(value) - numeric(parameter.active);
+      delta.textContent = sameValue(value, parameter.active) ? "与当前运行一致" : `相对当前 ${difference > 0 ? "+" : ""}${formatParameter(difference)}`;
+    }
+    stage.disabled = !draft;
+    filterParameters();
+  };
+  input.addEventListener("input", updateLocalState);
+  input.addEventListener("change", updateLocalState);
   stage.addEventListener("click", async () => {
-    const value = parameter.type === "BOOL" ? input.value === "true" : Number(input.value);
+    const value = parameterInputValue(parameter, input);
     if (!input.reportValidity()) return;
     try {
       const result = await command("/api/parameters/stage", {key: parameter.key, value}, stage);
       parameter.staged = result.result.staged;
+      setParameterInputValue(parameter, input, parameter.staged);
       row.classList.toggle("dirty", !sameValue(parameter.active, parameter.staged));
       $("stageRevision").textContent = result.result.stage_revision;
-      const dirty = parameterData.some((item) => !sameValue(item.active, item.staged));
-      $("dirtyState").className = `badge ${dirty ? "bad" : "ok"}`;
-      $("dirtyState").textContent = dirty ? "存在未应用暂存值" : "Active 与 Stage 一致";
-      showToast(`${parameter.key} 已暂存，尚未应用`);
+      updateParameterDirtySummary(); updateLocalState();
+      showToast(`${guide.name} 已暂存，尚未应用`);
     } catch (error) { showToast(error.message, true); }
   });
-  cells[4].appendChild(stage);
+  updateLocalState();
   return row;
 }
 
@@ -988,9 +1167,24 @@ function formatParameter(value) {
 function filterParameters() {
   const group = $("parameterGroup").value;
   const query = $("parameterSearch").value.trim().toLowerCase();
+  const dirtyOnly = $("parameterDirtyOnly").checked;
+  let visible = 0;
   document.querySelectorAll("#parameterRows tr[data-key]").forEach((row) => {
-    row.hidden = (group !== "all" && row.dataset.group !== group) || (query && !row.dataset.key.toLowerCase().includes(query));
+    const hidden = (group !== "all" && row.dataset.group !== group)
+      || (parameterLevel === "basic" && row.dataset.level !== "basic")
+      || (dirtyOnly && !row.classList.contains("dirty") && !row.classList.contains("draft"))
+      || (query && !row.dataset.search.includes(query));
+    row.hidden = hidden;
+    if (!hidden) visible += 1;
   });
+  $("parameterVisibleCount").textContent = `显示 ${visible} / ${parameterData.length} 项`;
+}
+
+function setParameterLevel(level) {
+  parameterLevel = level === "all" ? "all" : "basic";
+  $("parameterBasicButton").setAttribute("aria-pressed", String(parameterLevel === "basic"));
+  $("parameterAllButton").setAttribute("aria-pressed", String(parameterLevel === "all"));
+  filterParameters();
 }
 
 async function parameterOperation(path, body, button, message) {
@@ -1921,6 +2115,9 @@ $("loadParametersButton").addEventListener("click", () => loadParameters(false))
 $("refreshParametersButton").addEventListener("click", () => loadParameters(true));
 $("parameterGroup").addEventListener("change", filterParameters);
 $("parameterSearch").addEventListener("input", filterParameters);
+$("parameterDirtyOnly").addEventListener("change", filterParameters);
+$("parameterBasicButton").addEventListener("click", () => setParameterLevel("basic"));
+$("parameterAllButton").addEventListener("click", () => setParameterLevel("all"));
 $("revertParametersButton").addEventListener("click", () => parameterOperation("/api/parameters/revert", {}, $("revertParametersButton"), "已撤销全部暂存值"));
 $("loadFlashButton").addEventListener("click", () => parameterOperation("/api/parameters/load", {}, $("loadFlashButton"), "Flash 参数已载入暂存区，尚未应用"));
 $("applyParametersButton").addEventListener("click", () => parameterOperation("/api/parameters/apply", {}, $("applyParametersButton"), "暂存参数已应用到运行控制"));

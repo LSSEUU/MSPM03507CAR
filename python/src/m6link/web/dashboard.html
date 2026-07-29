@@ -333,31 +333,43 @@
       </section>
     </dialog>
 
-    <dialog id="parameterDialog" class="parameter-dialog" aria-labelledby="parameterTitle">
+    <dialog id="parameterDialog" class="parameter-dialog" aria-labelledby="parameterTitle" aria-describedby="parameterHelp">
     <section id="parameterTuning" class="workspace-section parameter-section" aria-labelledby="parameterTitle">
-      <div class="workspace-heading">
-        <div><p class="section-kicker">PARAMETERS · STAGE / APPLY / SAVE</p><h2 id="parameterTitle">参数调节</h2><p>单行“暂存”不会立即改变控制；“应用暂存值”才切换运行参数；“保存到 Flash”才跨重启保留。</p></div>
-        <div class="dialog-actions"><button id="loadParametersButton" type="button">加载参数</button><button id="closeParametersButton" class="secondary" type="button">关闭</button></div>
+      <div class="workspace-heading parameter-dialog-heading">
+        <div><p class="section-kicker">PARAMETERS · GUIDED TUNING</p><h2 id="parameterTitle">参数调节</h2><p id="parameterHelp">先小幅修改并暂存单项，应用后观察车辆表现，确认安全稳定再写入 Flash。页面不会自动应用或保存。</p></div>
+        <div class="dialog-actions"><button id="loadParametersButton" type="button">读取参数</button><button id="closeParametersButton" class="secondary" type="button">关闭</button></div>
       </div>
+      <ol class="parameter-workflow" aria-label="参数生效流程">
+        <li><strong>1</strong><span><b>编辑并暂存</b><small>一次只改少量参数</small></span></li>
+        <li><strong>2</strong><span><b>应用到运行</b><small>当前会话立即生效</small></span></li>
+        <li><strong>3</strong><span><b>验证并保存</b><small>确认稳定后写入 Flash</small></span></li>
+      </ol>
       <article id="parameterPanel" class="panel parameter-panel" hidden>
         <div class="parameter-toolbar">
-          <div class="parameter-summary"><span>Active <strong id="activeRevision">—</strong></span><span>Stage <strong id="stageRevision">—</strong></span><span>Generation <strong id="generation">—</strong></span><span id="dirtyState" class="badge waiting">读取中</span></div>
+          <div class="parameter-summary" aria-label="参数版本与存储状态">
+            <span>Active 版本<strong id="activeRevision">—</strong></span><span>Stage 版本<strong id="stageRevision">—</strong></span><span>Flash 代次<strong id="generation">—</strong></span>
+            <span>当前来源<strong id="parameterSource">—</strong></span><span>存储状态<strong id="parameterStorage">—</strong></span>
+            <span id="dirtyState" class="badge waiting">读取中</span><span id="parameterDirtyCount" class="parameter-dirty-count">已暂存修改 0 项</span>
+          </div>
           <div class="parameter-actions">
             <button id="refreshParametersButton" class="secondary" type="button">刷新</button>
             <button id="revertParametersButton" class="secondary" type="button">撤销暂存</button>
             <button id="loadFlashButton" class="secondary" type="button">从 Flash 载入到暂存</button>
             <button id="defaultsButton" class="secondary warning" type="button">默认值载入到暂存</button>
             <button id="applyParametersButton" type="button">应用暂存值</button>
-            <button id="saveParametersButton" class="warning" type="button">保存到 Flash</button>
+            <button id="saveParametersButton" class="warning" type="button">写入 Flash</button>
           </div>
         </div>
         <div class="parameter-filter">
-          <label for="parameterGroup">分组</label><select id="parameterGroup"><option value="all">全部</option><option value="wheel">wheel</option><option value="heading">heading</option><option value="line">line</option><option value="remote">remote</option></select>
-          <label for="parameterSearch">搜索</label><input id="parameterSearch" type="search" placeholder="例如 kp、speed、alpha">
+          <label class="parameter-filter-field" for="parameterGroup"><span>参数分组</span><select id="parameterGroup"><option value="all">全部分组</option><option value="wheel">轮速控制</option><option value="heading">航向控制</option><option value="line">循迹控制</option><option value="remote">遥控速度</option></select></label>
+          <fieldset class="parameter-level-filter"><legend>显示范围</legend><div class="parameter-segmented" role="group" aria-label="参数难度"><button id="parameterBasicButton" class="secondary" type="button" aria-pressed="true">常用参数</button><button id="parameterAllButton" class="secondary" type="button" aria-pressed="false">全部参数</button></div></fieldset>
+          <label class="parameter-modified-filter" for="parameterDirtyOnly"><input id="parameterDirtyOnly" type="checkbox"><span>仅看已修改</span></label>
+          <label class="parameter-filter-field parameter-search-field" for="parameterSearch"><span>搜索参数</span><input id="parameterSearch" type="search" placeholder="中文名称、用途或原始 key"></label>
+          <output id="parameterVisibleCount" class="parameter-visible-count" aria-live="polite">显示 0 项</output>
         </div>
         <div class="parameter-table-wrap">
           <table class="parameter-table">
-            <thead><tr><th>参数</th><th>当前值</th><th>暂存值</th><th>范围 / 单位</th><th>操作</th></tr></thead>
+            <thead><tr><th>参数与调节说明</th><th>当前运行</th><th>待暂存值</th><th>范围 / 默认值</th><th>操作</th></tr></thead>
             <tbody id="parameterRows"><tr><td colspan="5" class="empty-cell">正在读取参数…</td></tr></tbody>
           </table>
         </div>

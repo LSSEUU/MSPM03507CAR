@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+import re
 import threading
 import time
 from types import SimpleNamespace
@@ -40,6 +41,9 @@ from m6link.registry import (
     ParameterType,
     TelemetryStream,
 )
+
+
+WEB_ASSETS = Path(__file__).parents[1] / "python" / "src" / "m6link" / "web"
 
 
 def _sample(sample_id: int, *, gap: bool = False) -> TelemetrySample:
@@ -276,6 +280,27 @@ def test_dashboard_buffer_exposes_reconnect_state_and_new_identity() -> None:
     assert online["connection_message"] == "车辆已重新连接"
 
 
+def test_dashboard_buffer_reports_reconnect_attempt_elapsed_time_and_error() -> None:
+    now = [10.0]
+    buffer = DashboardBuffer(
+        {"firmware_id": "test", "port": "COM10"}, clock=lambda: now[0]
+    )
+    buffer.begin_reconnect(3, message="正在重连 COM10")
+    now[0] += 1.25
+    waiting = buffer.read_since(0)
+    assert waiting["reconnect_attempt"] == 3
+    assert waiting["reconnect_elapsed_ms"] == 1250
+    assert waiting["last_reconnect_error"] == ""
+    buffer.fail_reconnect("SerialException: access denied")
+    failed = buffer.read_since(0)
+    assert failed["last_reconnect_error"] == "SerialException: access denied"
+    buffer.set_connected(True, message="车辆已重新连接")
+    restored = buffer.read_since(0)
+    assert restored["reconnect_attempt"] == 0
+    assert restored["reconnect_elapsed_ms"] == 0
+    assert restored["last_reconnect_error"] == ""
+
+
 def test_dashboard_http_serves_assets_state_and_rejects_writes() -> None:
     buffer = DashboardBuffer({"firmware_id": "fw-test", "port": "COM1"})
     buffer.ingest(_sample(7))
@@ -315,6 +340,8 @@ def test_dashboard_http_serves_assets_state_and_rejects_writes() -> None:
             assert b"TextDecoder" in javascript
             assert b"textContent" in javascript
             assert b"vision_uart_rx" in javascript
+            assert b"refresh=${force ? 1 : 0}" in javascript
+            assert b'/api/stepper?refresh=1' not in javascript
         with urlopen(base + "/dashboard.css", timeout=2) as response:
             stylesheet = response.read()
             assert b'data-layout="cockpit"' in stylesheet
@@ -339,6 +366,83 @@ def test_dashboard_http_serves_assets_state_and_rejects_writes() -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=1)
+
+
+def test_parameter_guide_covers_frozen_registry_and_marks_beginner_set() -> None:
+    javascript = (WEB_ASSETS / "dashboard.js").read_text(encoding="utf-8")
+    guide = re.search(
+        r"PARAMETER_GUIDE_BEGIN(?P<body>.*?)PARAMETER_GUIDE_END",
+        javascript,
+        flags=re.DOTALL,
+    )
+    assert guide is not None
+    entries = {
+        match.group("key"): match.group("body")
+        for match in re.finditer(
+            r'^\s+"(?P<key>[^"]+)": \{(?P<body>.+)\},?$',
+            guide.group("body"),
+            flags=re.MULTILINE,
+        )
+    }
+    registry_keys = {str(parameter["key"]) for parameter in REGISTRY["parameters"]}
+    assert set(entries) == registry_keys
+    for entry in entries.values():
+        for field in ("name", "purpose", "increase", "decrease", "caution", "level"):
+            assert f"{field}:" in entry
+
+    beginner_keys = {
+        key for key, entry in entries.items() if 'level:"basic"' in entry
+    }
+    assert beginner_keys == {
+        "wheel.left.kp", "wheel.left.ki", "wheel.right.kp", "wheel.right.ki",
+        "wheel.filter_alpha", "heading.straight.kp", "heading.straight.kd",
+        "heading.turn.kp", "heading.turn.kd", "heading.correction_limit",
+        "heading.turn_speed", "heading.smooth_zone", "line.speed_min",
+        "line.speed_max", "line.kp", "line.kd", "line.correction_limit",
+        "line.lost_search_speed", "remote.speed_low", "remote.speed_medium",
+        "remote.speed_high", "remote.heading_hold",
+    }
+    assert "minimum:" not in guide.group("body")
+    assert "maximum:" not in guide.group("body")
+    assert "default:" not in guide.group("body")
+
+
+def test_parameter_tuning_ui_keeps_local_edits_explicit_and_accessible() -> None:
+    html = (WEB_ASSETS / "dashboard.html").read_text(encoding="utf-8")
+    javascript = (WEB_ASSETS / "dashboard.js").read_text(encoding="utf-8")
+    stylesheet = (WEB_ASSETS / "dashboard.css").read_text(encoding="utf-8")
+
+    for marker in (
+        'aria-describedby="parameterHelp"', 'class="parameter-workflow"',
+        'id="parameterBasicButton"', 'id="parameterAllButton"',
+        'id="parameterDirtyOnly"', 'id="parameterVisibleCount"',
+        "编辑并暂存", "应用到运行", "验证并保存",
+    ):
+        assert marker in html
+
+    assert "function parameterFineStep(parameter)" in javascript
+    assert "const PARAMETER_UNIT_LABELS" in javascript
+    assert "row.dataset.search" in javascript
+    assert 'input.setAttribute("role", "switch")' in javascript
+    assert 'parameterLevel === "basic"' in javascript
+    assert 'row.classList.contains("draft")' in javascript
+
+    adjust_start = javascript.index("const adjust = (direction) =>")
+    adjust_end = javascript.index("minus.addEventListener", adjust_start)
+    local_adjust = javascript[adjust_start:adjust_end]
+    assert "clamp(" in local_adjust
+    assert "dispatchEvent" in local_adjust
+    assert "command(" not in local_adjust
+    assert "/api/" not in local_adjust
+    assert 'command("/api/parameters/stage"' in javascript
+
+    assert 'font: 14px/1.5 "Segoe UI"' in stylesheet
+    assert ".parameter-nudge { min-width: 44px; min-height: 44px" in stylesheet
+    assert ".parameter-guide-title strong { font-size: 16px" in stylesheet
+    assert "@media (max-width: 760px)" in stylesheet
+    assert ".parameter-dialog .parameter-section { display: block; overflow-y: auto" in stylesheet
+    assert "button, select, input, textarea { font-size: 16px; }" in stylesheet
+    assert "@media (prefers-reduced-motion: reduce)" in stylesheet
 
 
 def test_dashboard_controller_requires_safety_ack_and_two_phase_confirmation() -> None:
@@ -406,6 +510,50 @@ def test_manual_drive_mixing_lease_and_heartbeat_coalescing() -> None:
         while time.monotonic() < deadline and session.manual_commands[-1][0] != "stop":
             time.sleep(0.005)
         assert session.manual_commands[-1][0] == "stop"
+    finally:
+        controller.close()
+
+
+def test_connection_loss_revokes_motion_state_and_fast_fails_device_rpcs() -> None:
+    session = FakeControlSession()
+    controller = DashboardController(
+        session, SimpleNamespace(enabled_capabilities=session.capabilities)
+    )
+    try:
+        armed = controller.arm({
+            "kind": "WHEEL_SPEED_TEST",
+            "target_l_mm_s": 100,
+            "target_r_mm_s": 100,
+            "duration_ms": 500,
+            "safety_ack": True,
+        })
+        assert armed["armed"] is not None
+        assert controller.manual_enable()["manual_drive"]["enabled"] is True
+
+        controller.link_lost()
+        control = controller.control_state()
+        assert control["connected"] is False
+        assert control["armed"] is None
+        assert control["manual_drive"]["enabled"] is False
+        assert control["manual_drive"]["driving"] is False
+        assert "reconnecting" in control["status_error"]
+
+        for operation in (
+            controller.parameter_state,
+            controller.calibration_state,
+            controller.stepper_state,
+        ):
+            try:
+                operation()
+                raise AssertionError("device RPC should be gated during reconnect")
+            except Disconnected:
+                pass
+        try:
+            controller.parameter_command("apply", {})
+            raise AssertionError("parameter mutation should be gated during reconnect")
+        except Disconnected:
+            pass
+        assert session.parameter_commands == []
     finally:
         controller.close()
 
@@ -823,6 +971,7 @@ def test_run_dashboard_reconnects_a_live_com_port_after_vehicle_reboot(monkeypat
             self.subscriptions = []
             self.reconnect_count = 0
             self.sample_id = 0
+            self.parameter_reads = 0
 
         def subscribe(self, entries):
             self.subscriptions.append(dict(entries))
@@ -841,6 +990,10 @@ def test_run_dashboard_reconnects_a_live_com_port_after_vehicle_reboot(monkeypat
             self.sample_id += 1
             return _sample(self.sample_id)
 
+        def get_parameters(self):
+            self.parameter_reads += 1
+            return object()
+
     monkeypatch.setattr(dashboard_module, "_RECONNECT_SILENCE_S", 0.01)
     monkeypatch.setattr(dashboard_module, "_RECONNECT_RETRY_S", 0.01)
     session = ReconnectingSession()
@@ -852,6 +1005,161 @@ def test_run_dashboard_reconnects_a_live_com_port_after_vehicle_reboot(monkeypat
         open_browser=False,
     )
     assert session.reconnect_count == 1
+    assert session.parameter_reads == 1
     assert session.subscriptions[0]
     assert session.subscriptions[1]
     assert session.subscriptions[-1] == {}
+
+
+def test_blocked_reconnect_keeps_state_http_responsive_and_shutdown_bounded(
+    monkeypatch, tmp_path
+) -> None:
+    import m6link.dashboard as dashboard_module
+
+    reconnect_entered = threading.Event()
+    reconnect_release = threading.Event()
+    server_ready = threading.Event()
+    captured = {}
+    real_create_server = dashboard_module.create_dashboard_server
+
+    def capture_server(*args, **kwargs):
+        server = real_create_server(*args, **kwargs)
+        captured["server"] = server
+        server_ready.set()
+        return server
+
+    class BlockingSession:
+        def __init__(self) -> None:
+            self.connected = False
+            self.capabilities = Capability(0)
+            self.subscriptions = []
+            self.parameter_calls = 0
+
+        def subscribe(self, entries):
+            self.subscriptions.append(dict(entries))
+            return (), 0
+
+        def reconnect(self):
+            reconnect_entered.set()
+            reconnect_release.wait(timeout=5)
+            self.connected = True
+            return SimpleNamespace(
+                firmware_id="M6-after-reboot",
+                enabled_capabilities=self.capabilities,
+                port="COM10",
+            )
+
+        def get_parameters(self):
+            self.parameter_calls += 1
+            raise AssertionError("parameter RPC must not run during reconnect")
+
+        def read_telemetry(self, timeout=None):
+            raise AssertionError("telemetry must not be read while disconnected")
+
+        def close(self, *, clean=True):
+            self.connected = False
+
+    monkeypatch.setattr(dashboard_module, "create_dashboard_server", capture_server)
+    monkeypatch.setattr(dashboard_module, "_RECONNECT_SILENCE_S", 0.01)
+    session = BlockingSession()
+    runner = threading.Thread(
+        target=run_dashboard,
+        kwargs={
+            "session": session,
+            "identity": {"firmware_id": "before", "port": "COM10"},
+            "port_name": "COM10",
+            "http_port": 0,
+            "duration_s": 0.25,
+            "open_browser": False,
+            "recordings_dir": tmp_path,
+        },
+        daemon=True,
+    )
+    runner.start()
+    assert server_ready.wait(timeout=1)
+    assert reconnect_entered.wait(timeout=1)
+    server = captured["server"]
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    with urlopen(base + "/api/state", timeout=0.5) as response:
+        state = json.loads(response.read())
+    assert state["reconnecting"] is True
+    assert state["reconnect_attempt"] == 1
+    assert state["identity"]["port"] == "COM10"
+    try:
+        urlopen(base + "/api/parameters?refresh=1", timeout=0.5)
+        raise AssertionError("parameter endpoint should be unavailable")
+    except HTTPError as exc:
+        assert exc.code == 503
+    assert session.parameter_calls == 0
+
+    runner.join(timeout=1.5)
+    assert not runner.is_alive()
+    reconnect_release.set()
+
+
+def test_reconnect_retries_after_a_returned_failure_and_restores_subscriptions(
+    monkeypatch, tmp_path
+) -> None:
+    import m6link.dashboard as dashboard_module
+
+    class RetrySession:
+        def __init__(self) -> None:
+            self.connected = False
+            self.capabilities = Capability.FAULT_CLEAR
+            self.subscriptions = []
+            self.reconnect_count = 0
+            self.sample_id = 0
+            self.parameter_reads = 0
+
+        def subscribe(self, entries):
+            self.subscriptions.append(dict(entries))
+            return (), 0
+
+        def reconnect(self):
+            self.reconnect_count += 1
+            if self.reconnect_count == 1:
+                raise Disconnected("temporary Bluetooth SPP open failure")
+            self.connected = True
+            return SimpleNamespace(
+                firmware_id="M6-recovered",
+                enabled_capabilities=self.capabilities,
+                port="COM10",
+            )
+
+        def read_telemetry(self, timeout=None):
+            self.sample_id += 1
+            return _sample(self.sample_id)
+
+        def get_parameters(self):
+            self.parameter_reads += 1
+            return object()
+
+    monkeypatch.setattr(dashboard_module, "_RECONNECT_SILENCE_S", 0.01)
+    monkeypatch.setattr(dashboard_module, "_RECONNECT_RETRY_S", 0.01)
+    session = RetrySession()
+    run_dashboard(
+        session,
+        {"firmware_id": "before", "port": "COM10"},
+        port_name="COM10",
+        http_port=0,
+        duration_s=0.08,
+        open_browser=False,
+        recordings_dir=tmp_path,
+    )
+    assert session.reconnect_count == 2
+    assert session.parameter_reads == 1
+    assert len([entry for entry in session.subscriptions if entry]) == 2
+    assert session.subscriptions[-1] == {}
+
+
+def test_reconnect_recording_event_names_are_distinct() -> None:
+    source = (Path(__file__).parents[1] / "python" / "src" / "m6link" / "dashboard.py").read_text(
+        encoding="utf-8"
+    )
+    for event_name in (
+        "connection_lost",
+        "reconnect_attempt",
+        "reconnect_failed",
+        "connection_restored",
+    ):
+        assert f'"{event_name}"' in source

@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any, Callable, Mapping
 
-from .errors import DeviceRejected, M6Error
+from .errors import DeviceRejected, Disconnected, M6Error
 from .faults import decode_safety_faults
 from .models import ActionSpec, ArmedAction
 from .registry import (
@@ -86,6 +86,8 @@ class DashboardController:
         self.token = secrets.token_urlsafe(24)
         self._clock = clock
         self._operation_lock = threading.Lock()
+        self._link_lock = threading.Lock()
+        self._link_available = True
         self._armed_lock = threading.Lock()
         self._armed: ArmedAction | None = None
         self._status: Any = None
@@ -122,19 +124,63 @@ class DashboardController:
             return Capability(int(session_capabilities))
         return Capability(int(getattr(self.identity, "enabled_capabilities", 0)))
 
+    @property
+    def link_available(self) -> bool:
+        with self._link_lock:
+            return self._link_available
+
+    def _require_link_available(self) -> None:
+        if not self.link_available:
+            raise Disconnected("vehicle link is reconnecting")
+
+    def link_lost(self) -> None:
+        """Revoke every host-side motion lease before reconnecting."""
+
+        with self._link_lock:
+            self._link_available = False
+        with self._armed_lock:
+            self._armed = None
+        with self._manual_condition:
+            self._manual_generation += 1
+            self._manual_controller_id = None
+            self._manual_last_input = None
+            self._manual_pending = None
+            self._manual_driving = False
+            self._manual_target = (0, 0)
+            self._manual_error = "vehicle link is reconnecting"
+            self._manual_device = None
+            self._manual_condition.notify_all()
+
+    def _link_restored(self, identity: Any, parameters: Any = None) -> None:
+        self.identity = identity
+        self._status = None
+        self._parameters = parameters
+        self._calibration = None
+        self._stepper = None
+        self._stepper_at = float("-inf")
+        self._status_at = float("-inf")
+        with self._link_lock:
+            self._link_available = True
+        with self._manual_lock:
+            self._manual_error = None
+
     def control_state(self, *, force: bool = False) -> dict[str, Any]:
         status_error: str | None = None
-        with self._operation_lock:
-            now = self._clock()
-            if force or self._status is None or now - self._status_at >= 0.5:
-                try:
-                    self._status = self.session.get_status()
-                    if self.capabilities & Capability.MANUAL_DRIVE:
-                        self._manual_device = self.session.get_manual_drive()
-                    self._status_at = now
-                except M6Error as exc:
-                    status_error = str(exc)
-            status = self._status
+        now = self._clock()
+        if self.link_available:
+            try:
+                with self._operation_lock:
+                    self._require_link_available()
+                    if force or self._status is None or now - self._status_at >= 0.5:
+                        self._status = self.session.get_status()
+                        if self.capabilities & Capability.MANUAL_DRIVE:
+                            self._manual_device = self.session.get_manual_drive()
+                        self._status_at = now
+            except M6Error as exc:
+                status_error = str(exc)
+        else:
+            status_error = "vehicle link is reconnecting"
+        status = self._status
         with self._armed_lock:
             armed = self._armed
             if armed is not None and now >= armed.expires_at:
@@ -150,7 +196,9 @@ class DashboardController:
         return {
             "ok": True,
             "control_token": self.token,
-            "connected": bool(getattr(self.session, "connected", True)),
+            "connected": self.link_available and bool(
+                getattr(self.session, "connected", True)
+            ),
             "capabilities": int(self.capabilities),
             "actions": self._action_catalog(),
             "status": status_payload,
@@ -181,6 +229,7 @@ class DashboardController:
         )
 
     def manual_enable(self) -> dict[str, Any]:
+        self._require_link_available()
         if self.capabilities & Capability.MANUAL_DRIVE != Capability.MANUAL_DRIVE:
             raise ValueError("当前固件未协商网页手动驾驶能力")
         controller_id = secrets.token_urlsafe(18)
@@ -201,6 +250,7 @@ class DashboardController:
         return {"ok": True, "controller_id": controller_id, "manual_drive": self._manual_payload(self._clock())}
 
     def manual_command(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_link_available()
         controller_id = str(request.get("controller_id", ""))
         try:
             sequence = int(request["sequence"])
@@ -243,6 +293,7 @@ class DashboardController:
         }
 
     def manual_disable(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_link_available()
         controller_id = str(request.get("controller_id", ""))
         with self._manual_condition:
             if controller_id and controller_id != self._manual_controller_id:
@@ -289,6 +340,7 @@ class DashboardController:
             generation, sequence, left, right, takeover, stop = command
             try:
                 with self._operation_lock:
+                    self._require_link_available()
                     with self._manual_lock:
                         if generation != self._manual_generation:
                             continue
@@ -325,6 +377,7 @@ class DashboardController:
         self._manual_thread.join(timeout=1.0)
 
     def calibration_state(self, *, force: bool = False) -> dict[str, Any]:
+        self._require_link_available()
         available = (
             self.capabilities & Capability.GRAYSCALE_CALIBRATION
             == Capability.GRAYSCALE_CALIBRATION
@@ -332,6 +385,7 @@ class DashboardController:
         if not available:
             return {"ok": True, "available": False, "active": False}
         with self._operation_lock:
+            self._require_link_available()
             if force or self._calibration is None:
                 self._calibration = self.session.get_grayscale_calibration()
             status = self._calibration
@@ -358,6 +412,7 @@ class DashboardController:
     def calibration_command(
         self, command: str, request: Mapping[str, Any]
     ) -> dict[str, Any]:
+        self._require_link_available()
         if (
             self.capabilities & Capability.GRAYSCALE_CALIBRATION
             != Capability.GRAYSCALE_CALIBRATION
@@ -378,6 +433,7 @@ class DashboardController:
         if method is None:
             raise ValueError("未知灰度标定操作")
         with self._operation_lock:
+            self._require_link_available()
             if command == "start":
                 result = method()
             else:
@@ -389,7 +445,9 @@ class DashboardController:
         return self.calibration_state()
 
     def parameter_state(self, *, force: bool = False) -> dict[str, Any]:
+        self._require_link_available()
         with self._operation_lock:
+            self._require_link_available()
             if force or self._parameters is None:
                 self._parameters = self.session.get_parameters()
             snapshot = self._parameters
@@ -433,6 +491,7 @@ class DashboardController:
         }
 
     def arm(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_link_available()
         if request.get("safety_ack") is not True:
             raise ValueError("必须先确认测试区域安全且急停可用")
         try:
@@ -458,6 +517,7 @@ class DashboardController:
             duration_ms=duration_ms,
         )
         with self._operation_lock:
+            self._require_link_available()
             status = self.session.get_status()
             self._status, self._status_at = status, self._clock()
             if int(status.fault_bits):
@@ -468,6 +528,7 @@ class DashboardController:
         return {"ok": True, "armed": self._armed_payload(armed, self._clock())}
 
     def confirm(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_link_available()
         try:
             arm_token = int(request["arm_token"])
         except (KeyError, TypeError, ValueError) as exc:
@@ -482,12 +543,15 @@ class DashboardController:
             # A token gets one host-side confirm attempt, including across tabs.
             self._armed = None
         with self._operation_lock:
+            self._require_link_available()
             status = self.session.confirm_action(armed)
             self._status = None
         return {"ok": True, "action": _object_payload(status)}
 
     def cancel(self) -> dict[str, Any]:
+        self._require_link_available()
         with self._operation_lock:
+            self._require_link_available()
             status = self.session.cancel_action(0)
             self._status = None
         with self._armed_lock:
@@ -497,6 +561,7 @@ class DashboardController:
     def emergency_stop(self) -> dict[str, Any]:
         """Queue the vehicle-only raw stop without touching the stepper."""
 
+        self._require_link_available()
         self.session.emergency_stop()
         with self._armed_lock:
             self._armed = None
@@ -543,11 +608,13 @@ class DashboardController:
         return payload
 
     def stepper_state(self, *, force: bool = False, refresh: bool = False) -> dict[str, Any]:
+        self._require_link_available()
         if not self._stepper_available():
             return {"ok": True, "available": False, "safety_independent": True,
                     "snapshot": None, "error": "当前固件未协商步进电机能力"}
         error: str | None = None
         with self._operation_lock:
+            self._require_link_available()
             now = self._clock()
             if force or refresh or self._stepper is None or now - self._stepper_at >= 0.2:
                 try:
@@ -566,9 +633,11 @@ class DashboardController:
         }
 
     def _stepper_call(self, method: str, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_link_available()
         if not self._stepper_available():
             raise ValueError("当前固件未协商步进电机能力")
         with self._operation_lock:
+            self._require_link_available()
             if method == "enable":
                 if request.get("confirm") != "ENABLE_ZDT_STEPPER":
                     raise ValueError("使能步进电机需要明确确认")
@@ -634,6 +703,7 @@ class DashboardController:
         return self._stepper_call("position", request)
 
     def clear_fault(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_link_available()
         if request.get("confirm") != "CLEAR_OBSERVED_FAULTS":
             raise ValueError("清除 Safety 故障需要明确确认")
         if self.capabilities & Capability.FAULT_CLEAR != Capability.FAULT_CLEAR:
@@ -643,6 +713,7 @@ class DashboardController:
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("缺少有效的已观察故障位") from exc
         with self._operation_lock:
+            self._require_link_available()
             status = self.session.get_status()
             current = int(status.fault_bits)
             if current == 0:
@@ -660,34 +731,44 @@ class DashboardController:
             "result": _object_payload(result),
         }
 
-    def reconnect(self, subscriptions: Mapping[Any, int]) -> Any:
+    def reconnect(
+        self,
+        subscriptions: Mapping[Any, int],
+        *,
+        stopping: threading.Event | None = None,
+    ) -> Any:
         """Rebuild the transport/session without replaying any motion command."""
 
         with self._operation_lock:
             identity = self.session.reconnect()
+            if stopping is not None and stopping.is_set():
+                try:
+                    self.session.close(clean=False)
+                except TypeError:
+                    self.session.close()
+                raise Disconnected("dashboard stopped during reconnect")
             self.session.subscribe(subscriptions)
-            self.identity = identity
-            self._status = None
-            self._parameters = None
-            self._calibration = None
-            self._stepper = None
-            self._stepper_at = float("-inf")
-            self._status_at = float("-inf")
-        with self._armed_lock:
-            self._armed = None
-        with self._manual_condition:
-            self._manual_generation += 1
-            self._manual_controller_id = None
-            self._manual_last_input = None
-            self._manual_pending = None
-            self._manual_driving = False
-            self._manual_target = (0, 0)
-            self._manual_error = None
-            self._manual_device = None
+            if stopping is not None and stopping.is_set():
+                try:
+                    self.session.close(clean=False)
+                except TypeError:
+                    self.session.close()
+                raise Disconnected("dashboard stopped during reconnect")
+            parameter_reader = getattr(self.session, "get_parameters", None)
+            parameters = parameter_reader() if callable(parameter_reader) else None
+            if stopping is not None and stopping.is_set():
+                try:
+                    self.session.close(clean=False)
+                except TypeError:
+                    self.session.close()
+                raise Disconnected("dashboard stopped during reconnect")
+            self._link_restored(identity, parameters)
         return identity
 
     def parameter_command(self, command: str, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_link_available()
         with self._operation_lock:
+            self._require_link_available()
             if command == "stage":
                 key = str(request.get("key", ""))
                 if not key:

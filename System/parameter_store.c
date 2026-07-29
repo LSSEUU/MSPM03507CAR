@@ -14,7 +14,7 @@
 #define PARAMETER_STORE_MAIN_SECTOR(address) \
     ((uint32_t)(address) / (uint32_t)PARAMETER_STORE_SLOT_SIZE)
 #define PARAMETER_STORE_WEPROTB_BIT(address) \
-    (1UL << (PARAMETER_STORE_MAIN_SECTOR(address) / 8U))
+    (1UL << ((PARAMETER_STORE_MAIN_SECTOR(address) - 32U) / 8U))
 #define PARAMETER_STORE_FLASH_POLL_LIMIT 16000000UL
 
 _Static_assert(PARAMETER_STORE_MAIN_SECTOR(PARAMETER_STORE_SLOT_A_ADDRESS) >= 32U,
@@ -22,6 +22,12 @@ _Static_assert(PARAMETER_STORE_MAIN_SECTOR(PARAMETER_STORE_SLOT_A_ADDRESS) >= 32
 _Static_assert(PARAMETER_STORE_WEPROTB_BIT(PARAMETER_STORE_SLOT_A_ADDRESS) ==
                PARAMETER_STORE_WEPROTB_BIT(PARAMETER_STORE_SLOT_B_ADDRESS),
                "parameter sectors must share one protection group");
+_Static_assert(PARAMETER_STORE_WEPROTB_BIT(PARAMETER_STORE_SLOT_A_ADDRESS) ==
+               (1UL << 11U),
+               "parameter slot A must use CMDWEPROTB bit 11");
+_Static_assert(PARAMETER_STORE_WEPROTB_BIT(PARAMETER_STORE_SLOT_B_ADDRESS) ==
+               (1UL << 11U),
+               "parameter slot B must use CMDWEPROTB bit 11");
 #endif
 
 typedef struct {
@@ -377,11 +383,24 @@ static void read_slots(ParameterStoreDecoded_t *a, ParameterStoreDecoded_t *b)
 
 /*
  * MSPM0 reapplies maximum write/erase protection after every Flash command.
- * Sectors 126 and 127 share CMDWEPROTB group 15, so that group must be
- * unprotected again before each 64-bit program command. Keep this direct
- * register operation in the RAM-only path; a DriverLib call would introduce
+ * On a single-bank MSPM0G3507, CMDWEPROTB bit 0 starts at main sector 32;
+ * sectors 126 and 127 therefore share group bit 11. Clear-status reapplies
+ * maximum protection, so that group must be unprotected again before each
+ * 64-bit program command. Keep these direct register operations in the
+ * RAM-only path; a DriverLib call would introduce
  * a Flash-resident dependency between consecutive program operations.
  */
+__attribute__((always_inline)) static inline void
+clear_flash_status_from_ram(void)
+{
+    FLASHCTL->GEN.CMDTYPE = DL_FLASHCTL_COMMAND_TYPE_CLEAR_STATUS;
+    FLASHCTL->GEN.CMDEXEC = FLASHCTL_CMDEXEC_VAL_EXECUTE;
+    while ((FLASHCTL->GEN.STATCMD & FLASHCTL_STATCMD_CMDINPROGRESS_MASK) ==
+           FLASHCTL_STATCMD_CMDINPROGRESS_STATINPROGRESS) {
+        WWDT0->WWDTCNTRST = 0x00A7U;
+    }
+}
+
 __attribute__((always_inline)) static inline void
 unprotect_parameter_group_from_ram(void)
 {
@@ -432,6 +451,7 @@ static bool write_sector_from_ram(uint32_t address,
          word_index < (sizeof(ParameterRecordV2_t) / 8U);
          word_index++) {
         uint32_t source_index = word_index * 2U;
+        clear_flash_status_from_ram();
         unprotect_parameter_group_from_ram();
         FLASHCTL->GEN.CMDTYPE =
             DL_FLASHCTL_COMMAND_TYPE_PROGRAM |
