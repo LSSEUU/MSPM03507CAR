@@ -203,19 +203,25 @@ static void Diagnostics_RefreshReports(void)
         (gyro.valid_frames > 0U) ? "valid JY61P angle frames" :
                                   "no valid 0x55 0x53 frame");
     Diagnostics_Set(DIAG_GRAYSCALE,
-        (gray.error_count > 0U) ? DIAG_STATUS_FAULT :
-            ((line_app.control.calibration.valid && gray.scan_count > 0U) ?
-                DIAG_STATUS_OK : DIAG_STATUS_DEGRADED),
+        (!gray.startup_ready) ? DIAG_STATUS_DEGRADED :
+            ((gray.scan_count > 0U && !gray.last_scan_ok) ?
+                DIAG_STATUS_FAULT :
+                ((line_app.control.calibration.valid &&
+                  gray.scan_count > 0U) ? DIAG_STATUS_OK :
+                                             DIAG_STATUS_DEGRADED)),
         gray.scan_count, gray.error_count,
-        (gray.error_count > 0U) ? "ADC/address scan error" :
+        !gray.startup_ready ? "OUT.8IR.B startup grace" :
+        ((gray.scan_count > 0U && !gray.last_scan_ok) ?
+            "OUT.8IR.B I2C read failed; recovery attempted" :
             (!line_app.control.calibration.valid ?
                 ((line_app.control.calibration.source ==
                   LINE_CALIBRATION_SOURCE_COMPILED) &&
                  !line_app.control.calibration.compiled_verified ?
-                    "ADC ready; compile fallback calibration locked" :
-                    "ADC ready; active calibration invalid") :
-                ((gray.scan_count > 0U) ? "analog scan and calibration ready" :
-                                          "waiting for scheduled ADC scan")));
+                    "I2C ready; compatibility calibration locked" :
+                    "I2C ready; compatibility calibration invalid") :
+                ((gray.scan_count > 0U) ?
+                    "I2C mask and compatibility values ready" :
+                    "waiting for scheduled I2C read"))));
     Diagnostics_Set(DIAG_OLED,
         !oled.present ? DIAG_STATUS_FAULT :
             ((oled.ack_errors > 0U || !oled_visual_passed) ?
@@ -378,9 +384,14 @@ static void Diagnostics_ServiceGrayReport(void)
             s->adc[4], s->adc[5], s->adc[6], s->adc[7],
             (unsigned long)s->scan_count, (unsigned long)s->error_count);
     } else {
-        debug_printf("GRAY ADC pending=%u power=%u enabled=%u started=%u status=0x%08lX flags=0x%08lX\r\n",
-            Grayscale_IsScanPending(), s->adc_powered, s->adc_enabled,
-            s->adc_started, (unsigned long)s->last_adc_status,
+        debug_printf("GRAY ADC transport=I2C pending=%u ready=%u raw=0x%02X ok=%u status=%u nack=%lu bus=%lu recover=%lu consecutive=%lu power=%u enabled=%u started=%u flags=0x%08lX\r\n",
+            Grayscale_IsScanPending(), s->startup_ready, s->raw_mask,
+            s->last_scan_ok, (unsigned int)s->last_i2c_status,
+            (unsigned long)s->nack_count,
+            (unsigned long)s->bus_error_count,
+            (unsigned long)s->recovery_count,
+            (unsigned long)s->consecutive_error_count,
+            s->adc_powered, s->adc_enabled, s->adc_started,
             (unsigned long)s->last_adc_flags);
         gray_report_pending = false;
         return;
@@ -1172,7 +1183,7 @@ void Diagnostics_RunBootSelfTest(void)
         (unsigned long)ControlParams_Revision(), ParameterStore_SourceName(),
         (store.health == PARAMETER_STORE_HEALTH_OK) ? "OK" : "DEGRADED",
         (unsigned long)store.generation);
-    debug_printf("GRAY CAL source=%s generation=%lu valid=%u mask=0x%02X "
+    debug_printf("GRAY CAL mode=IR_QUAL source=%s generation=%lu valid=%u mask=0x%02X "
                  "white=[%u,%u,%u,%u,%u,%u,%u,%u] "
                  "black=[%u,%u,%u,%u,%u,%u,%u,%u]\r\n",
         calibration_source, (unsigned long)store.generation,
@@ -1522,7 +1533,7 @@ void Diagnostics_Poll(void)
             Diagnostics_QueueLineCalibrationReport();
             break;
         case '2':
-            debug_println("M5 active-level fixed: black line is derived from active ADC calibration.");
+            debug_println("M5 active-level fixed: OUT.8IR.B mask uses 1=line and compatibility ADC values.");
             break;
         case '3':
         {
@@ -1533,7 +1544,7 @@ void Diagnostics_Poll(void)
                 (heading_diag_state != HEADING_DIAG_IDLE)) {
                 debug_println("M5 arm rejected: another action is active.");
             } else if (!line_app.control.calibration.valid) {
-                debug_println("M5 arm rejected: install or verify a valid analog calibration first.");
+                debug_println("M5 arm rejected: complete module calibration and compatibility qualification first.");
             } else if (AppLine_Arm(now_ms)) {
                 debug_println("Place car on line; type uppercase A within 10 s.");
             } else {

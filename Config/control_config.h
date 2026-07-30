@@ -48,7 +48,7 @@
 #define HEADING_STRAIGHT_TEST_SPEED_MM_S      250.0f
 #define HEADING_STRAIGHT_TEST_DURATION_MS     5000U
 
-/* M5 calibrated analog sensor is conditioned to active-high black-line bits.
+/* OUT.8IR.B compatibility values are conditioned to active-high line bits.
  * Position is normalized to [-1, 1], left negative and right positive. */
 #define LINE_VALID_CONFIDENCE                   0.20f
 #define LINE_VALID_ACQUIRE_SAMPLES                 2U

@@ -42,8 +42,8 @@ static void reset_fixture(uint32_t now_ms)
     memset(&test_saved_calibration, 0, sizeof(test_saved_calibration));
     for (channel = 0U; channel < GRAYSCALE_CALIBRATION_CHANNEL_COUNT;
          channel++) {
-        test_active_calibration.white_adc[channel] = 2800U;
-        test_active_calibration.black_adc[channel] = 100U;
+        test_active_calibration.white_adc[channel] = 4094U;
+        test_active_calibration.black_adc[channel] = 1U;
     }
     GrayscaleCalibration_Init(now_ms);
 }
@@ -109,11 +109,11 @@ static void test_valid_capture_is_atomic_and_persistent(void)
     uint32_t index;
     reset_fixture(100U);
     start_and_capture_white(100U);
-    send_scan(1U, 101U, 3000U, 0U, true);
-    send_scan(1U, 102U, 3000U, 0U, true);
+    send_scan(1U, 101U, 4094U, 0U, true);
+    send_scan(1U, 102U, 4094U, 0U, true);
     assert(status().progress == 1U);
     for (index = 2U; index <= 64U; index++)
-        send_scan(index, 100U + index, 3000U, 0U, true);
+        send_scan(index, 100U + index, 4094U, 0U, true);
     value = status();
     assert(value.state == GRAYSCALE_CAL_STATE_WAIT_BLACK);
     assert(test_apply_calls == 0U);
@@ -121,16 +121,16 @@ static void test_valid_capture_is_atomic_and_persistent(void)
         GRAYSCALE_CAL_COMMAND_CAPTURE_BLACK, test_generation, 200U) ==
         GRAYSCALE_CAL_RESULT_OK);
     for (index = 65U; index <= 128U; index++)
-        send_scan(index, 200U + index, 800U, 0U, true);
+        send_scan(index, 200U + index, 1U, 0U, true);
     value = status();
     assert(value.state == GRAYSCALE_CAL_STATE_REVIEW);
     assert(value.valid_mask == 0xFFU);
-    assert(value.candidate.white_adc[0] == 3000U);
-    assert(value.candidate.black_adc[0] == 800U);
-    assert(value.span[0] == 2200U);
+    assert(value.candidate.white_adc[0] == 4094U);
+    assert(value.candidate.black_adc[0] == 1U);
+    assert(value.span[0] == 4093U);
     assert(value.max_noise[0] == 0U);
     assert(test_save_calls == 0U && test_apply_calls == 0U);
-    assert(test_active_calibration.white_adc[0] == 2800U);
+    assert(test_active_calibration.white_adc[0] == 4094U);
     assert(GrayscaleCalibration_Command(GRAYSCALE_CAL_OWNER_HOST, 77U,
         GRAYSCALE_CAL_COMMAND_CONFIRM, test_generation, 400U) ==
         GRAYSCALE_CAL_RESULT_OK);
@@ -139,8 +139,8 @@ static void test_valid_capture_is_atomic_and_persistent(void)
     assert(value.owner == GRAYSCALE_CAL_OWNER_NONE);
     assert(value.generation == 6U);
     assert(test_save_calls == 1U && test_apply_calls == 1U);
-    assert(test_saved_calibration.white_adc[0] == 3000U);
-    assert(test_active_calibration.black_adc[0] == 800U);
+    assert(test_saved_calibration.white_adc[0] == 4094U);
+    assert(test_active_calibration.black_adc[0] == 1U);
     assert(test_system_state == SYSTEM_STATE_IDLE);
 }
 
@@ -224,7 +224,7 @@ static void test_generation_and_storage_failures_preserve_runtime(void)
     assert(value.state == GRAYSCALE_CAL_STATE_FAILED);
     assert(value.failed_stage == 3U);
     assert(test_apply_calls == 0U);
-    assert(test_active_calibration.white_adc[0] == 2800U);
+    assert(test_active_calibration.white_adc[0] == 4094U);
 }
 
 void AppLine_GetSnapshot(AppLineSnapshot_t *snapshot)

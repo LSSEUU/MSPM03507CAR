@@ -37,15 +37,17 @@ class FakeGraySerial:
                     b"GRAY scan requested (non-blocking).\r\n",
                     b"GRAY adc=[1000,1001,1002,1003,",
                     b"1004,1005,1006,1007] scans=41 errors=0\r\n",
-                    b"GRAY ADC pending=0 power=1 enabled=0 started=0 "
-                    b"status=0x00000000 flags=0x00000100\r\n",
+                    b"GRAY ADC transport=I2C pending=0 ready=1 raw=0x18 "
+                    b"ok=1 status=0 nack=0 bus=0 recover=0 consecutive=0 "
+                    b"power=1 enabled=1 started=0 flags=0x00000018\r\n",
                 ),
                 (
                     b"GRAY scan requested (non-blocking).\r\n",
                     b"GRAY adc=[2000,2001,2002,2003,",
                     b"2004,2005,2006,2007] scans=42 errors=0\r\n",
-                    b"GRAY ADC pending=0 power=1 enabled=0 started=0 "
-                    b"status=0x00000000 flags=0x00000100\r\n",
+                    b"GRAY ADC transport=I2C pending=0 ready=1 raw=0x18 "
+                    b"ok=1 status=0 nack=0 bus=0 recover=0 consecutive=0 "
+                    b"power=1 enabled=1 started=0 flags=0x00000018\r\n",
                 ),
             )
         )

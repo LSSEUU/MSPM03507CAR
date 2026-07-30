@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect two-stage compile-time calibration for the analog line sensor."""
+"""Qualify OUT.8IR.B digital channels through the legacy ADC-value interface."""
 
 from __future__ import annotations
 
@@ -236,7 +236,11 @@ class LegacySessionPort:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Collect 64 white and 64 black ADC scans over UART0."
+        description=(
+            "Collect 64 background and 64 line compatibility scans over UART0. "
+            "This verifies the OUT.8IR.B installation; calibrate the module "
+            "with its physical button first."
+        )
     )
     parser.add_argument("--port", help="UART0 serial port, for example COM10")
     parser.add_argument("--baud", type=int, default=115200)
@@ -277,8 +281,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print_stats(args.stage, stats)
                 print(f"STAGE_JSON {format_stage_json(args.stage, stats)}")
                 return 0
-            white = capture_stage(serial_port, "WHITE", args.timeout)
-            black = capture_stage(serial_port, "BLACK LINE", args.timeout)
+            white = capture_stage(serial_port, "BACKGROUND", args.timeout)
+            black = capture_stage(serial_port, "LINE", args.timeout)
         finally:
             session.close(clean=False)
 
@@ -286,15 +290,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print_stats("black", black)
         problems = validate_calibration(white, black)
         if problems:
-            print("Calibration rejected:", file=sys.stderr)
+            print("Channel qualification rejected:", file=sys.stderr)
             for problem in problems:
                 print(f"- {problem}", file=sys.stderr)
             return 2
-        print("Calibration accepted. Replace the placeholders with:")
+        print("Channel qualification accepted. Compatibility values are:")
         print(format_config(white, black))
         return 0
     except (RuntimeError, TimeoutError, ValueError, OSError) as exc:
-        print(f"Calibration failed: {exc}", file=sys.stderr)
+        print(f"Channel qualification failed: {exc}", file=sys.stderr)
         return 1
 
 

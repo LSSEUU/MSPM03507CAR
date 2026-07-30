@@ -1,28 +1,34 @@
 #ifndef GRAYSCALE_CONFIG_H
 #define GRAYSCALE_CONFIG_H
 
-/*
- * Commissioning lock for the Ganwei analog eight-channel sensor.
- *
- * The arrays below were collected after correcting AD0 to PB1/H13-6, using
- * 64 valid scans over the installed white background and 64 over the track's
- * black material at the final sensor height. Line motion is rejected if this
- * lock is cleared or any channel span becomes invalid.
- */
+/* OUT.8IR.B I2C line sensor compatibility configuration. */
 #ifndef GRAYSCALE_CALIBRATION_VERIFIED
 #define GRAYSCALE_CALIBRATION_VERIFIED          1U
 #endif
 
 #define GRAYSCALE_CALIBRATION_MIN_SPAN_ADC    512U
+#define GRAYSCALE_I2C_POLL_PERIOD_MS           20U
+#define GRAYSCALE_STARTUP_GRACE_MS           3000U
+#define GRAYSCALE_PROXY_LINE_ADC                1U
+#define GRAYSCALE_PROXY_BACKGROUND_ADC       4094U
+
+/* The installed module has IR1 on the vehicle's left-hand side. */
+#ifndef GRAYSCALE_IR1_ON_RIGHT
+#define GRAYSCALE_IR1_ON_RIGHT                  0U
+#endif
+
+#if ((GRAYSCALE_IR1_ON_RIGHT != 0U) && (GRAYSCALE_IR1_ON_RIGHT != 1U))
+#error "GRAYSCALE_IR1_ON_RIGHT must be 0 or 1"
+#endif
 
 #ifndef GRAYSCALE_WHITE_ADC_VALUES
 #define GRAYSCALE_WHITE_ADC_VALUES \
-    { 2804U, 2548U, 3026U, 2709U, 1112U, 3063U, 3071U, 2253U }
+    { 4094U, 4094U, 4094U, 4094U, 4094U, 4094U, 4094U, 4094U }
 #endif
 
 #ifndef GRAYSCALE_BLACK_ADC_VALUES
 #define GRAYSCALE_BLACK_ADC_VALUES \
-    { 102U, 106U, 108U, 109U, 109U, 106U, 282U, 109U }
+    { 1U, 1U, 1U, 1U, 1U, 1U, 1U, 1U }
 #endif
 
 #endif

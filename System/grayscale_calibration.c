@@ -56,15 +56,15 @@ static void oled_status(void)
 {
     if (!OLED_IsPresent()) return;
     OLED_Clear();
-    OLED_ShowString(0U, 0U, "GRAY CAL");
+    OLED_ShowString(0U, 0U, "IR CHECK");
     if (s_status.state == GRAYSCALE_CAL_STATE_WAIT_WHITE)
-        OLED_ShowString(0U, 2U, "WHITE OK=START");
+        OLED_ShowString(0U, 2U, "BG OK=START");
     else if (s_status.state == GRAYSCALE_CAL_STATE_CAPTURE_WHITE)
-        OLED_ShowString(0U, 2U, "WHITE CAPTURE");
+        OLED_ShowString(0U, 2U, "BG CAPTURE");
     else if (s_status.state == GRAYSCALE_CAL_STATE_WAIT_BLACK)
-        OLED_ShowString(0U, 2U, "BLACK OK=START");
+        OLED_ShowString(0U, 2U, "LINE OK=START");
     else if (s_status.state == GRAYSCALE_CAL_STATE_CAPTURE_BLACK)
-        OLED_ShowString(0U, 2U, "BLACK CAPTURE");
+        OLED_ShowString(0U, 2U, "LINE CAPTURE");
     else if (s_status.state == GRAYSCALE_CAL_STATE_REVIEW)
         OLED_ShowString(0U, 2U, "CHECK OK=SAVE");
     else if (s_status.state == GRAYSCALE_CAL_STATE_COMPLETE)
