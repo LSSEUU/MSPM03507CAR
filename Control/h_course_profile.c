@@ -19,6 +19,75 @@ static float HCourse_NormalizeDegrees(float degrees)
     return degrees;
 }
 
+static uint8_t HCourse_ActiveCount(uint8_t mask)
+{
+    uint8_t count = 0U;
+    while (mask != 0U) {
+        count = (uint8_t)(count + (mask & 1U));
+        mask >>= 1U;
+    }
+    return count;
+}
+
+static uint8_t HCourse_MaxContiguousCount(uint8_t mask)
+{
+    uint8_t maximum = 0U;
+    uint8_t current = 0U;
+    uint8_t i;
+    for (i = 0U; i < 8U; i++) {
+        if ((mask & (uint8_t)(1U << i)) != 0U) {
+            current++;
+            if (current > maximum) maximum = current;
+        } else {
+            current = 0U;
+        }
+    }
+    return maximum;
+}
+
+static void HCourse_UpdateFinishDetector(uint8_t active_mask)
+{
+    uint8_t active_count;
+    bool ordinary_line;
+    bool crossbar_candidate;
+    if (!course.finish_enabled || course.finish_line_detected) return;
+    active_count = HCourse_ActiveCount(active_mask);
+    ordinary_line = (active_count >= 1U) && (active_count <= 2U);
+    crossbar_candidate =
+        (active_count >= H2_FINISH_MIN_ACTIVE_CHANNELS) &&
+        (HCourse_MaxContiguousCount(active_mask) >=
+         H2_FINISH_MIN_CONTIGUOUS_CHANNELS);
+    if ((course.total_distance_mm < H2_FINISH_WINDOW_MIN_MM) ||
+        (course.total_distance_mm > H2_FINISH_WINDOW_MAX_MM)) {
+        course.finish_candidate_samples = 0U;
+        if (ordinary_line) {
+            if (course.finish_preline_samples < 0xFFU)
+                course.finish_preline_samples++;
+        } else {
+            course.finish_preline_samples = 0U;
+        }
+        return;
+    }
+    if (crossbar_candidate &&
+        (course.finish_preline_samples >= H2_FINISH_PRELINE_SAMPLES)) {
+        if (course.finish_candidate_samples < 0xFFU)
+            course.finish_candidate_samples++;
+        if (course.finish_candidate_samples >=
+            H2_FINISH_QUALIFY_SAMPLES) {
+            course.finish_line_detected = true;
+            course.finish_line_distance_mm = course.total_distance_mm;
+        }
+        return;
+    }
+    course.finish_candidate_samples = 0U;
+    if (ordinary_line) {
+        if (course.finish_preline_samples < 0xFFU)
+            course.finish_preline_samples++;
+    } else {
+        course.finish_preline_samples = 0U;
+    }
+}
+
 static bool HCourse_IsPositiveCurveEvidence(uint8_t mask, float position)
 {
     return (position >= H_COURSE_CURVE_EVIDENCE_POSITION) ||
@@ -73,6 +142,15 @@ void HCourse_Stop(void)
     course.running = false;
 }
 
+void HCourse_SetFinishEnabled(bool enabled)
+{
+    course.finish_enabled = enabled;
+    course.finish_preline_samples = 0U;
+    course.finish_candidate_samples = 0U;
+    course.finish_line_detected = false;
+    course.finish_line_distance_mm = 0.0f;
+}
+
 bool HCourse_IsCurvePhase(void)
 {
     return (course.phase == H_COURSE_BC_CURVE) ||
@@ -87,6 +165,19 @@ float HCourse_SelectBaseSpeed(float tracking_base_mm_s,
 {
     float position_abs;
     float blend;
+    if (course.finish_enabled) {
+        if (course.finish_line_detected) {
+            return (tracking_base_mm_s > H2_FINISH_CRAWL_SPEED_MM_S) ?
+                H2_FINISH_CRAWL_SPEED_MM_S : tracking_base_mm_s;
+        }
+        if ((course.total_distance_mm >=
+             H2_FINISH_APPROACH_START_MM) &&
+            (course.total_distance_mm <= H2_FINISH_WINDOW_MAX_MM)) {
+            return (tracking_base_mm_s >
+                    H2_FINISH_APPROACH_SPEED_MM_S) ?
+                H2_FINISH_APPROACH_SPEED_MM_S : tracking_base_mm_s;
+        }
+    }
     if (HCourse_IsCurvePhase() &&
         (tracking_base_mm_s > curve_base_mm_s)) {
         return curve_base_mm_s;
@@ -127,6 +218,7 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
     float dt_s;
     float forward_speed = 0.0f;
     float force_distance_mm;
+    float curve_evidence_arm_mm;
     bool curve_evidence;
     if (!course.running) return;
     dt_ms = (uint32_t)(now_ms - course.last_update_ms);
@@ -146,6 +238,7 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
             course.fast_straight_latched = true;
         }
     }
+    HCourse_UpdateFinishDetector(active_mask);
 
     /* The fixed course starts tangent to AB.  Capture that initial heading
      * from the first valid gyro sample so the high-speed first straight has
@@ -232,7 +325,10 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
 
     curve_evidence = line_usable &&
         HCourse_IsPositiveCurveEvidence(active_mask, line_position);
-    if ((course.phase_distance_mm >= H_COURSE_STRAIGHT_ARM_MM) &&
+    curve_evidence_arm_mm = course.fast_straight_latched ?
+        H_COURSE_FAST_CURVE_EVIDENCE_ARM_MM :
+        H_COURSE_STRAIGHT_ARM_MM;
+    if ((course.phase_distance_mm >= curve_evidence_arm_mm) &&
         curve_evidence) {
         if (course.curve_evidence_samples < 0xFFU)
             course.curve_evidence_samples++;

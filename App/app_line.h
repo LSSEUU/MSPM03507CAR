@@ -26,6 +26,12 @@ typedef struct {
     float final_correction_mm_s;
     float final_left_target_mm_s;
     float final_right_target_mm_s;
+    bool h2_finish_enabled;
+    bool finish_line_detected;
+    bool finish_crawl_active;
+    bool finish_complete;
+    float finish_line_distance_mm;
+    float finish_travel_mm;
     LineFollowSnapshot_t control;
 } AppLineSnapshot_t;
 

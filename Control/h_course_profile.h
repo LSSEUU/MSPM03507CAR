@@ -27,11 +27,17 @@ typedef struct {
     uint8_t straight_capture_samples;
     uint8_t curve_evidence_samples;
     bool fast_straight_latched;
+    bool finish_enabled;
+    uint8_t finish_preline_samples;
+    uint8_t finish_candidate_samples;
+    bool finish_line_detected;
+    float finish_line_distance_mm;
 } HCourseSnapshot_t;
 
 void HCourse_Init(void);
 void HCourse_Start(uint32_t now_ms);
 void HCourse_Stop(void);
+void HCourse_SetFinishEnabled(bool enabled);
 void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
                     float left_speed_mm_s, float right_speed_mm_s,
                     bool heading_sample_valid, float yaw_deg,

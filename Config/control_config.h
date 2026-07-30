@@ -151,6 +151,7 @@
  * sensor is close to the 1500 mm tangent. */
 #define H_COURSE_FAST_STRAIGHT_SPEED_MM_S                340.0f
 #define H_COURSE_FAST_CURVE_SPEED_START_MM               1350.0f
+#define H_COURSE_FAST_CURVE_EVIDENCE_ARM_MM              1450.0f
 #define H_COURSE_FAST_STRAIGHT_FORCE_MM                  1450.0f
 #define H_COURSE_CURVE_EVIDENCE_POSITION                  0.18f
 #define H_COURSE_CURVE_EVIDENCE_SAMPLES                    3U
@@ -184,6 +185,21 @@
  * after separating early deceleration from the steering transition. */
 #define H_COURSE_BC_CURVE_FEEDFORWARD_SCALE                     1.00f
 #define H_COURSE_DA_CURVE_FEEDFORWARD_SCALE                     1.00f
+
+/* H2 finish-line evidence from three r45 laps: the A crossbar appeared once
+ * at 5.77-5.84 m as 0x1C/0x3C/0x3E.  Detect it independently from ordinary
+ * single-line tracking, slow before the event for sampling and stopping
+ * accuracy, then crawl from the qualified event to the initial offset. */
+#define H2_FINISH_WINDOW_MIN_MM                         5300.0f
+#define H2_FINISH_WINDOW_MAX_MM                         6800.0f
+#define H2_FINISH_APPROACH_START_MM                     5500.0f
+#define H2_FINISH_APPROACH_SPEED_MM_S                    180.0f
+#define H2_FINISH_CRAWL_SPEED_MM_S                        80.0f
+#define H2_FINISH_STOP_OFFSET_MM                          58.0f
+#define H2_FINISH_PRELINE_SAMPLES                          3U
+#define H2_FINISH_QUALIFY_SAMPLES                          2U
+#define H2_FINISH_MIN_ACTIVE_CHANNELS                      3U
+#define H2_FINISH_MIN_CONTIGUOUS_CHANNELS                  3U
 #define H_COURSE_MAX_DT_MS                                100U
 
 #define LINE_FOLLOW_BASE_SPEED_MM_S             160.0f

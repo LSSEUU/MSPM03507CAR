@@ -47,6 +47,30 @@ static void AppLine_ReturnIdle(void)
     app_line.deadline_ms = 0U;
 }
 
+static void AppLine_ResetFinish(bool enabled)
+{
+    app_line.h2_finish_enabled = enabled;
+    app_line.finish_line_detected = false;
+    app_line.finish_crawl_active = false;
+    app_line.finish_complete = false;
+    app_line.finish_line_distance_mm = 0.0f;
+    app_line.finish_travel_mm = 0.0f;
+}
+
+static void AppLine_CompleteFinish(void)
+{
+    WheelSpeed_Disable();
+    Safety_EndAction();
+    (void)SystemState_RequestIdle();
+    LineFollow_Stop();
+    HCourse_Stop();
+    AppLine_ResetYawAssist();
+    LineTrace_Freeze();
+    app_line.finish_crawl_active = false;
+    app_line.finish_complete = true;
+    AppLine_ReturnIdle();
+}
+
 static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms)
 {
     LineFollowSnapshot_t snapshot;
@@ -68,6 +92,9 @@ static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms)
     WheelSpeed_Enable();
     AppLine_ResetYawAssist();
     HCourse_Start(now_ms);
+    AppLine_ResetFinish(
+        duration_ms == M6_LINE_ACTION_CONTINUOUS_DURATION_MS);
+    HCourse_SetFinishEnabled(app_line.h2_finish_enabled);
     app_line.state = APP_LINE_RUNNING;
     app_line.started_ms = now_ms;
     app_line.deadline_ms = now_ms + duration_ms;
@@ -227,6 +254,18 @@ void AppLine_Task20ms(uint32_t now_ms)
         control.line_valid && !control.ambiguous,
         control.active_mask, control.position);
     HCourse_GetSnapshot(&course);
+    if (app_line.h2_finish_enabled && course.finish_line_detected) {
+        app_line.finish_line_detected = true;
+        app_line.finish_crawl_active = true;
+        app_line.finish_line_distance_mm =
+            course.finish_line_distance_mm;
+        app_line.finish_travel_mm = course.total_distance_mm -
+            course.finish_line_distance_mm;
+        if (app_line.finish_travel_mm >= H2_FINISH_STOP_OFFSET_MM) {
+            AppLine_CompleteFinish();
+            return;
+        }
+    }
     assisted_control = control;
     assisted_control.dynamic_base_mm_s = HCourse_SelectBaseSpeed(
         control.dynamic_base_mm_s, line_config.speed_min_mm_s,
