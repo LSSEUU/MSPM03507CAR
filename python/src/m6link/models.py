@@ -375,6 +375,46 @@ class StepperSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class HMissionConfig:
+    h4_straight_speed_mm_s: int
+    h4_b_margin_mm: int
+    h5_straight_speed_mm_s: int
+    h5_curve_speed_mm_s: int
+    development_end_distance_mm: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class HMissionSnapshot:
+    time_ms: int
+    active_revision: int
+    stage_revision: int
+    selected_mode: int
+    running_mode: int
+    state: int
+    stop_reason: int
+    flags: int
+    white_ms: int
+    outer_ms: int
+    saturation_ms: int
+    active: HMissionConfig
+    staged: HMissionConfig
+    distance_mm: float
+    started_ms: int
+    latched_ms: int
+    elapsed_ms: int
+    final_left_target_mm_s: int
+    final_right_target_mm_s: int
+
+    @property
+    def dirty(self) -> bool:
+        return bool(self.flags & 1)
+
+    @property
+    def running(self) -> bool:
+        return bool(self.flags & 2)
+
+
+@dataclass(frozen=True, slots=True)
 class LinkEvent:
     code: int
     severity: int

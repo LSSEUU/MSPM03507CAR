@@ -33,6 +33,8 @@ from .models import (
     FaultEvent,
     GapEvent,
     GrayscaleCalibrationStatus,
+    HMissionConfig,
+    HMissionSnapshot,
     Identity,
     LinkEvent,
     LinkStats,
@@ -97,6 +99,9 @@ from .registry import (
 )
 from .stepper_registry import CAPABILITY_MASK as STEPPER_CAPABILITY_MASK
 from .stepper_registry import RPC as STEPPER_RPC, StepperCommand, StepperRefresh
+from .h_mission_registry import CAPABILITY_MASK as H_MISSION_CAPABILITY_MASK
+from .h_mission_registry import HMissionCommand, HMissionMode
+from .h_mission_registry import RPC as H_MISSION_RPC
 
 
 BAUD_RATE = 115200
@@ -663,7 +668,8 @@ class Session:
         self.mode = "v2-armed"
         required = int(CAPABILITY_MASKS["HANDSHAKE_REQUIRED"])
         optional = (int(CAPABILITY_MASKS["HELLO_OPTIONAL"]) |
-                    STEPPER_CAPABILITY_MASK) & ~required
+                    STEPPER_CAPABILITY_MASK |
+                    H_MISSION_CAPABILITY_MASK) & ~required
         payload = encode_hello(challenge, required, optional)
         frame = encode_frame(Frame(2, int(FrameType.HELLO), 0, 0, 0, payload))
         pending: queue.Queue[Frame] = queue.Queue(maxsize=1)
@@ -776,6 +782,10 @@ class Session:
         if int(self.capabilities) & STEPPER_CAPABILITY_MASK != STEPPER_CAPABILITY_MASK:
             raise UnsupportedCapability(STEPPER_CAPABILITY_MASK)
 
+    def _require_h_mission_capability(self) -> None:
+        if int(self.capabilities) & H_MISSION_CAPABILITY_MASK != H_MISSION_CAPABILITY_MASK:
+            raise UnsupportedCapability(H_MISSION_CAPABILITY_MASK)
+
     @staticmethod
     def _decode_stepper(body: bytes) -> StepperSnapshot:
         if len(body) != 88:
@@ -859,6 +869,83 @@ class Session:
             StepperCommand.POSITION_TEST, confirmed=True, direction=direction,
             speed_rpm=speed_rpm, acceleration=acceleration,
             duration_or_timeout_ms=timeout_ms, pulses=pulses, position_mode=2,
+        )
+
+    @staticmethod
+    def _decode_h_mission(body: bytes) -> HMissionSnapshot:
+        if len(body) != 64:
+            raise IntegrityError(f"H mission snapshot has {len(body)} bytes; expected 64")
+        u16 = lambda offset: struct.unpack_from("<H", body, offset)[0]
+        i16 = lambda offset: struct.unpack_from("<h", body, offset)[0]
+        u32 = lambda offset: struct.unpack_from("<I", body, offset)[0]
+        active = HMissionConfig(u16(24), u16(26), u16(28), u16(30), u16(32))
+        staged = HMissionConfig(u16(34), u16(36), u16(38), u16(40), u16(42))
+        return HMissionSnapshot(
+            time_ms=u32(0), active_revision=u32(4), stage_revision=u32(8),
+            selected_mode=body[12], running_mode=body[13], state=body[14],
+            stop_reason=body[15], flags=body[16], white_ms=u16(18),
+            outer_ms=u16(20), saturation_ms=u16(22), active=active,
+            staged=staged, distance_mm=u32(44) / 10.0, started_ms=u32(48),
+            latched_ms=u32(52), elapsed_ms=u32(56),
+            final_left_target_mm_s=i16(60), final_right_target_mm_s=i16(62),
+        )
+
+    def get_h_mission(self) -> HMissionSnapshot:
+        self._require_h_mission_capability()
+        return self._decode_h_mission(
+            self._rpc(int(H_MISSION_RPC["H_MISSION_STATUS_GET"]), b"")
+        )
+
+    def _h_mission_command(
+        self, command: HMissionCommand, *, snapshot: HMissionSnapshot | None = None,
+        mode: int = 0, flags: int = 0, config: HMissionConfig | None = None,
+    ) -> HMissionSnapshot:
+        self._require_h_mission_capability()
+        identity = self._require_identity()
+        current = snapshot
+        if command != HMissionCommand.ABORT and current is None:
+            current = self.get_h_mission()
+        active_revision = current.active_revision if current is not None else 0
+        stage_revision = current.stage_revision if current is not None else 0
+        values = config or HMissionConfig(0, 0, 0, 0, 0)
+        body = struct.pack(
+            "<IIIBBH5H6x", identity.boot_id, active_revision, stage_revision,
+            int(command), int(mode), int(flags),
+            values.h4_straight_speed_mm_s, values.h4_b_margin_mm,
+            values.h5_straight_speed_mm_s, values.h5_curve_speed_mm_s,
+            values.development_end_distance_mm,
+        )
+        return self._decode_h_mission(
+            self._rpc(int(H_MISSION_RPC["H_MISSION_COMMAND"]), body)
+        )
+
+    def stage_h_mission(
+        self, config: HMissionConfig, *, snapshot: HMissionSnapshot | None = None,
+    ) -> HMissionSnapshot:
+        return self._h_mission_command(
+            HMissionCommand.STAGE, snapshot=snapshot, config=config
+        )
+
+    def apply_h_mission(
+        self, *, snapshot: HMissionSnapshot | None = None,
+    ) -> HMissionSnapshot:
+        return self._h_mission_command(HMissionCommand.APPLY, snapshot=snapshot)
+
+    def revert_h_mission(
+        self, *, snapshot: HMissionSnapshot | None = None,
+    ) -> HMissionSnapshot:
+        return self._h_mission_command(HMissionCommand.REVERT, snapshot=snapshot)
+
+    def select_h_mission(
+        self, mode: int | HMissionMode, *, snapshot: HMissionSnapshot | None = None,
+    ) -> HMissionSnapshot:
+        return self._h_mission_command(
+            HMissionCommand.SELECT_MODE, snapshot=snapshot, mode=int(mode)
+        )
+
+    def abort_h_mission(self, *, telemetry_gap: bool = False) -> HMissionSnapshot:
+        return self._h_mission_command(
+            HMissionCommand.ABORT, flags=1 if telemetry_gap else 0
         )
 
     def get_identity(self) -> Identity:

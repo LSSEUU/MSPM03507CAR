@@ -276,6 +276,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/stepper":
             self._send_stepper_state(parse_qs(parsed.query))
             return
+        if parsed.path == "/api/h-mission":
+            self._send_h_mission_state(parse_qs(parsed.query))
+            return
         if parsed.path == "/api/parameters":
             self._send_parameter_state(parse_qs(parsed.query))
             return
@@ -327,6 +330,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/stepper/disable": lambda controller, body: controller.stepper_disable(body),
             "/api/stepper/velocity": lambda controller, body: controller.stepper_velocity(body),
             "/api/stepper/position": lambda controller, body: controller.stepper_position(body),
+            "/api/h-mission/stage": lambda controller, body: controller.h_mission_command("stage", body),
+            "/api/h-mission/apply": lambda controller, body: controller.h_mission_command("apply", body),
+            "/api/h-mission/revert": lambda controller, body: controller.h_mission_command("revert", body),
+            "/api/h-mission/select": lambda controller, body: controller.h_mission_command("select", body),
+            "/api/h-mission/abort": lambda controller, body: controller.h_mission_command("abort", body),
             "/api/parameters/stage": lambda controller, body: controller.parameter_command("stage", body),
             "/api/parameters/apply": lambda controller, body: controller.parameter_command("apply", body),
             "/api/parameters/revert": lambda controller, body: controller.parameter_command("revert", body),
@@ -490,6 +498,19 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         refresh = query.get("refresh", ["0"])[0] == "1"
         try:
             result = controller.stepper_state(force=refresh, refresh=refresh)
+        except M6Error as exc:
+            self._send_json(503, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+            return
+        self._send_json(200, result)
+
+    def _send_h_mission_state(self, query: dict[str, list[str]]) -> None:
+        controller = self.server.dashboard_controller
+        if controller is None:
+            self._send_json(404, {"ok": False, "error": {"message": "HMission 功能未启用"}})
+            return
+        force = query.get("refresh", ["0"])[0] == "1"
+        try:
+            result = controller.h_mission_state(force=force)
         except M6Error as exc:
             self._send_json(503, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
             return

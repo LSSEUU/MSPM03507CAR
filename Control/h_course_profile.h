@@ -11,6 +11,12 @@ typedef enum {
     H_COURSE_DA_CURVE
 } HCoursePhase_t;
 
+typedef enum {
+    H_COURSE_FINISH_NONE = 0,
+    H_COURSE_FINISH_H2_STOP,
+    H_COURSE_FINISH_H5_LATCH
+} HCourseFinishMode_t;
+
 typedef struct {
     bool running;
     HCoursePhase_t phase;
@@ -29,6 +35,7 @@ typedef struct {
     bool fast_straight_latched;
     bool initial_ab_offset_applied;
     bool finish_enabled;
+    HCourseFinishMode_t finish_mode;
     uint8_t finish_preline_samples;
     uint8_t finish_candidate_samples;
     bool finish_line_detected;
@@ -39,6 +46,8 @@ void HCourse_Init(void);
 void HCourse_Start(uint32_t now_ms);
 void HCourse_Stop(void);
 void HCourse_SetFinishEnabled(bool enabled);
+void HCourse_SetFixedCourseStart(bool enabled);
+void HCourse_SetFinishMode(HCourseFinishMode_t mode);
 void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
                     float left_speed_mm_s, float right_speed_mm_s,
                     bool heading_sample_valid, float yaw_deg,

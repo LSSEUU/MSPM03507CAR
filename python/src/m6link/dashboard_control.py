@@ -10,7 +10,7 @@ from typing import Any, Callable, Mapping
 
 from .errors import DeviceRejected, Disconnected, M6Error
 from .faults import decode_safety_faults
-from .models import ActionSpec, ArmedAction
+from .models import ActionSpec, ArmedAction, HMissionConfig
 from .registry import (
     ActionKind,
     Capability,
@@ -21,6 +21,7 @@ from .registry import (
 )
 from .stepper_registry import CAPABILITY_MASK as STEPPER_CAPABILITY_MASK
 from .stepper_registry import StepperNotReady, StepperRefresh
+from .h_mission_registry import CAPABILITY_MASK as H_MISSION_CAPABILITY_MASK
 
 
 _DASHBOARD_ACTIONS = {
@@ -96,6 +97,8 @@ class DashboardController:
         self._calibration: Any = None
         self._stepper: Any = None
         self._stepper_at = float("-inf")
+        self._h_mission: Any = None
+        self._h_mission_at = float("-inf")
         self._manual_lock = threading.Lock()
         self._manual_condition = threading.Condition(self._manual_lock)
         self._manual_controller_id: str | None = None
@@ -158,6 +161,8 @@ class DashboardController:
         self._calibration = None
         self._stepper = None
         self._stepper_at = float("-inf")
+        self._h_mission = None
+        self._h_mission_at = float("-inf")
         self._status_at = float("-inf")
         with self._link_lock:
             self._link_available = True
@@ -576,6 +581,81 @@ class DashboardController:
 
     def _stepper_available(self) -> bool:
         return bool(int(self.capabilities) & STEPPER_CAPABILITY_MASK)
+
+    def _h_mission_available(self) -> bool:
+        return bool(int(self.capabilities) & H_MISSION_CAPABILITY_MASK)
+
+    @staticmethod
+    def _h_mission_payload(snapshot: Any) -> dict[str, Any]:
+        payload = _object_payload(snapshot)
+        mode_names = {2: "H2", 4: "H4", 5: "H5"}
+        state_names = (
+            "idle", "running", "completion_latched", "stopping",
+            "complete", "aborted",
+        )
+        stop_names = (
+            "none", "h2_finish", "h4_distance", "h5_finish_line",
+            "development_distance", "user_cancel", "fault", "gyro",
+            "line_white", "outer_sensor", "negative_target", "saturation",
+            "stop_timeout", "telemetry_gap",
+        )
+        payload["selected_mode_name"] = mode_names.get(snapshot.selected_mode, "unknown")
+        payload["running_mode_name"] = mode_names.get(snapshot.running_mode, "unknown")
+        payload["state_name"] = state_names[snapshot.state] if 0 <= snapshot.state < len(state_names) else "unknown"
+        payload["stop_reason_name"] = stop_names[snapshot.stop_reason] if 0 <= snapshot.stop_reason < len(stop_names) else "unknown"
+        payload["ram_only"] = True
+        payload["save_supported"] = False
+        return payload
+
+    def h_mission_state(self, *, force: bool = False) -> dict[str, Any]:
+        self._require_link_available()
+        if not self._h_mission_available():
+            return {"ok": True, "available": False, "ram_only": True,
+                    "save_supported": False, "snapshot": None}
+        with self._operation_lock:
+            self._require_link_available()
+            now = self._clock()
+            if force or self._h_mission is None or now - self._h_mission_at >= 0.2:
+                self._h_mission = self.session.get_h_mission()
+                self._h_mission_at = now
+            snapshot = self._h_mission
+        return {"ok": True, "available": True, "ram_only": True,
+                "save_supported": False,
+                "snapshot": self._h_mission_payload(snapshot)}
+
+    def h_mission_command(self, method: str, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_link_available()
+        if not self._h_mission_available():
+            raise ValueError("当前固件未协商 HMission 能力")
+        with self._operation_lock:
+            self._require_link_available()
+            current = self.session.get_h_mission()
+            if method == "stage":
+                config = HMissionConfig(
+                    h4_straight_speed_mm_s=int(request["h4_straight_speed_mm_s"]),
+                    h4_b_margin_mm=int(request["h4_b_margin_mm"]),
+                    h5_straight_speed_mm_s=int(request["h5_straight_speed_mm_s"]),
+                    h5_curve_speed_mm_s=int(request["h5_curve_speed_mm_s"]),
+                    development_end_distance_mm=int(request.get("development_end_distance_mm", 0)),
+                )
+                snapshot = self.session.stage_h_mission(config, snapshot=current)
+            elif method == "apply":
+                snapshot = self.session.apply_h_mission(snapshot=current)
+            elif method == "revert":
+                snapshot = self.session.revert_h_mission(snapshot=current)
+            elif method == "select":
+                snapshot = self.session.select_h_mission(int(request["mode"]), snapshot=current)
+            elif method == "abort":
+                snapshot = self.session.abort_h_mission(
+                    telemetry_gap=bool(request.get("telemetry_gap", False))
+                )
+            else:
+                raise ValueError("未知 HMission 命令")
+            self._h_mission = snapshot
+            self._h_mission_at = self._clock()
+        return {"ok": True, "available": True, "ram_only": True,
+                "save_supported": False,
+                "snapshot": self._h_mission_payload(snapshot)}
 
     @staticmethod
     def _stepper_payload(snapshot: Any) -> dict[str, Any]:

@@ -162,6 +162,14 @@ extern "C" {
 #define KEY1_PIN                                                (DL_GPIO_PIN_18)
 #define KEY1_IOMUX                                              (IOMUX_PINCM44)
 
+/* Carrier KEY2/KEY3: external pull-downs, pressed level is high. */
+#define KEY2_PORT                                                       (GPIOB)
+#define KEY2_PIN                                                (DL_GPIO_PIN_19)
+#define KEY2_IOMUX                                              (IOMUX_PINCM45)
+#define KEY3_PORT                                                       (GPIOB)
+#define KEY3_PIN                                                (DL_GPIO_PIN_17)
+#define KEY3_IOMUX                                              (IOMUX_PINCM43)
+
 /* Latest populated carrier routes the active-high buzzer SIG to PA12. */
 #define BUZZER_PORT                                                     (GPIOA)
 #define BUZZER_PIN                                              (DL_GPIO_PIN_12)

@@ -2,6 +2,7 @@
 #define APP_LINE_H
 
 #include "grayscale.h"
+#include "h_mission.h"
 #include "line_follow.h"
 
 #include <stdbool.h>
@@ -42,7 +43,11 @@ bool AppLine_Arm(uint32_t now_ms);
 bool AppLine_ConfirmStart(uint32_t now_ms);
 bool AppLine_StartTimed(uint32_t now_ms, uint32_t duration_ms);
 bool AppLine_StartH2(uint32_t now_ms);
+bool AppLine_StartH4(uint32_t now_ms);
+bool AppLine_StartH5(uint32_t now_ms);
+bool AppLine_StartMission(HMissionMode_t mode, uint32_t now_ms);
 bool AppLine_Stop(uint32_t now_ms);
+bool AppLine_AbortHMission(uint32_t now_ms, HMissionStopReason_t reason);
 void AppLine_ProcessGrayscale(const GrayscaleSnapshot_t *gray);
 void AppLine_Task20ms(uint32_t now_ms);
 void AppLine_GetSnapshot(AppLineSnapshot_t *snapshot);

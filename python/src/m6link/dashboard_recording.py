@@ -353,6 +353,8 @@ class DashboardRecordingManager:
         self._action_id: int | None = None
         self._action_result: Any = None
         self._action_motion_seen = False
+        self._local_line_active = False
+        self._gap_abort_requested = False
         self._post_deadline: float | None = None
         self._disconnect_deadline: float | None = None
         self._stop = threading.Event()
@@ -386,14 +388,30 @@ class DashboardRecordingManager:
         captured = self._capture(event, now)
         if captured is None:
             return
+        abort_for_gap = False
         with self._lock:
             self._add_prebuffer(captured, now)
             self._append_active(dict(captured))
             if isinstance(event, LinkEvent):
                 self._handle_link_event(event, now)
             elif isinstance(event, TelemetrySample):
+                self._handle_local_line_telemetry(event, now)
                 self._handle_action_telemetry(event, now)
+                if (
+                    event.gap_before and self._local_line_active
+                    and not self._gap_abort_requested
+                    and callable(getattr(self.session, "abort_h_mission", None))
+                ):
+                    self._gap_abort_requested = True
+                    abort_for_gap = True
             self._tick_locked(now)
+        if abort_for_gap:
+            try:
+                result = self.session.abort_h_mission(telemetry_gap=True)
+            except Exception as exc:
+                self.record_event("h_mission_gap_abort_failed", {"error": str(exc)})
+            else:
+                self.record_event("h_mission_gap_abort", {"result": _json_safe(result)})
 
     def record_event(self, event: str, values: Mapping[str, Any] | None = None) -> None:
         now = self._clock()
@@ -781,6 +799,39 @@ class DashboardRecordingManager:
             device_time_ms=sample.time_ms,
         )
 
+    def _handle_local_line_telemetry(self, sample: TelemetrySample, now: float) -> None:
+        if int(sample.stream) != int(TelemetryStream.LINE):
+            return
+        try:
+            running = int(sample.values.get("app_state", 0)) == 2
+        except (TypeError, ValueError):
+            return
+        if running and not self._local_line_active:
+            self._local_line_active = True
+            self._gap_abort_requested = False
+            if self._writer is None:
+                try:
+                    self._start(
+                        name="K1 HMission 自动录制",
+                        notes="由车载本地按键启动边沿自动触发；包含前5秒和后2秒。",
+                        trigger="action",
+                        include_preroll=True,
+                        action={"source": "local_key", "kind": "h_mission"},
+                    )
+                except (OSError, ValueError) as exc:
+                    self._last_error = str(exc)
+            return
+        if not running and self._local_line_active:
+            self._local_line_active = False
+            self._gap_abort_requested = False
+            self._set_action_terminal(
+                now,
+                state=ActionState.COMPLETE,
+                reason=ActionReason.COMPLETE,
+                source="line_app_idle",
+                device_time_ms=sample.time_ms,
+            )
+
     def _set_action_terminal(
         self,
         now: float,
@@ -857,6 +908,7 @@ class DashboardRecordingManager:
         self._action_id = None
         self._action_result = None
         self._action_motion_seen = False
+        self._gap_abort_requested = False
         self._post_deadline = None
         self._disconnect_deadline = None
 

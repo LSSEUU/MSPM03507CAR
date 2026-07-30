@@ -7,9 +7,9 @@
 #include <stdint.h>
 
 #ifdef M2_FAULT_INJECTION_TEST
-#define CONTROL_PROTOCOL_FIRMWARE_ID "M6-runtime-20260731-r56-fi"
+#define CONTROL_PROTOCOL_FIRMWARE_ID "M6-runtime-20260731-r58-fi"
 #else
-#define CONTROL_PROTOCOL_FIRMWARE_ID "M6-runtime-20260731-r56"
+#define CONTROL_PROTOCOL_FIRMWARE_ID "M6-runtime-20260731-r58"
 #endif
 #define CONTROL_PROTOCOL_SCHEMA_VERSION CONTROL_PARAMS_SCHEMA_VERSION
 /* Payload only; CR/LF keeps every complete wire frame within 60 bytes. */

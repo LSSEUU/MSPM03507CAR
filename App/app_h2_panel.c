@@ -25,6 +25,14 @@ typedef struct {
     uint8_t stable_samples;
     bool display_dirty;
     bool calibration_was_active;
+    bool raw_key2_pressed;
+    bool raw_key3_pressed;
+    bool key2_debounced;
+    bool key3_debounced;
+    bool key2_release_armed;
+    bool key3_release_armed;
+    uint8_t key2_stable_samples;
+    uint8_t key3_stable_samples;
 } AppH2PanelState_t;
 
 static AppH2PanelState_t panel;
@@ -89,6 +97,48 @@ static const char *AppH2Panel_StatusText(AppH2StartStatus_t status)
     }
 }
 
+static const char *AppH2Panel_ModeText(HMissionMode_t mode)
+{
+    if (mode == H_MISSION_MODE_H4) return "H4";
+    if (mode == H_MISSION_MODE_H5) return "H5";
+    return "H2";
+}
+
+static bool AppH2Panel_DebouncedPress(bool pressed, bool *raw,
+                                      uint8_t *stable, bool *debounced,
+                                      bool *release_armed)
+{
+    if (pressed == *raw) {
+        if (*stable < APP_H2_KEY_DEBOUNCE_SAMPLES) (*stable)++;
+    } else {
+        *raw = pressed;
+        *stable = 1U;
+    }
+    if ((*stable < APP_H2_KEY_DEBOUNCE_SAMPLES) ||
+        (pressed == *debounced)) return false;
+    *debounced = pressed;
+    if (!pressed) {
+        *release_armed = true;
+        return false;
+    }
+    if (!*release_armed) return false;
+    *release_armed = false;
+    return true;
+}
+
+static HMissionMode_t AppH2Panel_AdjacentMode(HMissionMode_t mode,
+                                              bool forward)
+{
+    if (forward) {
+        if (mode == H_MISSION_MODE_H2) return H_MISSION_MODE_H4;
+        if (mode == H_MISSION_MODE_H4) return H_MISSION_MODE_H5;
+        return H_MISSION_MODE_H2;
+    }
+    if (mode == H_MISSION_MODE_H2) return H_MISSION_MODE_H5;
+    if (mode == H_MISSION_MODE_H5) return H_MISSION_MODE_H4;
+    return H_MISSION_MODE_H2;
+}
+
 static void AppH2Panel_ShowTime(uint32_t elapsed_ms)
 {
     uint32_t centiseconds = elapsed_ms / 10U;
@@ -115,31 +165,38 @@ static void AppH2Panel_ShowTime(uint32_t elapsed_ms)
 
 static void AppH2Panel_Render(AppH2PanelDisplay_t display,
                               AppH2StartStatus_t status,
-                              uint32_t elapsed_ms)
+                              uint32_t elapsed_ms,
+                              HMissionMode_t mode)
 {
+    const char *mode_text = AppH2Panel_ModeText(mode);
     if (!OLED_IsPresent()) return;
     OLED_Clear();
     if (display == APP_H2_PANEL_RUNNING) {
-        OLED_ShowString(0U, 0U, "H2 RUNNING");
-        OLED_ShowString(0U, 2U, "AUTO STOP ON");
+        OLED_ShowString(0U, 0U, mode_text);
+        OLED_ShowString(18U, 0U, "RUNNING");
+        OLED_ShowString(0U, 2U, "SAFE STOP ON");
         AppH2Panel_ShowTime(elapsed_ms);
         OLED_ShowString(0U, 6U, "WAIT FOR LINE");
     } else if (display == APP_H2_PANEL_FINISHED) {
-        OLED_ShowString(0U, 0U, "H2 FINISHED");
-        OLED_ShowString(0U, 2U, "POINT ON LINE");
+        OLED_ShowString(0U, 0U, mode_text);
+        OLED_ShowString(18U, 0U, "FINISHED");
+        OLED_ShowString(0U, 2U, "STOP COMPLETE");
         AppH2Panel_ShowTime(elapsed_ms);
-        OLED_ShowString(0U, 6U, "K1 NEXT LAP");
+        OLED_ShowString(0U, 6U, "K1 RUN K2/3 MODE");
     } else if (display == APP_H2_PANEL_STOPPED) {
-        OLED_ShowString(0U, 0U, "H2 STOPPED");
+        OLED_ShowString(0U, 0U, mode_text);
+        OLED_ShowString(18U, 0U, "STOPPED");
         OLED_ShowString(0U, 2U, "CHECK SAFETY");
         AppH2Panel_ShowTime(elapsed_ms);
     } else if (display == APP_H2_PANEL_READY) {
-        OLED_ShowString(0U, 0U, "H2 READY");
+        OLED_ShowString(0U, 0U, mode_text);
+        OLED_ShowString(18U, 0U, "READY");
         OLED_ShowString(0U, 2U, "K1 START");
         OLED_ShowString(0U, 4U, "LINE CENTER");
-        OLED_ShowString(0U, 6U, "AUTO STOP ON");
+        OLED_ShowString(0U, 6U, "K2 PREV K3 NEXT");
     } else {
-        OLED_ShowString(0U, 0U, "H2 WAIT");
+        OLED_ShowString(0U, 0U, mode_text);
+        OLED_ShowString(18U, 0U, "WAIT");
         OLED_ShowString(0U, 2U, AppH2Panel_StatusText(status));
         OLED_ShowString(0U, 4U, "K1 WHEN READY");
     }
@@ -151,9 +208,18 @@ void AppH2Panel_Init(uint32_t now_ms)
     (void)now_ms;
     memset(&panel, 0, sizeof(panel));
     panel.raw_pressed = Key1_IsPressed();
+    panel.raw_key2_pressed = Key2_IsPressed();
+    panel.raw_key3_pressed = Key3_IsPressed();
     panel.snapshot.debounced_pressed = panel.raw_pressed;
+    panel.key2_debounced = panel.raw_key2_pressed;
+    panel.key3_debounced = panel.raw_key3_pressed;
     panel.snapshot.release_armed = !panel.raw_pressed;
+    panel.key2_release_armed = !panel.raw_key2_pressed;
+    panel.key3_release_armed = !panel.raw_key3_pressed;
     panel.stable_samples = 1U;
+    panel.key2_stable_samples = 1U;
+    panel.key3_stable_samples = 1U;
+    panel.snapshot.selected_mode = HMission_SelectedMode();
     panel.snapshot.display = APP_H2_PANEL_WAIT;
     panel.snapshot.start_status = APP_H2_START_LINE_INVALID;
     panel.display_dirty = true;
@@ -162,27 +228,40 @@ void AppH2Panel_Init(uint32_t now_ms)
 void AppH2Panel_Task20ms(uint32_t now_ms)
 {
     bool pressed = Key1_IsPressed();
+    bool key2_pressed = Key2_IsPressed();
+    bool key3_pressed = Key3_IsPressed();
+    bool key2_edge;
+    bool key3_edge;
+    bool key1_edge;
+    AppLineSnapshot_t line;
     AppH2StartStatus_t status;
-    if (pressed == panel.raw_pressed) {
-        if (panel.stable_samples < APP_H2_KEY_DEBOUNCE_SAMPLES)
-            panel.stable_samples++;
-    } else {
-        panel.raw_pressed = pressed;
-        panel.stable_samples = 1U;
+    key2_edge = AppH2Panel_DebouncedPress(key2_pressed,
+        &panel.raw_key2_pressed, &panel.key2_stable_samples,
+        &panel.key2_debounced, &panel.key2_release_armed);
+    key3_edge = AppH2Panel_DebouncedPress(key3_pressed,
+        &panel.raw_key3_pressed, &panel.key3_stable_samples,
+        &panel.key3_debounced, &panel.key3_release_armed);
+    AppLine_GetSnapshot(&line);
+    if ((key2_edge != key3_edge) &&
+        (SystemState_Get() == SYSTEM_STATE_IDLE) &&
+        (line.state == APP_LINE_IDLE)) {
+        HMissionMode_t selected = AppH2Panel_AdjacentMode(
+            HMission_SelectedMode(), key3_edge);
+        if (HMission_Select(selected)) {
+            panel.snapshot.selected_mode = selected;
+            panel.snapshot.mode_changes++;
+            panel.display_dirty = true;
+        }
     }
-    if ((panel.stable_samples < APP_H2_KEY_DEBOUNCE_SAMPLES) ||
-        (pressed == panel.snapshot.debounced_pressed))
-        return;
-    panel.snapshot.debounced_pressed = pressed;
-    if (!pressed) {
-        panel.snapshot.release_armed = true;
-        return;
-    }
-    if (!panel.snapshot.release_armed) return;
-    panel.snapshot.release_armed = false;
+    key1_edge = AppH2Panel_DebouncedPress(pressed, &panel.raw_pressed,
+        &panel.stable_samples, &panel.snapshot.debounced_pressed,
+        &panel.snapshot.release_armed);
+    if (!key1_edge) return;
     panel.snapshot.key_presses++;
     status = AppH2Panel_Preflight(now_ms);
-    if ((status == APP_H2_START_READY) && AppLine_StartH2(now_ms)) {
+    panel.snapshot.selected_mode = HMission_SelectedMode();
+    if ((status == APP_H2_START_READY) &&
+        AppLine_StartMission(panel.snapshot.selected_mode, now_ms)) {
         panel.snapshot.starts++;
         panel.snapshot.display = APP_H2_PANEL_RUNNING;
         panel.snapshot.start_status = APP_H2_START_READY;
@@ -200,6 +279,7 @@ void AppH2Panel_Task20ms(uint32_t now_ms)
 void AppH2Panel_Task100ms(uint32_t now_ms)
 {
     AppLineSnapshot_t line;
+    HMissionSnapshot_t mission;
     AppH2PanelDisplay_t display;
     AppH2StartStatus_t status;
     uint32_t elapsed_ms = 0U;
@@ -216,14 +296,18 @@ void AppH2Panel_Task100ms(uint32_t now_ms)
         panel.display_dirty = true;
     }
     AppLine_GetSnapshot(&line);
+    HMission_GetSnapshot(&mission);
+    panel.snapshot.selected_mode = HMission_SelectedMode();
     status = AppH2Panel_Preflight(now_ms);
-    if ((line.state == APP_LINE_RUNNING) && line.h2_finish_enabled) {
+    if ((line.state == APP_LINE_RUNNING) && HMission_IsActive()) {
         display = APP_H2_PANEL_RUNNING;
         elapsed_ms = (uint32_t)(now_ms - line.started_ms);
         status = APP_H2_START_NOT_IDLE;
-    } else if (line.finish_complete) {
+    } else if (line.finish_complete ||
+               (mission.state == H_MISSION_COMPLETE)) {
         display = APP_H2_PANEL_FINISHED;
-        elapsed_ms = line.elapsed_ms;
+        elapsed_ms = line.finish_complete ? line.elapsed_ms :
+            mission.elapsed_ms;
         status = APP_H2_START_READY;
     } else if (panel.snapshot.display == APP_H2_PANEL_RUNNING) {
         display = APP_H2_PANEL_STOPPED;
@@ -242,7 +326,8 @@ void AppH2Panel_Task100ms(uint32_t now_ms)
          (elapsed_centiseconds != displayed_centiseconds)) ||
         ((display == APP_H2_PANEL_FINISHED) &&
          (elapsed_ms != panel.snapshot.displayed_elapsed_ms))) {
-        AppH2Panel_Render(display, status, elapsed_ms);
+        AppH2Panel_Render(display, status, elapsed_ms,
+                          panel.snapshot.selected_mode);
         panel.snapshot.display = display;
         panel.snapshot.start_status = status;
         panel.snapshot.displayed_elapsed_ms = elapsed_ms;

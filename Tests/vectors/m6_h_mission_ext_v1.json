@@ -1,0 +1,78 @@
+{
+  "name": "m6-h-mission-v1",
+  "version": 1,
+  "base_contract": "m6-v2-wire-v1",
+  "capability": {"name": "H_MISSION_CONTROL", "bit": 29},
+  "rpc_opcodes": {
+    "H_MISSION_STATUS_GET": 15,
+    "H_MISSION_COMMAND": 33545
+  },
+  "commands": {
+    "STAGE": 1,
+    "APPLY": 2,
+    "REVERT": 3,
+    "SELECT_MODE": 4,
+    "ABORT": 5
+  },
+  "modes": {"H2": 2, "H4": 4, "H5": 5},
+  "layouts": [
+    {
+      "name": "h_mission_command_request",
+      "size": 32,
+      "fields": [
+        {"name": "boot_id", "offset": 0, "size": 4, "type": "u32"},
+        {"name": "expected_active_revision", "offset": 4, "size": 4, "type": "u32"},
+        {"name": "expected_stage_revision", "offset": 8, "size": 4, "type": "u32"},
+        {"name": "command", "offset": 12, "size": 1, "type": "u8"},
+        {"name": "mode", "offset": 13, "size": 1, "type": "u8"},
+        {"name": "flags", "offset": 14, "size": 2, "type": "u16"},
+        {"name": "h4_straight_speed_mm_s", "offset": 16, "size": 2, "type": "u16"},
+        {"name": "h4_b_margin_mm", "offset": 18, "size": 2, "type": "u16"},
+        {"name": "h5_straight_speed_mm_s", "offset": 20, "size": 2, "type": "u16"},
+        {"name": "h5_curve_speed_mm_s", "offset": 22, "size": 2, "type": "u16"},
+        {"name": "development_end_distance_mm", "offset": 24, "size": 2, "type": "u16"},
+        {"name": "reserved", "offset": 26, "size": 6, "type": "bytes"}
+      ]
+    },
+    {
+      "name": "h_mission_snapshot",
+      "size": 64,
+      "fields": [
+        {"name": "time_ms", "offset": 0, "size": 4, "type": "u32"},
+        {"name": "active_revision", "offset": 4, "size": 4, "type": "u32"},
+        {"name": "stage_revision", "offset": 8, "size": 4, "type": "u32"},
+        {"name": "selected_mode", "offset": 12, "size": 1, "type": "u8"},
+        {"name": "running_mode", "offset": 13, "size": 1, "type": "u8"},
+        {"name": "state", "offset": 14, "size": 1, "type": "u8"},
+        {"name": "stop_reason", "offset": 15, "size": 1, "type": "u8"},
+        {"name": "flags", "offset": 16, "size": 1, "type": "u8"},
+        {"name": "reserved", "offset": 17, "size": 1, "type": "u8"},
+        {"name": "white_ms", "offset": 18, "size": 2, "type": "u16"},
+        {"name": "outer_ms", "offset": 20, "size": 2, "type": "u16"},
+        {"name": "saturation_ms", "offset": 22, "size": 2, "type": "u16"},
+        {"name": "active_h4_straight_speed_mm_s", "offset": 24, "size": 2, "type": "u16"},
+        {"name": "active_h4_b_margin_mm", "offset": 26, "size": 2, "type": "u16"},
+        {"name": "active_h5_straight_speed_mm_s", "offset": 28, "size": 2, "type": "u16"},
+        {"name": "active_h5_curve_speed_mm_s", "offset": 30, "size": 2, "type": "u16"},
+        {"name": "active_development_end_distance_mm", "offset": 32, "size": 2, "type": "u16"},
+        {"name": "staged_h4_straight_speed_mm_s", "offset": 34, "size": 2, "type": "u16"},
+        {"name": "staged_h4_b_margin_mm", "offset": 36, "size": 2, "type": "u16"},
+        {"name": "staged_h5_straight_speed_mm_s", "offset": 38, "size": 2, "type": "u16"},
+        {"name": "staged_h5_curve_speed_mm_s", "offset": 40, "size": 2, "type": "u16"},
+        {"name": "staged_development_end_distance_mm", "offset": 42, "size": 2, "type": "u16"},
+        {"name": "distance_x10_mm", "offset": 44, "size": 4, "type": "u32"},
+        {"name": "started_ms", "offset": 48, "size": 4, "type": "u32"},
+        {"name": "latched_ms", "offset": 52, "size": 4, "type": "u32"},
+        {"name": "elapsed_ms", "offset": 56, "size": 4, "type": "u32"},
+        {"name": "final_left_target_mm_s", "offset": 60, "size": 2, "type": "i16"},
+        {"name": "final_right_target_mm_s", "offset": 62, "size": 2, "type": "i16"}
+      ]
+    }
+  ],
+  "semantics": {
+    "ram_only": true,
+    "save_supported": false,
+    "idle_only_commands": ["STAGE", "APPLY", "REVERT", "SELECT_MODE"],
+    "abort_allowed_while_running": true
+  }
+}

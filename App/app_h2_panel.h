@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "h_mission.h"
+
 typedef enum {
     APP_H2_PANEL_READY = 0,
     APP_H2_PANEL_WAIT,
@@ -31,6 +33,8 @@ typedef struct {
     uint32_t starts;
     uint32_t rejects;
     uint32_t displayed_elapsed_ms;
+    HMissionMode_t selected_mode;
+    uint32_t mode_changes;
     bool debounced_pressed;
     bool release_armed;
 } AppH2PanelSnapshot_t;

@@ -27,6 +27,7 @@ class AppH2PanelTests(unittest.TestCase):
                 "-I", str(ROOT / "System"),
                 str(ROOT / "Tests" / "app_h2_panel_test.c"),
                 str(ROOT / "App" / "app_h2_panel.c"),
+                str(ROOT / "App" / "h_mission.c"),
                 "-o", str(executable),
             ]
             compiled = subprocess.run(command, capture_output=True, text=True)

@@ -144,7 +144,13 @@ void HCourse_Stop(void)
 
 void HCourse_SetFinishEnabled(bool enabled)
 {
-    if (enabled && !course.finish_enabled &&
+    HCourse_SetFinishMode(enabled ? H_COURSE_FINISH_H2_STOP :
+                          H_COURSE_FINISH_NONE);
+}
+
+void HCourse_SetFixedCourseStart(bool enabled)
+{
+    if (enabled &&
         !course.initial_ab_offset_applied &&
         (course.phase == H_COURSE_AB_STRAIGHT) &&
         (course.total_distance_mm <= 0.01f)) {
@@ -152,7 +158,13 @@ void HCourse_SetFinishEnabled(bool enabled)
             H2_COURSE_INITIAL_AB_PHASE_OFFSET_MM;
         course.initial_ab_offset_applied = true;
     }
-    course.finish_enabled = enabled;
+}
+
+void HCourse_SetFinishMode(HCourseFinishMode_t mode)
+{
+    course.finish_mode = mode;
+    course.finish_enabled = mode != H_COURSE_FINISH_NONE;
+    if (course.finish_enabled) HCourse_SetFixedCourseStart(true);
     course.finish_preline_samples = 0U;
     course.finish_candidate_samples = 0U;
     course.finish_line_detected = false;
@@ -173,7 +185,7 @@ float HCourse_SelectBaseSpeed(float tracking_base_mm_s,
 {
     float position_abs;
     float blend;
-    if (course.finish_enabled) {
+    if (course.finish_mode == H_COURSE_FINISH_H2_STOP) {
         if (course.finish_line_detected) {
             return (tracking_base_mm_s > H2_FINISH_CRAWL_SPEED_MM_S) ?
                 H2_FINISH_CRAWL_SPEED_MM_S : tracking_base_mm_s;

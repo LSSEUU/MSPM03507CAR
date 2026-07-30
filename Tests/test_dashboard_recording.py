@@ -30,6 +30,13 @@ class FakeClock:
 class FakeSession:
     connected = True
 
+    def __init__(self) -> None:
+        self.abort_calls: list[bool] = []
+
+    def abort_h_mission(self, *, telemetry_gap: bool = False):
+        self.abort_calls.append(telemetry_gap)
+        return {"stopped": True, "telemetry_gap": telemetry_gap}
+
 
 def sample(sample_id: int, time_ms: int, *, gap: bool = False, value: float = 10.0) -> TelemetrySample:
     return TelemetrySample(
@@ -200,6 +207,39 @@ def test_action_recording_infers_terminal_edge_from_core_targets(tmp_path: Path)
     assert summary["action_result"]["reason"] == int(ActionReason.COMPLETE)
     inferred = next(record for record in records if record["event"] == "action_completion_inferred")
     assert inferred["values"]["source"] == "core_target_zero"
+
+
+def test_local_k1_line_edge_auto_records_and_gap_aborts(tmp_path: Path) -> None:
+    clock = FakeClock()
+    recording = manager(tmp_path, clock)
+    recording.ingest(sample(1, 1000))
+    clock.advance(1.0)
+    recording.ingest(TelemetrySample(
+        TelemetryStream.LINE, 1, 2000, {"app_state": 2, "active_mask": 0x18}
+    ))
+    assert recording.status()["recording"] is True
+    assert recording.status()["trigger"] == "action"
+
+    clock.advance(0.04)
+    recording.ingest(TelemetrySample(
+        TelemetryStream.WHEEL, 1, 2040, {"filtered_l_mm_s": 200}, gap_before=True
+    ))
+    assert recording.session.abort_calls == [True]
+
+    clock.advance(0.04)
+    recording.ingest(TelemetrySample(
+        TelemetryStream.LINE, 2, 2080, {"app_state": 0, "active_mask": 0x18}
+    ))
+    assert recording.status()["post_roll"] is True
+    clock.advance(2.1)
+    recording.tick()
+    assert recording.status()["recording"] is False
+    directory = session_directory(tmp_path / "recordings")
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    records = read_jsonl(directory / "timeline.jsonl")
+    assert manifest["trigger"] == "action"
+    assert manifest["pre_roll_ms"] == 1000
+    assert any(record["event"] == "h_mission_gap_abort" for record in records)
 
 
 def test_manual_recording_survives_reconnect_but_action_recording_does_not(tmp_path: Path) -> None:

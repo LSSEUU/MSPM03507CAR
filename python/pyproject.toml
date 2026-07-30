@@ -20,6 +20,7 @@ packages = ["src/m6link"]
 "../Tests/vectors/m6_v2_wire.schema.json" = "m6link/data/m6_v2_wire.schema.json"
 "../Tests/vectors/m6_zdt_stepper_ext_v1.json" = "m6link/data/m6_zdt_stepper_ext_v1.json"
 "../Tests/vectors/m6_zdt_stepper_ext.schema.json" = "m6link/data/m6_zdt_stepper_ext.schema.json"
+"../Tests/vectors/m6_h_mission_ext_v1.json" = "m6link/data/m6_h_mission_ext_v1.json"
 "src/m6link/web/dashboard.html" = "m6link/web/dashboard.html"
 "src/m6link/web/dashboard.css" = "m6link/web/dashboard.css"
 "src/m6link/web/dashboard.js" = "m6link/web/dashboard.js"

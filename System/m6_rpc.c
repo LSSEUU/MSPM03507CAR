@@ -114,6 +114,10 @@ static void p64(uint8_t *p, uint64_t v)
     for (uint8_t i = 0U; i < 8U; i++) p[i] = (uint8_t)(v >> (8U * i));
 }
 
+static int16_t round_i16(float value);
+static int32_t round_i32(float value);
+static uint16_t round_u16(float value);
+
 static void fill_zdt_stepper(uint8_t *out)
 {
     ZdtStepperTestSnapshot_t s;
@@ -134,6 +138,41 @@ static void fill_zdt_stepper(uint8_t *out)
     out[78] = (uint8_t)s.direction; out[79] = s.acceleration;
     p16(&out[80], s.requested_speed_rpm); out[82] = (uint8_t)s.position_mode;
     out[83] = (uint8_t)s.stop_reason; p32(&out[84], s.pulses);
+}
+
+static void fill_h_mission(uint8_t *out)
+{
+    HMissionSnapshot_t s;
+    HMission_GetSnapshot(&s);
+    memset(out, 0, M6_H_MISSION_SNAPSHOT_SIZE);
+    p32(&out[0], SystemTime_Now());
+    p32(&out[4], s.active_revision);
+    p32(&out[8], s.stage_revision);
+    out[12] = (uint8_t)s.selected_mode;
+    out[13] = (uint8_t)s.running_mode;
+    out[14] = (uint8_t)s.state;
+    out[15] = (uint8_t)s.stop_reason;
+    out[16] = (s.dirty ? 1U : 0U) |
+        (HMission_IsActive() ? 2U : 0U);
+    p16(&out[18], s.white_ms);
+    p16(&out[20], s.outer_ms);
+    p16(&out[22], s.saturation_ms);
+    p16(&out[24], round_u16(s.active.h4_straight_speed_mm_s));
+    p16(&out[26], round_u16(s.active.h4_b_margin_mm));
+    p16(&out[28], round_u16(s.active.h5_straight_speed_mm_s));
+    p16(&out[30], round_u16(s.active.h5_curve_speed_mm_s));
+    p16(&out[32], round_u16(s.active.development_end_distance_mm));
+    p16(&out[34], round_u16(s.staged.h4_straight_speed_mm_s));
+    p16(&out[36], round_u16(s.staged.h4_b_margin_mm));
+    p16(&out[38], round_u16(s.staged.h5_straight_speed_mm_s));
+    p16(&out[40], round_u16(s.staged.h5_curve_speed_mm_s));
+    p16(&out[42], round_u16(s.staged.development_end_distance_mm));
+    p32(&out[44], (uint32_t)round_i32(s.distance_mm * 10.0f));
+    p32(&out[48], s.started_ms);
+    p32(&out[52], s.latched_ms);
+    p32(&out[56], s.elapsed_ms);
+    p16(&out[60], (uint16_t)round_i16(s.final_left_target_mm_s));
+    p16(&out[62], (uint16_t)round_i16(s.final_right_target_mm_s));
 }
 
 static int16_t round_i16(float value)
@@ -483,6 +522,14 @@ static M6Result_t execute_read(uint16_t opcode, const uint8_t *body,
                                uint16_t *out_length, uint32_t *detail)
 {
     (void)detail;
+    if (opcode == M6_RPC_H_MISSION_STATUS_GET) {
+        if ((M6Link_EnabledCapabilities() & M6_CAP_H_MISSION_CONTROL) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != 0U) return M6_RESULT_BAD_LENGTH;
+        fill_h_mission(out);
+        *out_length = M6_H_MISSION_SNAPSHOT_SIZE;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_ZDT_STEPPER_STATUS_GET) {
         if ((M6Link_EnabledCapabilities() & M6_CAP_ZDT_STEPPER_CONTROL) == 0U)
             return M6_RESULT_UNSUPPORTED_CAPABILITY;
@@ -739,6 +786,82 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
     ControlParamsResult_t pr;
     *detail = 0U;
     ParameterStore_GetInfo(&store);
+    if (opcode == M6_RPC_H_MISSION_COMMAND) {
+        HMissionSnapshot_t snapshot;
+        HMissionConfig_t config;
+        uint8_t command;
+        uint16_t flags;
+        uint8_t i;
+        if ((M6Link_EnabledCapabilities() & M6_CAP_H_MISSION_CONTROL) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != M6_H_MISSION_COMMAND_REQUEST_SIZE)
+            return M6_RESULT_BAD_LENGTH;
+        if (u32(body) != s_boot_id) return M6_RESULT_INVALID_ARGUMENT;
+        for (i = 26U; i < M6_H_MISSION_COMMAND_REQUEST_SIZE; i++) {
+            if (body[i] != 0U) return M6_RESULT_MALFORMED;
+        }
+        command = body[12];
+        flags = u16(&body[14]);
+        HMission_GetSnapshot(&snapshot);
+        if (command == M6_H_MISSION_COMMAND_ABORT) {
+            if ((body[13] != 0U) || ((flags & (uint16_t)~1U) != 0U) ||
+                ((body[16] | body[17] | body[18] | body[19] |
+                  body[20] | body[21] | body[22] | body[23] |
+                  body[24] | body[25]) != 0U))
+                return M6_RESULT_INVALID_ARGUMENT;
+            if (!AppLine_AbortHMission(SystemTime_Now(),
+                    (flags & 1U) ? H_MISSION_STOP_TELEMETRY_GAP :
+                    H_MISSION_STOP_USER_CANCEL))
+                return M6_RESULT_WRONG_STATE;
+            fill_h_mission(out);
+            *out_length = M6_H_MISSION_SNAPSHOT_SIZE;
+            return M6_RESULT_OK;
+        }
+        if (!action_base_safe() || !HMission_IsConfigMutable())
+            return M6_RESULT_WRONG_STATE;
+        if (u32(&body[4]) != snapshot.active_revision) {
+            *detail = snapshot.active_revision;
+            return M6_RESULT_STALE_ACTIVE_REVISION;
+        }
+        if (u32(&body[8]) != snapshot.stage_revision) {
+            *detail = snapshot.stage_revision;
+            return M6_RESULT_STALE_STAGE_REVISION;
+        }
+        if (flags != 0U) return M6_RESULT_INVALID_ARGUMENT;
+        if (command == M6_H_MISSION_COMMAND_STAGE) {
+            if (body[13] != 0U) return M6_RESULT_INVALID_ARGUMENT;
+            config.h4_straight_speed_mm_s = (float)u16(&body[16]);
+            config.h4_b_margin_mm = (float)u16(&body[18]);
+            config.h5_straight_speed_mm_s = (float)u16(&body[20]);
+            config.h5_curve_speed_mm_s = (float)u16(&body[22]);
+            config.development_end_distance_mm = (float)u16(&body[24]);
+            if (!HMission_Stage(&config)) return M6_RESULT_OUT_OF_RANGE;
+        } else if (command == M6_H_MISSION_COMMAND_APPLY) {
+            if ((body[13] | body[16] | body[17] | body[18] | body[19] |
+                 body[20] | body[21] | body[22] | body[23] |
+                 body[24] | body[25]) != 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            if (!HMission_Apply()) return M6_RESULT_WRONG_STATE;
+        } else if (command == M6_H_MISSION_COMMAND_REVERT) {
+            if ((body[13] | body[16] | body[17] | body[18] | body[19] |
+                 body[20] | body[21] | body[22] | body[23] |
+                 body[24] | body[25]) != 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            if (!HMission_Revert()) return M6_RESULT_WRONG_STATE;
+        } else if (command == M6_H_MISSION_COMMAND_SELECT_MODE) {
+            if ((body[16] | body[17] | body[18] | body[19] |
+                 body[20] | body[21] | body[22] | body[23] |
+                 body[24] | body[25]) != 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            if (!HMission_Select((HMissionMode_t)body[13]))
+                return M6_RESULT_INVALID_ARGUMENT;
+        } else {
+            return M6_RESULT_INVALID_ARGUMENT;
+        }
+        fill_h_mission(out);
+        *out_length = M6_H_MISSION_SNAPSHOT_SIZE;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_ZDT_STEPPER_COMMAND) {
         ZdtStepperTestRequest_t request;
         ZdtStepperResult_t result;

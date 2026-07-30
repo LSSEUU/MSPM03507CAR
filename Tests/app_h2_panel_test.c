@@ -18,6 +18,8 @@
 #define TEST_SCREEN_COLUMNS 21U
 
 static bool test_key_pressed;
+static bool test_key2_pressed;
+static bool test_key3_pressed;
 static bool test_fault;
 static bool test_calibration_active;
 static bool test_start_allowed;
@@ -44,6 +46,8 @@ static void reset_fixture(bool key_held)
     memset(&test_heading, 0, sizeof(test_heading));
     memset(&test_wheel, 0, sizeof(test_wheel));
     test_key_pressed = key_held;
+    test_key2_pressed = false;
+    test_key3_pressed = false;
     test_fault = false;
     test_calibration_active = false;
     test_start_allowed = true;
@@ -62,6 +66,7 @@ static void reset_fixture(bool key_held)
     test_heading.last_rate_update_ms = 1000U;
     test_wheel.sample_valid = true;
     clear_screen_model();
+    HMission_Init();
     AppH2Panel_Init(1000U);
 }
 
@@ -77,7 +82,22 @@ static void stable_key(bool pressed, uint32_t *now_ms)
     }
 }
 
+static void stable_mode_key(bool key2, bool key3, uint32_t *now_ms)
+{
+    uint32_t sample;
+    test_key2_pressed = key2;
+    test_key3_pressed = key3;
+    for (sample = 0U; sample < 3U; sample++) {
+        *now_ms += 20U;
+        test_line.control.last_update_ms = *now_ms;
+        test_heading.last_rate_update_ms = *now_ms;
+        AppH2Panel_Task20ms(*now_ms);
+    }
+}
+
 bool Key1_IsPressed(void) { return test_key_pressed; }
+bool Key2_IsPressed(void) { return test_key2_pressed; }
+bool Key3_IsPressed(void) { return test_key3_pressed; }
 bool Safety_HasFault(void) { return test_fault; }
 bool GrayscaleCalibration_IsActive(void)
 { return test_calibration_active; }
@@ -98,6 +118,12 @@ bool AppLine_StartH2(uint32_t now_ms)
     test_line.started_ms = now_ms;
     test_system_state = SYSTEM_STATE_RUN;
     return true;
+}
+
+bool AppLine_StartMission(HMissionMode_t mode, uint32_t now_ms)
+{
+    HMission_Start(mode, now_ms);
+    return AppLine_StartH2(now_ms);
 }
 
 void Heading_GetSnapshot(HeadingSnapshot_t *snapshot)
@@ -218,11 +244,31 @@ static void test_calibration_temporarily_owns_oled(void)
     assert(test_refreshes == refreshes + 1U);
 }
 
+static void test_k2_k3_switch_only_while_idle(void)
+{
+    uint32_t now_ms = 1000U;
+    reset_fixture(false);
+    stable_mode_key(true, false, &now_ms);
+    assert(snapshot().selected_mode == H_MISSION_MODE_H5);
+    assert(snapshot().mode_changes == 1U);
+    stable_mode_key(false, false, &now_ms);
+    stable_mode_key(false, true, &now_ms);
+    assert(snapshot().selected_mode == H_MISSION_MODE_H2);
+    assert(snapshot().mode_changes == 2U);
+    stable_mode_key(false, false, &now_ms);
+    test_system_state = SYSTEM_STATE_RUN;
+    test_line.state = APP_LINE_RUNNING;
+    stable_mode_key(false, true, &now_ms);
+    assert(snapshot().selected_mode == H_MISSION_MODE_H2);
+    assert(snapshot().mode_changes == 2U);
+}
+
 int main(void)
 {
     test_boot_with_held_key_requires_release();
     test_preflight_rejects_bad_center_gyro_motion_and_fault();
     test_successful_press_and_oled_timing();
     test_calibration_temporarily_owns_oled();
+    test_k2_k3_switch_only_while_idle();
     return 0;
 }
