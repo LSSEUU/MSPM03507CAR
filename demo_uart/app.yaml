@@ -1,7 +1,7 @@
 id: ball
 name: Ball
 name[zh]: 钢珠位置
-version: 1.1.0
+version: 1.2.0
 icon: ''
 author: liuargo
 desc: Detect and display the calibrated position of a steel ball.
@@ -11,4 +11,5 @@ files:
   - models\yolo26_all_maixcam_yolo26_480_160\yolo26_all.cvimodel
   - models\yolo26_all_maixcam_yolo26_480_160\yolo26_all.mud
   - ball_position.py
+  - ball_wire.py
   - main.py
