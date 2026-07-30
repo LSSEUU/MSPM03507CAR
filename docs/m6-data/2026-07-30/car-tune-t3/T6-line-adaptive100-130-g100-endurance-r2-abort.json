@@ -1,0 +1,348 @@
+{
+  "firmware": "M6-runtime-20260730-r18",
+  "schema": 1,
+  "revision": 4,
+  "source": "RUNTIME",
+  "generation": 2,
+  "boot_id": 5,
+  "format_version": "m6-dashboard-score-adapter-v1",
+  "source_format": "m6-dashboard-session-v1",
+  "source_session": "C:\\Users\\Administrator\\Desktop\\DXS\\MSPM03507CAR\\User_Project\\MSPM03507CAR\\recordings\\2026-07-30\\20260730T115529-024Z-T6-line-adaptive100-130--5261b8",
+  "session_id": "20260730T115529-024Z-T6-line-adaptive100-130--5261b8",
+  "test_mode": "line",
+  "requested_speed": 130.0,
+  "period_ms": 40,
+  "parameters": {
+    "heading.correction_limit": 120.0,
+    "heading.rate_alpha": 0.3499999940395355,
+    "heading.smooth_zone": 2.0,
+    "heading.straight.kd": 0.8799999952316284,
+    "heading.straight.kp": 3.0,
+    "heading.turn.kd": 0.550000011920929,
+    "heading.turn.kp": 2.0,
+    "heading.turn_speed": 150.0,
+    "line.correction_limit": 150.0,
+    "line.correction_slew": 2000.0,
+    "line.curve_gain": 1.0,
+    "line.derivative_alpha": 1.0,
+    "line.kd": 1.100000023841858,
+    "line.kp": 150.0,
+    "line.lost_search_speed": 105.0,
+    "line.position_alpha": 1.0,
+    "line.speed_max": 130.0,
+    "line.speed_min": 100.0,
+    "remote.heading_hold": false,
+    "remote.speed_high": 220.0,
+    "remote.speed_low": 100.0,
+    "remote.speed_medium": 160.0,
+    "wheel.accel": 600.0,
+    "wheel.decel": 900.0,
+    "wheel.diag_target": 300.0,
+    "wheel.filter_alpha": 0.10000000149011612,
+    "wheel.jerk": 20000.0,
+    "wheel.left.ki": 2.5,
+    "wheel.left.kp": 0.699999988079071,
+    "wheel.left.ks": 0.0,
+    "wheel.left.kv": 0.0,
+    "wheel.right.ki": 2.5,
+    "wheel.right.kp": 0.699999988079071,
+    "wheel.right.ks": 0.0,
+    "wheel.right.kv": 0.0
+  },
+  "action_spec": {
+    "angle_mdeg": 0,
+    "duration_ms": 10000,
+    "expected_active_revision": 15,
+    "kind": {
+      "name": "LINE_FOLLOW",
+      "value": 5
+    },
+    "target_l_mm_s": 0,
+    "target_r_mm_s": 0,
+    "wheel_mask": 3,
+    "yaw_rate_mdeg_s": 0
+  },
+  "events": [
+    {
+      "record_index": 293,
+      "elapsed_ms": 4972,
+      "host_time_utc": "2026-07-30T11:55:28.998Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "control_arm",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {
+          "safety_ack": true,
+          "duration_ms": 10000,
+          "kind": "LINE_FOLLOW"
+        },
+        "result": {
+          "ok": true,
+          "armed": {
+            "arm_token": 3842465123,
+            "expires_in_ms": 10000,
+            "spec": {
+              "kind": {
+                "value": 5,
+                "name": "LINE_FOLLOW"
+              },
+              "wheel_mask": 3,
+              "target_l_mm_s": 0,
+              "target_r_mm_s": 0,
+              "angle_mdeg": 0,
+              "yaw_rate_mdeg_s": 0,
+              "duration_ms": 10000,
+              "expected_active_revision": 15
+            },
+            "kind_name": "LINE_FOLLOW"
+          }
+        }
+      }
+    },
+    {
+      "record_index": 296,
+      "elapsed_ms": 4997,
+      "host_time_utc": "2026-07-30T11:55:29.024Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "control_confirm",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {
+          "arm_token": 3842465123,
+          "recording": {
+            "name": "T6-line-adaptive100-130-g100-endurance-r2",
+            "auto": true,
+            "notes": "CAR-TUNE T6 adaptive final 10 s endurance; firmware lost_ms guard"
+          }
+        },
+        "result": {
+          "ok": true,
+          "action": {
+            "action_id": 14,
+            "state": {
+              "value": 2,
+              "name": "RUNNING"
+            },
+            "kind": {
+              "value": 5,
+              "name": "LINE_FOLLOW"
+            },
+            "reason": 0,
+            "start_ms": 1030376,
+            "deadline_ms": 1040376,
+            "stopped_ms": 0,
+            "spec": {
+              "kind": {
+                "value": 5,
+                "name": "LINE_FOLLOW"
+              },
+              "wheel_mask": 3,
+              "target_l_mm_s": 0,
+              "target_r_mm_s": 0,
+              "angle_mdeg": 0,
+              "yaw_rate_mdeg_s": 0,
+              "duration_ms": 10000,
+              "expected_active_revision": 15
+            }
+          }
+        }
+      }
+    },
+    {
+      "record_index": 297,
+      "elapsed_ms": 4997,
+      "host_time_utc": "2026-07-30T11:55:29.024Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "recording_started",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "trigger": "action",
+        "pre_roll_ms": 4997
+      }
+    },
+    {
+      "record_index": 887,
+      "elapsed_ms": 14912,
+      "host_time_utc": "2026-07-30T11:55:38.938Z",
+      "device_time_ms": 1040402,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "action_completion_inferred",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "action_id": 14,
+        "state": 4,
+        "reason": 2,
+        "stopped_ms": 1040402,
+        "inferred": true,
+        "source": "core_target_zero"
+      }
+    },
+    {
+      "record_index": 913,
+      "elapsed_ms": 15363,
+      "host_time_utc": "2026-07-30T11:55:39.389Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "emergency_stop_requested",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {},
+        "result": {
+          "ok": true,
+          "accepted": true
+        }
+      }
+    },
+    {
+      "record_index": 915,
+      "elapsed_ms": 15371,
+      "host_time_utc": "2026-07-30T11:55:39.397Z",
+      "device_time_ms": 1040867,
+      "record_type": "device_event",
+      "stream": null,
+      "event": "EMERGENCY_STOP",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "event_code": 3,
+        "severity": 3,
+        "occurrence_count": 1,
+        "emergency_epoch": 5,
+        "fault_bits": 1,
+        "system_state": 4,
+        "action_state": 0,
+        "source": 1,
+        "reserved": 0,
+        "target_l_mm_s": 0,
+        "target_r_mm_s": 0,
+        "requested_pwm_l": 0,
+        "requested_pwm_r": 0,
+        "applied_pwm_l": 0,
+        "applied_pwm_r": 0
+      }
+    },
+    {
+      "record_index": 916,
+      "elapsed_ms": 15386,
+      "host_time_utc": "2026-07-30T11:55:39.413Z",
+      "device_time_ms": 1040867,
+      "record_type": "device_event",
+      "stream": null,
+      "event": "SAFETY_FAULT",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "event_code": 2,
+        "severity": 2,
+        "occurrence_count": 1,
+        "fault_bits": 1,
+        "first_fault_ms": 1040867,
+        "last_fault_ms": 1040867,
+        "fault_count": 1,
+        "required_sensor_mask": 0,
+        "action_deadline_ms": 0,
+        "system_state": 4,
+        "action_state": 0,
+        "reserved": "b'\\x00\\x00'",
+        "requested_pwm_l": 0,
+        "requested_pwm_r": 0,
+        "applied_pwm_l": 0,
+        "applied_pwm_r": 0
+      }
+    },
+    {
+      "record_index": 941,
+      "elapsed_ms": 15791,
+      "host_time_utc": "2026-07-30T11:55:39.817Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "emergency_stop_requested",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {},
+        "result": {
+          "ok": true,
+          "accepted": true
+        }
+      }
+    },
+    {
+      "record_index": 942,
+      "elapsed_ms": 15802,
+      "host_time_utc": "2026-07-30T11:55:39.828Z",
+      "device_time_ms": 1041301,
+      "record_type": "device_event",
+      "stream": null,
+      "event": "EMERGENCY_STOP",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "event_code": 3,
+        "severity": 3,
+        "occurrence_count": 1,
+        "emergency_epoch": 6,
+        "fault_bits": 1,
+        "system_state": 4,
+        "action_state": 0,
+        "source": 1,
+        "reserved": 0,
+        "target_l_mm_s": 0,
+        "target_r_mm_s": 0,
+        "requested_pwm_l": 0,
+        "requested_pwm_r": 0,
+        "applied_pwm_l": 0,
+        "applied_pwm_r": 0
+      }
+    }
+  ],
+  "adapter_hard_failures": [
+    "operator_emergency_stop",
+    "firmware_fault_0x1",
+    "telemetry_gap"
+  ],
+  "abort_reason": null,
+  "metrics": {
+    "score": 114.50228282392092,
+    "hard_failures": [
+      "firmware_fault_0x1",
+      "telemetry_drop",
+      "operator_emergency_stop",
+      "telemetry_gap"
+    ],
+    "action_started": true,
+    "sample_count": 407,
+    "duration_ms": 17000,
+    "rise_time_ms": 9962.0,
+    "overshoot_pct": 30.76923076923077,
+    "steady_error_pct": 30.246153846153845,
+    "error_zero_crossings": 0,
+    "saturation_ratio": 0.0,
+    "sustained_saturation_ms": 0,
+    "yaw_rms_deg": 6.0469211518479975,
+    "yaw_peak_deg": 13.260000000000105,
+    "line_position_rms": 0.25143884279614925,
+    "correction_jerk_rms": 387.17456160535465,
+    "line_loss_events": 6,
+    "line_loss_max_ms": 160,
+    "missed_task_delta": 0,
+    "uart_drop_delta": 0,
+    "telemetry_drop_delta": 2,
+    "telemetry_gap_count": 0,
+    "fault_bits": 1
+  }
+}

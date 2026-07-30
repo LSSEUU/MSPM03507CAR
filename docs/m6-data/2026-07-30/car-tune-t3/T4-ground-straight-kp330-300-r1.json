@@ -1,0 +1,331 @@
+{
+  "firmware": "M6-runtime-20260730-r17",
+  "schema": 1,
+  "revision": 4,
+  "source": "RUNTIME",
+  "generation": 2,
+  "boot_id": 3,
+  "format_version": "m6-dashboard-score-adapter-v1",
+  "source_format": "m6-dashboard-session-v1",
+  "source_session": "C:\\Users\\Administrator\\Desktop\\DXS\\MSPM03507CAR\\User_Project\\MSPM03507CAR\\recordings\\2026-07-30\\20260730T112819-184Z-T4-ground-straight-kp330-50cce7",
+  "session_id": "20260730T112819-184Z-T4-ground-straight-kp330-50cce7",
+  "test_mode": "ground",
+  "requested_speed": 300.0,
+  "period_ms": 40,
+  "parameters": {
+    "heading.correction_limit": 120.0,
+    "heading.rate_alpha": 0.3499999940395355,
+    "heading.smooth_zone": 2.0,
+    "heading.straight.kd": 0.800000011920929,
+    "heading.straight.kp": 3.299999952316284,
+    "heading.turn.kd": 0.550000011920929,
+    "heading.turn.kp": 2.0,
+    "heading.turn_speed": 150.0,
+    "line.correction_limit": 150.0,
+    "line.correction_slew": 2000.0,
+    "line.curve_gain": 0.0,
+    "line.derivative_alpha": 1.0,
+    "line.kd": 1.0,
+    "line.kp": 150.0,
+    "line.lost_search_speed": 105.0,
+    "line.position_alpha": 1.0,
+    "line.speed_max": 160.0,
+    "line.speed_min": 160.0,
+    "remote.heading_hold": false,
+    "remote.speed_high": 220.0,
+    "remote.speed_low": 100.0,
+    "remote.speed_medium": 160.0,
+    "wheel.accel": 600.0,
+    "wheel.decel": 900.0,
+    "wheel.diag_target": 300.0,
+    "wheel.filter_alpha": 0.10000000149011612,
+    "wheel.jerk": 20000.0,
+    "wheel.left.ki": 2.5,
+    "wheel.left.kp": 0.699999988079071,
+    "wheel.left.ks": 0.0,
+    "wheel.left.kv": 0.0,
+    "wheel.right.ki": 2.5,
+    "wheel.right.kp": 0.699999988079071,
+    "wheel.right.ks": 0.0,
+    "wheel.right.kv": 0.0
+  },
+  "action_spec": {
+    "angle_mdeg": 0,
+    "duration_ms": 3000,
+    "expected_active_revision": 7,
+    "kind": {
+      "name": "HEADING_HOLD",
+      "value": 2
+    },
+    "target_l_mm_s": 300,
+    "target_r_mm_s": 300,
+    "wheel_mask": 3,
+    "yaw_rate_mdeg_s": 0
+  },
+  "events": [
+    {
+      "record_index": 131,
+      "elapsed_ms": 2256,
+      "host_time_utc": "2026-07-30T11:28:16.443Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "parameter_stage",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {
+          "key": "heading.straight.kp",
+          "value": 3.3
+        },
+        "result": {
+          "ok": true,
+          "result": {
+            "parameter_id": 14,
+            "key": "heading.straight.kp",
+            "type": {
+              "value": 1,
+              "name": "F32"
+            },
+            "active": 3.0,
+            "staged": 3.299999952316284,
+            "active_source": {
+              "value": 2,
+              "name": "RUNTIME"
+            },
+            "staged_source": {
+              "value": 2,
+              "name": "RUNTIME"
+            },
+            "active_revision": 6,
+            "stage_revision": 8,
+            "generation": 2
+          }
+        },
+        "revision_before": {
+          "parameter_schema": 1,
+          "active_revision": 6,
+          "stage_revision": 7,
+          "generation": 2,
+          "active_source": "RUNTIME",
+          "flags": 12,
+          "slot": 2,
+          "storage_health": 0,
+          "save_failures": 0
+        },
+        "revision_after": {
+          "parameter_schema": 1,
+          "active_revision": 6,
+          "stage_revision": 8,
+          "generation": 2,
+          "active_source": "RUNTIME",
+          "flags": 13,
+          "slot": 2,
+          "storage_health": 0,
+          "save_failures": 0
+        }
+      }
+    },
+    {
+      "record_index": 205,
+      "elapsed_ms": 3581,
+      "host_time_utc": "2026-07-30T11:28:17.768Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "parameter_apply",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {},
+        "result": {
+          "ok": true,
+          "result": {
+            "active_revision": 7,
+            "stage_revision": 9,
+            "change_mask": 8,
+            "source": 2,
+            "boundary": 0,
+            "reserved": 0
+          }
+        },
+        "revision_before": {
+          "parameter_schema": 1,
+          "active_revision": 6,
+          "stage_revision": 8,
+          "generation": 2,
+          "active_source": "RUNTIME",
+          "flags": 13,
+          "slot": 2,
+          "storage_health": 0,
+          "save_failures": 0
+        },
+        "revision_after": {
+          "parameter_schema": 1,
+          "active_revision": 7,
+          "stage_revision": 9,
+          "generation": 2,
+          "active_source": "RUNTIME",
+          "flags": 12,
+          "slot": 2,
+          "storage_health": 0,
+          "save_failures": 0
+        }
+      }
+    },
+    {
+      "record_index": 286,
+      "elapsed_ms": 4976,
+      "host_time_utc": "2026-07-30T11:28:19.163Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "control_arm",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {
+          "target_r_mm_s": 300,
+          "wheel_mask": 3,
+          "duration_ms": 3000,
+          "kind": "HEADING_HOLD",
+          "target_l_mm_s": 300,
+          "safety_ack": true
+        },
+        "result": {
+          "ok": true,
+          "armed": {
+            "arm_token": 3424749486,
+            "expires_in_ms": 10000,
+            "spec": {
+              "kind": {
+                "value": 2,
+                "name": "HEADING_HOLD"
+              },
+              "wheel_mask": 3,
+              "target_l_mm_s": 300,
+              "target_r_mm_s": 300,
+              "angle_mdeg": 0,
+              "yaw_rate_mdeg_s": 0,
+              "duration_ms": 3000,
+              "expected_active_revision": 7
+            },
+            "kind_name": "HEADING_HOLD"
+          }
+        }
+      }
+    },
+    {
+      "record_index": 288,
+      "elapsed_ms": 4996,
+      "host_time_utc": "2026-07-30T11:28:19.184Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "control_confirm",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {
+          "arm_token": 3424749486,
+          "recording": {
+            "name": "T4-ground-straight-kp330-300-r1",
+            "auto": true,
+            "notes": "ground; candidate heading.straight.kp 3.0->3.3; alpha=0.10; no Save"
+          }
+        },
+        "result": {
+          "ok": true,
+          "action": {
+            "action_id": 15,
+            "state": {
+              "value": 2,
+              "name": "RUNNING"
+            },
+            "kind": {
+              "value": 2,
+              "name": "HEADING_HOLD"
+            },
+            "reason": 0,
+            "start_ms": 1542334,
+            "deadline_ms": 1545334,
+            "stopped_ms": 0,
+            "spec": {
+              "kind": {
+                "value": 2,
+                "name": "HEADING_HOLD"
+              },
+              "wheel_mask": 3,
+              "target_l_mm_s": 300,
+              "target_r_mm_s": 300,
+              "angle_mdeg": 0,
+              "yaw_rate_mdeg_s": 0,
+              "duration_ms": 3000,
+              "expected_active_revision": 7
+            }
+          }
+        }
+      }
+    },
+    {
+      "record_index": 289,
+      "elapsed_ms": 4996,
+      "host_time_utc": "2026-07-30T11:28:19.184Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "recording_started",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "trigger": "action",
+        "pre_roll_ms": 4996
+      }
+    },
+    {
+      "record_index": 472,
+      "elapsed_ms": 8024,
+      "host_time_utc": "2026-07-30T11:28:22.212Z",
+      "device_time_ms": 1545382,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "action_completion_inferred",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "action_id": 15,
+        "state": 4,
+        "reason": 2,
+        "stopped_ms": 1545382,
+        "inferred": true,
+        "source": "core_target_zero"
+      }
+    }
+  ],
+  "adapter_hard_failures": [],
+  "abort_reason": null,
+  "metrics": {
+    "score": 3.2186008288601244,
+    "hard_failures": [],
+    "action_started": true,
+    "sample_count": 221,
+    "duration_ms": 9401,
+    "rise_time_ms": 2980.0,
+    "overshoot_pct": 1.6666666666666667,
+    "steady_error_pct": 1.5192307692307692,
+    "error_zero_crossings": 0,
+    "saturation_ratio": 0.0,
+    "sustained_saturation_ms": 0,
+    "yaw_rms_deg": 0.8078031603961119,
+    "yaw_peak_deg": 1.460000000000008,
+    "line_position_rms": 0.0,
+    "correction_jerk_rms": 0.0,
+    "line_loss_events": 0,
+    "line_loss_max_ms": 0,
+    "missed_task_delta": 0,
+    "uart_drop_delta": 0,
+    "telemetry_drop_delta": 0,
+    "telemetry_gap_count": 0,
+    "fault_bits": 0
+  }
+}

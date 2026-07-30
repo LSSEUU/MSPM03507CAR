@@ -1,0 +1,223 @@
+{
+  "firmware": "M6-runtime-20260729-r16",
+  "schema": 1,
+  "revision": 5,
+  "source": "PERSISTED",
+  "generation": 2,
+  "boot_id": 1,
+  "format_version": "m6-dashboard-score-adapter-v1",
+  "source_format": "m6-dashboard-session-v1",
+  "source_session": "C:\\Users\\Administrator\\Desktop\\DXS\\MSPM03507CAR\\User_Project\\MSPM03507CAR\\recordings\\2026-07-30\\20260730T104650-320Z-T2-ff-c1-both-160-9091be",
+  "session_id": "20260730T104650-320Z-T2-ff-c1-both-160-9091be",
+  "test_mode": "wheel",
+  "requested_speed": 160.0,
+  "period_ms": 40,
+  "parameters": {
+    "heading.correction_limit": 120.0,
+    "heading.rate_alpha": 0.3499999940395355,
+    "heading.smooth_zone": 2.0,
+    "heading.straight.kd": 0.800000011920929,
+    "heading.straight.kp": 3.0,
+    "heading.turn.kd": 0.550000011920929,
+    "heading.turn.kp": 2.0,
+    "heading.turn_speed": 150.0,
+    "line.correction_limit": 150.0,
+    "line.correction_slew": 2000.0,
+    "line.curve_gain": 0.0,
+    "line.derivative_alpha": 1.0,
+    "line.kd": 1.0,
+    "line.kp": 150.0,
+    "line.lost_search_speed": 105.0,
+    "line.position_alpha": 1.0,
+    "line.speed_max": 160.0,
+    "line.speed_min": 160.0,
+    "remote.heading_hold": false,
+    "remote.speed_high": 220.0,
+    "remote.speed_low": 100.0,
+    "remote.speed_medium": 160.0,
+    "wheel.accel": 600.0,
+    "wheel.decel": 900.0,
+    "wheel.diag_target": 300.0,
+    "wheel.filter_alpha": 0.25,
+    "wheel.jerk": 20000.0,
+    "wheel.left.ki": 2.5,
+    "wheel.left.kp": 0.699999988079071,
+    "wheel.left.ks": 15.945205688476562,
+    "wheel.left.kv": 0.8193066120147705,
+    "wheel.right.ki": 2.5,
+    "wheel.right.kp": 0.699999988079071,
+    "wheel.right.ks": 13.310685157775879,
+    "wheel.right.kv": 0.8374067544937134
+  },
+  "action_spec": {
+    "angle_mdeg": 0,
+    "duration_ms": 7000,
+    "expected_active_revision": 6,
+    "kind": {
+      "name": "WHEEL_SPEED_TEST",
+      "value": 1
+    },
+    "target_l_mm_s": 160,
+    "target_r_mm_s": 160,
+    "wheel_mask": 3,
+    "yaw_rate_mdeg_s": 0
+  },
+  "events": [
+    {
+      "record_index": 303,
+      "elapsed_ms": 4925,
+      "host_time_utc": "2026-07-30T10:46:50.259Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "control_arm",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {
+          "angle_mdeg": 0,
+          "target_r_mm_s": 160,
+          "wheel_mask": 3,
+          "safety_ack": true,
+          "kind": "WHEEL_SPEED_TEST",
+          "duration_ms": 7000,
+          "target_l_mm_s": 160,
+          "yaw_rate_mdeg_s": 0
+        },
+        "result": {
+          "ok": true,
+          "armed": {
+            "arm_token": 2710781347,
+            "expires_in_ms": 10000,
+            "spec": {
+              "kind": {
+                "value": 1,
+                "name": "WHEEL_SPEED_TEST"
+              },
+              "wheel_mask": 3,
+              "target_l_mm_s": 160,
+              "target_r_mm_s": 160,
+              "angle_mdeg": 0,
+              "yaw_rate_mdeg_s": 0,
+              "duration_ms": 7000,
+              "expected_active_revision": 6
+            },
+            "kind_name": "WHEEL_SPEED_TEST"
+          }
+        }
+      }
+    },
+    {
+      "record_index": 307,
+      "elapsed_ms": 4986,
+      "host_time_utc": "2026-07-30T10:46:50.320Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "control_confirm",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "request": {
+          "arm_token": 2710781347,
+          "recording": {
+            "name": "T2-ff-c1-both-160",
+            "auto": true,
+            "notes": "Bounded batch T2-WHEEL-LIFTED candidate FF-C1 validation 2/4; both wheels +160 mm/s, 7 s; revision 6; no Save."
+          }
+        },
+        "result": {
+          "ok": true,
+          "action": {
+            "action_id": 9,
+            "state": {
+              "value": 2,
+              "name": "RUNNING"
+            },
+            "kind": {
+              "value": 1,
+              "name": "WHEEL_SPEED_TEST"
+            },
+            "reason": 0,
+            "start_ms": 3363743,
+            "deadline_ms": 3370743,
+            "stopped_ms": 0,
+            "spec": {
+              "kind": {
+                "value": 1,
+                "name": "WHEEL_SPEED_TEST"
+              },
+              "wheel_mask": 3,
+              "target_l_mm_s": 160,
+              "target_r_mm_s": 160,
+              "angle_mdeg": 0,
+              "yaw_rate_mdeg_s": 0,
+              "duration_ms": 7000,
+              "expected_active_revision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "record_index": 308,
+      "elapsed_ms": 4986,
+      "host_time_utc": "2026-07-30T10:46:50.320Z",
+      "device_time_ms": null,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "recording_started",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "trigger": "action",
+        "pre_roll_ms": 4986
+      }
+    },
+    {
+      "record_index": 740,
+      "elapsed_ms": 11954,
+      "host_time_utc": "2026-07-30T10:46:57.287Z",
+      "device_time_ms": 3370780,
+      "record_type": "dashboard_event",
+      "stream": null,
+      "event": "action_completion_inferred",
+      "sample_id": null,
+      "gap": false,
+      "values": {
+        "action_id": 9,
+        "state": 4,
+        "reason": 2,
+        "stopped_ms": 3370780,
+        "inferred": true,
+        "source": "core_target_zero"
+      }
+    }
+  ],
+  "adapter_hard_failures": [],
+  "abort_reason": null,
+  "metrics": {
+    "score": 7.655913461538462,
+    "hard_failures": [],
+    "action_started": true,
+    "sample_count": 351,
+    "duration_ms": 14041,
+    "rise_time_ms": 6960.0,
+    "overshoot_pct": 13.125,
+    "steady_error_pct": 2.848557692307692,
+    "error_zero_crossings": 0,
+    "saturation_ratio": 0.0,
+    "sustained_saturation_ms": 0,
+    "yaw_rms_deg": 0.0,
+    "yaw_peak_deg": 0.010000000000000675,
+    "line_position_rms": 0.0,
+    "correction_jerk_rms": 0.0,
+    "line_loss_events": 0,
+    "line_loss_max_ms": 0,
+    "missed_task_delta": 0,
+    "uart_drop_delta": 0,
+    "telemetry_drop_delta": 0,
+    "telemetry_gap_count": 0,
+    "fault_bits": 0
+  }
+}
