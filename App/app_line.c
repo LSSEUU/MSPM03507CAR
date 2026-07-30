@@ -229,7 +229,11 @@ void AppLine_Task20ms(uint32_t now_ms)
     HCourse_GetSnapshot(&course);
     assisted_control = control;
     assisted_control.dynamic_base_mm_s = HCourse_SelectBaseSpeed(
-        control.dynamic_base_mm_s, line_config.speed_min_mm_s);
+        control.dynamic_base_mm_s, line_config.speed_min_mm_s,
+        line_config.speed_max_mm_s,
+        (control.state == LINE_FOLLOW_TRACKING) &&
+        control.line_valid && !control.ambiguous,
+        control.position);
     assisted_control.left_target_mm_s =
         assisted_control.dynamic_base_mm_s + control.correction_mm_s;
     assisted_control.right_target_mm_s =
@@ -237,6 +241,11 @@ void AppLine_Task20ms(uint32_t now_ms)
     LineYawAssist_SetMode(HCourse_IsCurvePhase() ?
         LINE_YAW_ASSIST_MODE_CURVE_POSITIVE :
         LINE_YAW_ASSIST_MODE_STRAIGHT);
+    LineYawAssist_SetCurveFeedforwardScale(
+        (course.phase == H_COURSE_BC_CURVE) ?
+        H_COURSE_BC_CURVE_FEEDFORWARD_SCALE :
+        (course.phase == H_COURSE_DA_CURVE) ?
+        H_COURSE_DA_CURVE_FEEDFORWARD_SCALE : 1.0f);
     LineYawAssist_SetStraightReference(
         course.straight_heading_target_valid,
         course.straight_heading_target_deg);

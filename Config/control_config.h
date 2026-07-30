@@ -121,8 +121,16 @@
 #define LINE_CURVE_TARGET_POSITION                       0.10f
 #define LINE_CURVE_POSITION_TRIM_MM_S                   10.0f
 #define LINE_CURVE_DERIVATIVE_TRIM_MM_S_PER_UNIT_S       6.0f
-#define LINE_CURVE_DESIRED_CORRECTION_LIMIT_MM_S        50.0f
+/* The geometric feed-forward already needs 47.1 mm/s at 220 mm/s and
+ * 64.3 mm/s at 300 mm/s.  Leave enough headroom for the infrared trim to
+ * pull the sensor back from an outer channel; the runtime correction_limit
+ * remains the final per-test safety bound. */
+#define LINE_CURVE_DESIRED_CORRECTION_LIMIT_MM_S        80.0f
 #define LINE_CURVE_YAW_ASSIST_LIMIT_MM_S                40.0f
+/* The wheel-speed plant has a visible late-curve rate overshoot at the H2
+ * profile.  Add damping only while the fixed-course curve owns yaw rate;
+ * the proven straight-heading Kd remains unchanged. */
+#define LINE_FIXED_CURVE_DAMPING_MULTIPLIER               1.60f
 #define LINE_CURVE_CONFIRM_TURN_DEG                      15.0f
 #define LINE_CURVE_EXIT_ARM_DEG                         175.0f
 #define LINE_CURVE_FORCE_EXIT_DEG                       195.0f
@@ -134,7 +142,16 @@
  * curve-entry window; infrared confirms the edge, with a distance fallback
  * for placement and odometry tolerance. */
 #define H_COURSE_STRAIGHT_ARM_MM                       1350.0f
-#define H_COURSE_STRAIGHT_FORCE_MM                     1500.0f
+/* Slower profiles keep the proven small entry lead. */
+#define H_COURSE_STRAIGHT_FORCE_MM                     1400.0f
+/* At the 400 mm/s H2 profile, deceleration and yaw feed-forward must not
+ * start at the same distance.  Starting both at 1350 mm cut the inside of
+ * the painted curve and then swept the sensor to the outside.  Latch the
+ * fast straight, reduce speed first, and delay geometric steering until the
+ * sensor is close to the 1500 mm tangent. */
+#define H_COURSE_FAST_STRAIGHT_SPEED_MM_S                340.0f
+#define H_COURSE_FAST_CURVE_SPEED_START_MM               1350.0f
+#define H_COURSE_FAST_STRAIGHT_FORCE_MM                  1450.0f
 #define H_COURSE_CURVE_EVIDENCE_POSITION                  0.18f
 #define H_COURSE_CURVE_EVIDENCE_SAMPLES                    3U
 /* Start the gyro-owned straight handoff before 180 degrees so the residual
@@ -147,6 +164,26 @@
 #define H_COURSE_EXIT_CAPTURE_HEADING_MAX_DEG              3.0f
 #define H_COURSE_EXIT_CAPTURE_RATE_MAX_DEG_S               6.0f
 #define H_COURSE_EXIT_CAPTURE_SAMPLES                       10U
+
+/* The first gyro sample is the vehicle heading, not necessarily the exact
+ * track tangent.  Learn a small bounded tangent trim from sustained lateral
+ * error while the fixed-course straight still owns the heading. */
+#define H_COURSE_STRAIGHT_TANGENT_ADAPT_DEG_S                2.5f
+#define H_COURSE_STRAIGHT_TANGENT_TRIM_LIMIT_DEG              4.0f
+#define H_COURSE_STRAIGHT_TANGENT_POSITION_MAX                0.60f
+#define H_COURSE_STRAIGHT_TANGENT_RATE_MAX_DEG_S              8.0f
+
+/* A fixed-course straight is a dedicated high-speed state.  Ordinary line
+ * severity must not pull it down to curve speed while the line is safely
+ * inside the middle probes; blend back to the conservative tracker before
+ * an outer probe is reached. */
+#define H_COURSE_STRAIGHT_FULL_SPEED_POSITION_MAX              0.30f
+#define H_COURSE_STRAIGHT_FALLBACK_POSITION                    0.60f
+/* The measured mean curvature already matches the 500 mm geometry.  The
+ * visible corner cut came from entry timing, so retain nominal feed-forward
+ * after separating early deceleration from the steering transition. */
+#define H_COURSE_BC_CURVE_FEEDFORWARD_SCALE                     1.00f
+#define H_COURSE_DA_CURVE_FEEDFORWARD_SCALE                     1.00f
 #define H_COURSE_MAX_DT_MS                                100U
 
 #define LINE_FOLLOW_BASE_SPEED_MM_S             160.0f

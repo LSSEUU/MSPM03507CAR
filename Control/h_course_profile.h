@@ -22,9 +22,11 @@ typedef struct {
     bool curve_entry_heading_valid;
     float curve_entry_yaw_deg;
     bool straight_heading_target_valid;
+    float straight_heading_anchor_deg;
     float straight_heading_target_deg;
     uint8_t straight_capture_samples;
     uint8_t curve_evidence_samples;
+    bool fast_straight_latched;
 } HCourseSnapshot_t;
 
 void HCourse_Init(void);
@@ -38,6 +40,9 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
 void HCourse_GetSnapshot(HCourseSnapshot_t *snapshot);
 bool HCourse_IsCurvePhase(void);
 float HCourse_SelectBaseSpeed(float tracking_base_mm_s,
-                              float curve_base_mm_s);
+                              float curve_base_mm_s,
+                              float straight_base_mm_s,
+                              bool line_usable,
+                              float line_position);
 
 #endif

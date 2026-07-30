@@ -382,6 +382,32 @@ static void test_fixed_curve_mode_starts_feedforward_at_centre(void)
     assert(fabsf(result.desired_yaw_rate_deg_s - expected) < 0.1f);
 }
 
+static void test_fixed_curve_keeps_outer_recovery_above_feedforward(void)
+{
+    LineFollowSnapshot_t line = make_line(220.0f, 0.0f);
+    LineYawAssistSnapshot_t result;
+    float feedforward = 220.0f * CHASSIS_DRIVE_TRACK_MM /
+                        (2.0f * LINE_CURVE_RADIUS_MM);
+    float desired = feedforward + LINE_CURVE_POSITION_TRIM_MM_S *
+                    (1.0f - LINE_CURVE_TARGET_POSITION);
+    float expected_rate = (-2.0f * desired / CHASSIS_DRIVE_TRACK_MM) *
+                          57.2957795f;
+    uint32_t now_ms;
+    line.active_mask = 0x80U;
+    line.position = 1.0f;
+    LineYawAssist_Init();
+    LineYawAssist_SetMode(LINE_YAW_ASSIST_MODE_CURVE_POSITIVE);
+    for (now_ms = 100U; now_ms <= 2200U; now_ms += 100U)
+        LineYawAssist_Update(&line, 60.0f, 0.0f, expected_rate,
+                             3.0f, 0.88f, true, now_ms);
+    LineYawAssist_GetSnapshot(&result);
+    assert(result.curve_rate_active);
+    assert(desired > 55.0f);
+    assert(fabsf(result.desired_yaw_rate_deg_s - expected_rate) < 0.1f);
+    assert(result.final_correction_mm_s > 55.0f);
+    assert(result.final_correction_mm_s <= 60.0f);
+}
+
 static void test_fixed_curve_rejects_straight_pd_derivative_spike(void)
 {
     LineFollowSnapshot_t line = make_line(160.0f, 50.0f);
@@ -432,6 +458,49 @@ static void test_fixed_curve_uses_low_gain_derivative_damping(void)
     LineYawAssist_GetSnapshot(&moving_inward);
     assert(moving_outward.desired_yaw_rate_deg_s <
            moving_inward.desired_yaw_rate_deg_s - 5.0f);
+}
+
+static void test_fixed_course_can_select_phase_feedforward_scale(void)
+{
+    LineFollowSnapshot_t line = make_line(280.0f, 0.0f);
+    LineYawAssistSnapshot_t result;
+    float nominal = 280.0f * CHASSIS_DRIVE_TRACK_MM /
+                    (2.0f * LINE_CURVE_RADIUS_MM);
+    line.position = LINE_CURVE_TARGET_POSITION;
+    LineYawAssist_Init();
+    LineYawAssist_SetMode(LINE_YAW_ASSIST_MODE_CURVE_POSITIVE);
+    LineYawAssist_SetCurveFeedforwardScale(
+        H_COURSE_DA_CURVE_FEEDFORWARD_SCALE);
+    LineYawAssist_Update(&line, 75.0f, 0.0f, -30.0f,
+                         3.0f, 0.88f, true, 100U);
+    LineYawAssist_GetSnapshot(&result);
+    assert(fabsf(result.curve_feedforward_correction_mm_s -
+                 nominal * H_COURSE_DA_CURVE_FEEDFORWARD_SCALE) < 0.01f);
+}
+
+static void test_fixed_curve_adds_rate_damping_without_changing_straight_kd(void)
+{
+    LineFollowSnapshot_t line = make_line(280.0f, 0.0f);
+    LineYawAssistSnapshot_t result;
+    float feedforward = 280.0f * CHASSIS_DRIVE_TRACK_MM /
+                        (2.0f * LINE_CURVE_RADIUS_MM);
+    float desired_rate = (-2.0f * feedforward /
+                          CHASSIS_DRIVE_TRACK_MM) * 57.2957795f;
+    uint32_t now_ms;
+    line.active_mask = 0x10U;
+    line.position = LINE_CURVE_TARGET_POSITION;
+    LineYawAssist_Init();
+    LineYawAssist_SetMode(LINE_YAW_ASSIST_MODE_CURVE_POSITIVE);
+    for (now_ms = 100U; now_ms <= 1200U; now_ms += 100U)
+        LineYawAssist_Update(&line, 75.0f, 0.0f, desired_rate,
+                             3.0f, 0.88f, true, now_ms);
+    for (now_ms = 1300U; now_ms <= 1800U; now_ms += 100U)
+        LineYawAssist_Update(&line, 75.0f, 0.0f, -40.0f,
+                             3.0f, 0.88f, true, now_ms);
+    LineYawAssist_GetSnapshot(&result);
+    assert(result.rate_error_deg_s < -7.0f);
+    assert(result.final_correction_mm_s < 51.0f);
+    assert(result.final_correction_mm_s > 45.0f);
 }
 
 static void test_fixed_curve_holds_command_through_tracking_gap(void)
@@ -565,8 +634,11 @@ int main(void)
     test_short_tracking_gap_preserves_confirmed_curve();
     test_fixed_straight_mode_ignores_early_outer_mask();
     test_fixed_curve_mode_starts_feedforward_at_centre();
+    test_fixed_curve_keeps_outer_recovery_above_feedforward();
     test_fixed_curve_rejects_straight_pd_derivative_spike();
     test_fixed_curve_uses_low_gain_derivative_damping();
+    test_fixed_course_can_select_phase_feedforward_scale();
+    test_fixed_curve_adds_rate_damping_without_changing_straight_kd();
     test_fixed_curve_holds_command_through_tracking_gap();
     test_fixed_curve_to_straight_transition_captures_heading();
     test_fixed_straight_can_hold_planned_exit_heading();

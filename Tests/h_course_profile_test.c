@@ -52,8 +52,62 @@ static void test_distance_window_and_line_evidence_enter_curve(void)
     result = snapshot();
     assert(result.phase == H_COURSE_BC_CURVE);
     assert(fabsf(result.curve_progress_deg) < 0.01f);
-    assert(fabsf(HCourse_SelectBaseSpeed(220.0f, 160.0f) - 160.0f) <
+    assert(fabsf(HCourse_SelectBaseSpeed(220.0f, 160.0f, 300.0f,
+                                        true, 0.0f) - 160.0f) <
            0.01f);
+}
+
+static void test_fixed_course_forces_high_speed_transition_before_tangent(void)
+{
+    HCourseSnapshot_t result;
+    uint32_t steps_before_force;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+
+    assert(H_COURSE_STRAIGHT_FORCE_MM < 1500.0f);
+    steps_before_force =
+        (uint32_t)(H_COURSE_STRAIGHT_FORCE_MM / (300.0f * 0.02f));
+    advance(300.0f, 0.0f, true, 0x18U, 0.0f,
+            steps_before_force - 1U);
+    result = snapshot();
+    assert(result.phase == H_COURSE_AB_STRAIGHT);
+
+    advance(300.0f, 0.0f, true, 0x18U, 0.0f, 2U);
+    result = snapshot();
+    assert(result.phase == H_COURSE_BC_CURVE);
+    assert(result.total_distance_mm < 1500.0f);
+}
+
+static void test_fast_profile_decelerates_before_steering(void)
+{
+    HCourseSnapshot_t result;
+    float selected;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+
+    assert(H_COURSE_FAST_STRAIGHT_SPEED_MM_S > 300.0f);
+    assert(H_COURSE_FAST_STRAIGHT_FORCE_MM >
+           H_COURSE_STRAIGHT_FORCE_MM);
+    assert(H_COURSE_FAST_CURVE_SPEED_START_MM <
+           H_COURSE_FAST_STRAIGHT_FORCE_MM);
+
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 169U);
+    result = snapshot();
+    assert(result.phase == H_COURSE_AB_STRAIGHT);
+    assert(result.fast_straight_latched);
+    assert(result.phase_distance_mm >=
+           H_COURSE_FAST_CURVE_SPEED_START_MM);
+    assert(result.phase_distance_mm < H_COURSE_FAST_STRAIGHT_FORCE_MM);
+    selected = HCourse_SelectBaseSpeed(280.0f, 280.0f, 400.0f,
+                                       true, 0.0f);
+    assert(fabsf(selected - 280.0f) < 0.01f);
+
+    /* The fast latch survives the commanded slowdown, so the ordinary
+     * 1400 mm fallback cannot start yaw feed-forward during deceleration. */
+    advance(280.0f, 0.0f, true, 0x18U, 0.0f, 18U);
+    result = snapshot();
+    assert(result.phase == H_COURSE_BC_CURVE);
+    assert(result.total_distance_mm >= H_COURSE_FAST_STRAIGHT_FORCE_MM);
 }
 
 static void test_semicircle_enters_second_straight_immediately(void)
@@ -75,11 +129,33 @@ static void test_semicircle_enters_second_straight_immediately(void)
     assert(result.straight_heading_target_valid);
     assert(fabsf(fabsf(result.straight_heading_target_deg) - 180.0f) <
            1.0f);
-    assert(fabsf(HCourse_SelectBaseSpeed(220.0f, 160.0f) - 220.0f) <
+    assert(fabsf(HCourse_SelectBaseSpeed(220.0f, 160.0f, 220.0f,
+                                        true, 0.0f) - 220.0f) <
            0.01f);
 }
 
-static void test_exit_heading_waits_for_line_and_heading_capture(void)
+static void test_fixed_straight_has_safe_high_speed_envelope(void)
+{
+    float selected;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 1U);
+
+    selected = HCourse_SelectBaseSpeed(280.0f, 280.0f, 400.0f,
+                                       true, 0.286f);
+    assert(fabsf(selected - 400.0f) < 0.01f);
+    selected = HCourse_SelectBaseSpeed(280.0f, 280.0f, 400.0f,
+                                       true, 0.45f);
+    assert(fabsf(selected - 340.0f) < 0.01f);
+    selected = HCourse_SelectBaseSpeed(280.0f, 280.0f, 400.0f,
+                                       true, 0.60f);
+    assert(fabsf(selected - 280.0f) < 0.01f);
+    selected = HCourse_SelectBaseSpeed(280.0f, 280.0f, 400.0f,
+                                       false, 0.0f);
+    assert(fabsf(selected - 280.0f) < 0.01f);
+}
+
+static void test_exit_heading_remains_owned_after_line_capture(void)
 {
     HCourseSnapshot_t result;
     uint32_t steps;
@@ -106,10 +182,12 @@ static void test_exit_heading_waits_for_line_and_heading_capture(void)
                        179.0f, 0.0f, true, 0x18U, 0.0f);
     }
     result = snapshot();
-    assert(!result.straight_heading_target_valid);
+    assert(result.straight_heading_target_valid);
+    assert(result.straight_capture_samples >=
+           H_COURSE_EXIT_CAPTURE_SAMPLES);
 }
 
-static void test_exit_heading_fallback_keeps_control_past_800_mm(void)
+static void test_exit_heading_remains_owned_for_whole_straight(void)
 {
     HCourseSnapshot_t result;
     uint32_t steps;
@@ -129,7 +207,58 @@ static void test_exit_heading_fallback_keeps_control_past_800_mm(void)
     advance(220.0f, 0.0f, true, 0x04U, -0.4f, 30U);
     result = snapshot();
     assert(result.phase_distance_mm >= H_COURSE_EXIT_CAPTURE_MAX_MM);
+    assert(result.straight_heading_target_valid);
+}
+
+static void test_initial_ab_heading_is_owned_until_curve(void)
+{
+    HCourseSnapshot_t result;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 1U);
+    result = snapshot();
+    assert(result.phase == H_COURSE_AB_STRAIGHT);
+    assert(result.straight_heading_target_valid);
+    assert(fabsf(result.straight_heading_target_deg) < 0.01f);
+
+    advance(400.0f, 0.0f, true, 0x04U, -0.4f, 150U);
+    result = snapshot();
+    assert(result.phase == H_COURSE_AB_STRAIGHT);
+    assert(result.straight_heading_target_valid);
+
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 32U);
+    result = snapshot();
+    assert(result.phase == H_COURSE_BC_CURVE);
     assert(!result.straight_heading_target_valid);
+}
+
+static void test_fixed_straight_learns_bounded_track_tangent(void)
+{
+    HCourseSnapshot_t result;
+    uint32_t i;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 1U);
+    for (i = 0U; i < 100U; i++) {
+        now_ms += 20U;
+        HCourse_Update(now_ms, true, 200.0f, 200.0f, true,
+                       0.0f, 0.0f, true, 0x04U, -0.4f);
+    }
+    result = snapshot();
+    assert(result.straight_heading_target_deg > 1.5f);
+    assert(result.straight_heading_target_deg <=
+           H_COURSE_STRAIGHT_TANGENT_TRIM_LIMIT_DEG);
+
+    for (i = 0U; i < 500U; i++) {
+        now_ms += 20U;
+        HCourse_Update(now_ms, true, 0.0f, 0.0f, true,
+                       0.0f, 0.0f, true, 0x04U, -0.4f);
+    }
+    result = snapshot();
+    assert(fabsf(result.straight_heading_target_deg -
+                 H_COURSE_STRAIGHT_TANGENT_TRIM_LIMIT_DEG) < 0.01f);
 }
 
 static void test_second_curve_completes_lap(void)
@@ -155,9 +284,14 @@ int main(void)
 {
     test_early_outer_transient_cannot_start_curve();
     test_distance_window_and_line_evidence_enter_curve();
+    test_fixed_course_forces_high_speed_transition_before_tangent();
+    test_fast_profile_decelerates_before_steering();
     test_semicircle_enters_second_straight_immediately();
-    test_exit_heading_waits_for_line_and_heading_capture();
-    test_exit_heading_fallback_keeps_control_past_800_mm();
+    test_fixed_straight_has_safe_high_speed_envelope();
+    test_exit_heading_remains_owned_after_line_capture();
+    test_exit_heading_remains_owned_for_whole_straight();
+    test_initial_ab_heading_is_owned_until_curve();
+    test_fixed_straight_learns_bounded_track_tangent();
     test_second_curve_completes_lap();
     return 0;
 }

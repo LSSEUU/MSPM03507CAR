@@ -21,6 +21,7 @@ static float curve_applied_correction_mm_s;
 static uint32_t curve_exit_guard_started_ms;
 static LineYawAssistMode_t requested_mode;
 static LineYawAssistMode_t applied_mode;
+static float requested_curve_feedforward_scale;
 static bool requested_straight_reference_valid;
 static float requested_straight_reference_yaw_deg;
 
@@ -88,6 +89,7 @@ void LineYawAssist_Init(void)
     curve_exit_guard_started_ms = 0U;
     requested_mode = LINE_YAW_ASSIST_MODE_AUTO;
     applied_mode = LINE_YAW_ASSIST_MODE_AUTO;
+    requested_curve_feedforward_scale = 1.0f;
     requested_straight_reference_valid = false;
     requested_straight_reference_yaw_deg = 0.0f;
 }
@@ -104,6 +106,13 @@ void LineYawAssist_SetMode(LineYawAssistMode_t mode)
         mode = LINE_YAW_ASSIST_MODE_AUTO;
     }
     requested_mode = mode;
+}
+
+void LineYawAssist_SetCurveFeedforwardScale(float scale)
+{
+    if (!LineYawAssist_IsFinite(scale)) scale = 1.0f;
+    requested_curve_feedforward_scale = LineYawAssist_Clamp(
+        scale, 0.5f, 1.2f);
 }
 
 void LineYawAssist_SetStraightReference(bool valid, float yaw_deg)
@@ -128,6 +137,7 @@ void LineYawAssist_Update(const LineFollowSnapshot_t *line,
     float desired_correction;
     float maximum_correction;
     float assist_limit;
+    float owned_damping_gain;
     float combined;
     float curve_position_target;
     bool exit_guard_active;
@@ -363,7 +373,8 @@ void LineYawAssist_Update(const LineFollowSnapshot_t *line,
             line->filtered_derivative : 0.0f;
         assist.curve_feedforward_correction_mm_s =
             (float)curve_direction * line->dynamic_base_mm_s *
-            CHASSIS_DRIVE_TRACK_MM / (2.0f * LINE_CURVE_RADIUS_MM);
+            CHASSIS_DRIVE_TRACK_MM / (2.0f * LINE_CURVE_RADIUS_MM) *
+            requested_curve_feedforward_scale;
         desired_correction = LineYawAssist_Clamp(
             assist.curve_feedforward_correction_mm_s +
             LINE_CURVE_POSITION_TRIM_MM_S *
@@ -396,9 +407,14 @@ void LineYawAssist_Update(const LineFollowSnapshot_t *line,
          * retained briefly across curve exit so the planned outgoing heading
          * cannot be overwritten by a large line-edge derivative. */
         target_assist = desired_correction;
+        owned_damping_gain = damping_gain_mm_s_per_deg_s;
+        if (fixed_curve_owned) {
+            owned_damping_gain *=
+                LINE_FIXED_CURVE_DAMPING_MULTIPLIER;
+        }
         if (LineYawAssist_Abs(assist.rate_error_deg_s) >
             LINE_YAW_ASSIST_RATE_DEADBAND_DEG_S) {
-            target_assist += damping_gain_mm_s_per_deg_s *
+            target_assist += owned_damping_gain *
                              assist.rate_error_deg_s;
         }
         maximum_correction = correction_limit_mm_s;

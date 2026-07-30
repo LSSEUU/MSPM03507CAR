@@ -36,6 +36,7 @@ static void HCourse_EnterCurve(HCoursePhase_t phase,
     course.straight_heading_target_valid = false;
     course.straight_capture_samples = 0U;
     course.curve_evidence_samples = 0U;
+    course.fast_straight_latched = false;
 }
 
 static void HCourse_EnterStraight(HCoursePhase_t phase)
@@ -45,10 +46,13 @@ static void HCourse_EnterStraight(HCoursePhase_t phase)
     course.curve_progress_deg = 0.0f;
     course.straight_heading_target_valid =
         course.curve_entry_heading_valid;
-    course.straight_heading_target_deg = HCourse_NormalizeDegrees(
+    course.straight_heading_anchor_deg = HCourse_NormalizeDegrees(
         course.curve_entry_yaw_deg - 180.0f);
+    course.straight_heading_target_deg =
+        course.straight_heading_anchor_deg;
     course.straight_capture_samples = 0U;
     course.curve_evidence_samples = 0U;
+    course.fast_straight_latched = false;
 }
 
 void HCourse_Init(void)
@@ -76,11 +80,39 @@ bool HCourse_IsCurvePhase(void)
 }
 
 float HCourse_SelectBaseSpeed(float tracking_base_mm_s,
-                              float curve_base_mm_s)
+                              float curve_base_mm_s,
+                              float straight_base_mm_s,
+                              bool line_usable,
+                              float line_position)
 {
+    float position_abs;
+    float blend;
     if (HCourse_IsCurvePhase() &&
         (tracking_base_mm_s > curve_base_mm_s)) {
         return curve_base_mm_s;
+    }
+    if (!HCourse_IsCurvePhase() && course.fast_straight_latched &&
+        (course.phase_distance_mm >=
+         H_COURSE_FAST_CURVE_SPEED_START_MM)) {
+        return (tracking_base_mm_s > curve_base_mm_s) ?
+            curve_base_mm_s : tracking_base_mm_s;
+    }
+    if (!HCourse_IsCurvePhase() &&
+        course.straight_heading_target_valid && line_usable &&
+        (straight_base_mm_s > tracking_base_mm_s)) {
+        position_abs = HCourse_Abs(line_position);
+        if (position_abs <=
+            H_COURSE_STRAIGHT_FULL_SPEED_POSITION_MAX) {
+            return straight_base_mm_s;
+        }
+        if (position_abs < H_COURSE_STRAIGHT_FALLBACK_POSITION) {
+            blend = (position_abs -
+                     H_COURSE_STRAIGHT_FULL_SPEED_POSITION_MAX) /
+                    (H_COURSE_STRAIGHT_FALLBACK_POSITION -
+                     H_COURSE_STRAIGHT_FULL_SPEED_POSITION_MAX);
+            return straight_base_mm_s +
+                (tracking_base_mm_s - straight_base_mm_s) * blend;
+        }
     }
     return tracking_base_mm_s;
 }
@@ -93,7 +125,8 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
 {
     uint32_t dt_ms;
     float dt_s;
-    float forward_speed;
+    float forward_speed = 0.0f;
+    float force_distance_mm;
     bool curve_evidence;
     if (!course.running) return;
     dt_ms = (uint32_t)(now_ms - course.last_update_ms);
@@ -108,6 +141,24 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
             course.total_distance_mm += forward_speed * dt_s;
             course.phase_distance_mm += forward_speed * dt_s;
         }
+        if (!HCourse_IsCurvePhase() &&
+            (forward_speed >= H_COURSE_FAST_STRAIGHT_SPEED_MM_S)) {
+            course.fast_straight_latched = true;
+        }
+    }
+
+    /* The fixed course starts tangent to AB.  Capture that initial heading
+     * from the first valid gyro sample so the high-speed first straight has
+     * the same planned-heading ownership as a straight entered from a curve. */
+    if ((course.phase == H_COURSE_AB_STRAIGHT) &&
+        (course.lap_count == 0U) &&
+        !course.straight_heading_target_valid &&
+        heading_sample_valid &&
+        (course.phase_distance_mm <= 100.0f)) {
+        course.straight_heading_target_valid = true;
+        course.straight_heading_anchor_deg = yaw_deg;
+        course.straight_heading_target_deg = yaw_deg;
+        course.straight_capture_samples = 0U;
     }
 
     if (HCourse_IsCurvePhase()) {
@@ -126,6 +177,7 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
     }
 
     if (course.straight_heading_target_valid) {
+        float tangent_trim_deg;
         float heading_error = HCourse_NormalizeDegrees(
             course.straight_heading_target_deg - yaw_deg);
         bool central = (active_mask == 0x08U) ||
@@ -147,13 +199,35 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
         } else {
             course.straight_capture_samples = 0U;
         }
-        if ((course.straight_capture_samples >=
-             H_COURSE_EXIT_CAPTURE_SAMPLES) ||
-            (course.phase_distance_mm >=
-             H_COURSE_EXIT_CAPTURE_MAX_MM)) {
-            course.straight_heading_target_valid = false;
-            course.straight_capture_samples = 0U;
+        if (line_usable && heading_sample_valid &&
+            (HCourse_Abs(line_position) <=
+             H_COURSE_STRAIGHT_TANGENT_POSITION_MAX) &&
+            (HCourse_Abs(yaw_rate_deg_s) <=
+             H_COURSE_STRAIGHT_TANGENT_RATE_MAX_DEG_S)) {
+            course.straight_heading_target_deg = HCourse_NormalizeDegrees(
+                course.straight_heading_target_deg -
+                H_COURSE_STRAIGHT_TANGENT_ADAPT_DEG_S * line_position *
+                dt_s);
+            tangent_trim_deg = HCourse_NormalizeDegrees(
+                course.straight_heading_target_deg -
+                course.straight_heading_anchor_deg);
+            if (tangent_trim_deg >
+                H_COURSE_STRAIGHT_TANGENT_TRIM_LIMIT_DEG) {
+                tangent_trim_deg =
+                    H_COURSE_STRAIGHT_TANGENT_TRIM_LIMIT_DEG;
+            } else if (tangent_trim_deg <
+                       -H_COURSE_STRAIGHT_TANGENT_TRIM_LIMIT_DEG) {
+                tangent_trim_deg =
+                    -H_COURSE_STRAIGHT_TANGENT_TRIM_LIMIT_DEG;
+            }
+            course.straight_heading_target_deg = HCourse_NormalizeDegrees(
+                course.straight_heading_anchor_deg + tangent_trim_deg);
         }
+        /* Keep the planned heading for the whole fixed-course straight.
+         * The capture count remains useful diagnostic evidence, but handing
+         * ownership back to digital-mask PD here caused a 400 mm/s limit
+         * cycle.  HCourse_EnterCurve() releases the reference at the known
+         * next tangent instead. */
     }
 
     curve_evidence = line_usable &&
@@ -165,9 +239,13 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
     } else {
         course.curve_evidence_samples = 0U;
     }
+    force_distance_mm = H_COURSE_STRAIGHT_FORCE_MM;
+    if (course.fast_straight_latched) {
+        force_distance_mm = H_COURSE_FAST_STRAIGHT_FORCE_MM;
+    }
     if ((course.curve_evidence_samples >=
          H_COURSE_CURVE_EVIDENCE_SAMPLES) ||
-        (course.phase_distance_mm >= H_COURSE_STRAIGHT_FORCE_MM)) {
+        (course.phase_distance_mm >= force_distance_mm)) {
         HCourse_EnterCurve(
             (course.phase == H_COURSE_AB_STRAIGHT) ?
             H_COURSE_BC_CURVE : H_COURSE_DA_CURVE,

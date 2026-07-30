@@ -38,6 +38,7 @@ typedef struct {
 void LineYawAssist_Init(void);
 void LineYawAssist_Reset(void);
 void LineYawAssist_SetMode(LineYawAssistMode_t mode);
+void LineYawAssist_SetCurveFeedforwardScale(float scale);
 void LineYawAssist_SetStraightReference(bool valid, float yaw_deg);
 void LineYawAssist_Update(const LineFollowSnapshot_t *line,
                           float correction_limit_mm_s,
