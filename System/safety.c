@@ -101,6 +101,8 @@ void Safety_BeginContinuousAction(uint32_t now_ms,
 void Safety_EndAction(void)
 {
     Safety_StopMotor();
+    safety.requested_motor_a = 0;
+    safety.requested_motor_b = 0;
     safety.action_active = false;
     safety.action_deadline_ms = 0U;
     safety.required_sensor_mask = 0U;

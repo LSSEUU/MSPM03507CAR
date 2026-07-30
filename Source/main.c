@@ -46,6 +46,15 @@ static void Main_ControlParamsCommitted(const ControlParamsCommit_t *commit)
     }
 }
 
+/* Wheel controllers use logical vehicle-left/vehicle-right signs.  Safety and
+ * Motor_SetPWM retain raw driver-channel A/B semantics for board diagnostics. */
+static bool Main_RequestLogicalWheelPWM(int16_t left_pwm, int16_t right_pwm)
+{
+    int16_t motor_a = (int16_t)(right_pwm * CHASSIS_MOTOR_A_FORWARD_SIGN);
+    int16_t motor_b = (int16_t)(left_pwm * CHASSIS_MOTOR_B_FORWARD_SIGN);
+    return Safety_RequestMotor(motor_a, motor_b);
+}
+
 static void Main_CompleteTask(SchedulerTask_t task, uint32_t started_ms,
                               uint32_t deadline_ms)
 {
@@ -170,7 +179,10 @@ int main(void)
             ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TASK_5MS);
             ControlProtocol_WheelBoundary();
             Encoder_GetSnapshot(&encoder);
-            WheelSpeed_Update(encoder.count_a, encoder.count_b, started);
+            /* Powered-wheel-first chassis: raw B is physical left, raw A is
+             * physical right.  WheelSpeed owns only logical L/R semantics. */
+            WheelSpeed_UpdateLogical(encoder.count_b, encoder.count_a,
+                                     started);
             WheelSpeed_GetSnapshot(&wheel);
             Safety_SetControlContext(
                 (int16_t)wheel.ramped_mm_s[WHEEL_SPEED_LEFT],
@@ -191,8 +203,9 @@ int main(void)
             }
             Safety_Evaluate(started);
             if (wheel.enabled && !Safety_HasFault() &&
-                !Safety_RequestMotor(wheel.pwm[WHEEL_SPEED_LEFT],
-                                     wheel.pwm[WHEEL_SPEED_RIGHT])) {
+                !Main_RequestLogicalWheelPWM(
+                    wheel.pwm[WHEEL_SPEED_LEFT],
+                    wheel.pwm[WHEEL_SPEED_RIGHT])) {
                 WheelSpeed_Disable();
             }
             Main_CompleteTask(SCHEDULER_TASK_5MS, started,

@@ -39,18 +39,18 @@ static void test_speed_conversion_direction_and_ramp(void)
 {
     WheelSpeedSnapshot_t snapshot;
     WheelSpeed_Init();
-    WheelSpeed_Update(0, 0, 0U);
-    WheelSpeed_Update(8, -8, 5U);
+    WheelSpeed_UpdateLogical(0, 0, 0U);
+    WheelSpeed_UpdateLogical(8, -8, 5U);
     WheelSpeed_GetSnapshot(&snapshot);
     assert(snapshot.sample_valid);
     assert(snapshot.encoder_delta[WHEEL_SPEED_LEFT] == 8);
     assert(snapshot.encoder_delta[WHEEL_SPEED_RIGHT] == 8);
-    assert(close_to(snapshot.raw_mm_s[WHEEL_SPEED_LEFT], 436.25f, 1.0f));
-    assert(close_to(snapshot.raw_mm_s[WHEEL_SPEED_RIGHT], 435.10f, 1.0f));
+    assert(close_to(snapshot.raw_mm_s[WHEEL_SPEED_LEFT], 443.68f, 1.0f));
+    assert(close_to(snapshot.raw_mm_s[WHEEL_SPEED_RIGHT], 445.98f, 1.0f));
 
     WheelSpeed_Enable();
     WheelSpeed_SetTarget(1000.0f, -1000.0f);
-    WheelSpeed_Update(16, -16, 10U);
+    WheelSpeed_UpdateLogical(16, -16, 10U);
     WheelSpeed_GetSnapshot(&snapshot);
     assert(close_to(snapshot.requested_mm_s[WHEEL_SPEED_LEFT],
                     WHEEL_SPEED_MAX_TARGET_MM_S, 0.01f));
@@ -73,10 +73,10 @@ static void test_runtime_jerk_limit(void)
     WheelSpeed_GetDefaultConfig(&config);
     config.jerk_mm_s3 = 1000.0f;
     assert(WheelSpeed_ApplyConfig(&config, true));
-    WheelSpeed_Update(0, 0, 0U);
+    WheelSpeed_UpdateLogical(0, 0, 0U);
     WheelSpeed_Enable();
     WheelSpeed_SetTarget(100.0f, 0.0f);
-    WheelSpeed_Update(0, 0, 5U);
+    WheelSpeed_UpdateLogical(0, 0, 5U);
     WheelSpeed_GetSnapshot(&snapshot);
     assert(close_to(snapshot.ramp_accel_mm_s2[WHEEL_SPEED_LEFT],
                     5.0f, 0.01f));
@@ -95,10 +95,10 @@ static void test_runtime_config_feedforward_and_atomic_reject(void)
     config.static_feedforward_pwm[WHEEL_SPEED_LEFT] = 10.0f;
     config.velocity_feedforward_pwm_per_mm_s[WHEEL_SPEED_LEFT] = 0.1f;
     assert(WheelSpeed_ApplyConfig(&config, true));
-    WheelSpeed_Update(0, 0, 0U);
+    WheelSpeed_UpdateLogical(0, 0, 0U);
     WheelSpeed_Enable();
     WheelSpeed_SetTarget(100.0f, 0.0f);
-    WheelSpeed_Update(0, 0, 5U);
+    WheelSpeed_UpdateLogical(0, 0, 5U);
     WheelSpeed_GetSnapshot(&snapshot);
     assert(close_to(snapshot.feedforward_pwm[WHEEL_SPEED_LEFT],
                     10.3f, 0.01f));
@@ -118,14 +118,14 @@ static void test_reverse_target_passes_through_zero(void)
     uint32_t now;
     bool saw_zero = false;
     WheelSpeed_Init();
-    WheelSpeed_Update(0, 0, 0U);
+    WheelSpeed_UpdateLogical(0, 0, 0U);
     WheelSpeed_Enable();
     WheelSpeed_SetTarget(100.0f, 100.0f);
     for (now = 5U; now <= 500U; now += 5U)
-        WheelSpeed_Update(0, 0, now);
+        WheelSpeed_UpdateLogical(0, 0, now);
     WheelSpeed_SetTarget(-100.0f, -100.0f);
     for (; now <= 1500U; now += 5U) {
-        WheelSpeed_Update(0, 0, now);
+        WheelSpeed_UpdateLogical(0, 0, now);
         WheelSpeed_GetSnapshot(&snapshot);
         if (close_to(snapshot.ramped_mm_s[WHEEL_SPEED_LEFT], 0.0f, 0.001f))
             saw_zero = true;
@@ -142,9 +142,9 @@ static void test_encoder_invalid_fault(void)
 {
     WheelSpeedSnapshot_t snapshot;
     WheelSpeed_Init();
-    WheelSpeed_Update(0, 0, 0U);
+    WheelSpeed_UpdateLogical(0, 0, 0U);
     WheelSpeed_Enable();
-    WheelSpeed_Update(100, 0, 5U);
+    WheelSpeed_UpdateLogical(100, 0, 5U);
     WheelSpeed_GetSnapshot(&snapshot);
     assert(!snapshot.sample_valid);
     assert((snapshot.fault_bits &
@@ -160,8 +160,8 @@ static void test_encoder_count_wrap(void)
 {
     WheelSpeedSnapshot_t snapshot;
     WheelSpeed_Init();
-    WheelSpeed_Update(INT32_MAX - 2, INT32_MIN + 2, 0U);
-    WheelSpeed_Update(INT32_MIN + 2, INT32_MAX - 2, 5U);
+    WheelSpeed_UpdateLogical(INT32_MAX - 2, INT32_MIN + 2, 0U);
+    WheelSpeed_UpdateLogical(INT32_MIN + 2, INT32_MAX - 2, 5U);
     WheelSpeed_GetSnapshot(&snapshot);
     assert(snapshot.encoder_delta[WHEEL_SPEED_LEFT] == 5);
     assert(snapshot.encoder_delta[WHEEL_SPEED_RIGHT] == 5);
@@ -173,11 +173,11 @@ static void test_stall_fault(void)
     WheelSpeedSnapshot_t snapshot;
     uint32_t now;
     WheelSpeed_Init();
-    WheelSpeed_Update(0, 0, 0U);
+    WheelSpeed_UpdateLogical(0, 0, 0U);
     WheelSpeed_Enable();
     WheelSpeed_SetTarget(700.0f, 0.0f);
     for (now = 5U; now <= 3000U; now += 5U)
-        WheelSpeed_Update(0, 0, now);
+        WheelSpeed_UpdateLogical(0, 0, now);
     WheelSpeed_GetSnapshot(&snapshot);
     assert((snapshot.fault_bits & WHEEL_SPEED_FAULT_STALL) != 0U);
     assert(snapshot.stall_ms[WHEEL_SPEED_LEFT] >= WHEEL_STALL_TIMEOUT_MS);

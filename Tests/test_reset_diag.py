@@ -96,8 +96,8 @@ class ResetDiagnosticsTests(unittest.TestCase):
             main.index("if (Scheduler_Take(SCHEDULER_TASK_100MS))"),
             main.index("Diagnostics_ServiceBackground();"),
         )
-        self.assertIn('"M6-runtime-20260729-r16"', protocol)
-        self.assertEqual(flash.count("M6-runtime-20260729-r16"), 2)
+        self.assertIn('"M6-runtime-20260730-r35"', protocol)
+        self.assertEqual(flash.count("M6-runtime-20260730-r35"), 2)
 
         for prefix in ("RESET ", "RESETCTX ", "RESETIO "):
             source_line = next(

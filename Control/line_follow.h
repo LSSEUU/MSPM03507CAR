@@ -93,6 +93,9 @@ void LineFollow_GetCalibrationValues(LineCalibrationValues_t *values,
                                      LineCalibrationSource_t *source);
 void LineFollow_ProcessSample(const uint16_t adc[LINE_SENSOR_CHANNEL_COUNT],
                               uint32_t scan_id, uint32_t now_ms);
+/* Process an active-high mask already ordered from vehicle left to right. */
+void LineFollow_ProcessDigitalMask(uint8_t active_mask,
+                                   uint32_t scan_id, uint32_t now_ms);
 bool LineFollow_Start(uint32_t now_ms);
 void LineFollow_Update(uint32_t now_ms);
 void LineFollow_Stop(void);

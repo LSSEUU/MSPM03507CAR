@@ -51,8 +51,8 @@ static void test_defaults_and_descriptors(void)
     ControlParams_Init();
     active = ControlParams_Active();
     assert(ControlParams_Validate(active) == CONTROL_PARAMS_OK);
-    assert(close_to(active->wheel.left_kp, WHEEL_SPEED_KP_A));
-    assert(close_to(active->wheel.left_ki, WHEEL_SPEED_KI_A));
+    assert(close_to(active->wheel.left_kp, WHEEL_SPEED_KP_LEFT));
+    assert(close_to(active->wheel.left_ki, WHEEL_SPEED_KI_LEFT));
     assert(close_to(active->wheel.filter_alpha, WHEEL_SPEED_FILTER_ALPHA));
     assert(close_to(active->wheel.accel_mm_s2, WHEEL_SPEED_ACCEL_MM_S2));
     assert(close_to(active->wheel.decel_mm_s2, WHEEL_SPEED_DECEL_MM_S2));
@@ -145,7 +145,7 @@ static void test_value_validation_is_side_effect_free(void)
     assert(ControlParams_Set("remote.heading_hold", 0.5f) ==
            CONTROL_PARAMS_ERR_RANGE);
     assert(ControlParams_Get("wheel.left.kp", &readback) == CONTROL_PARAMS_OK);
-    assert(close_to(readback.staged.real, WHEEL_SPEED_KP_A));
+    assert(close_to(readback.staged.real, WHEEL_SPEED_KP_LEFT));
     assert(!ControlParams_IsDirty());
 
     for (index = 0U; index < ControlParams_DescriptorCount(); ++index) {

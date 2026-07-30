@@ -57,12 +57,26 @@ class M3ControlTests(unittest.TestCase):
         )[1].split("if (Scheduler_Take(SCHEDULER_TASK_10MS))", 1)[0]
 
         self.assertIn("Encoder_GetSnapshot", five_ms)
-        self.assertIn("WheelSpeed_Update", five_ms)
-        self.assertIn("Safety_RequestMotor", five_ms)
-        self.assertLess(
-            five_ms.index("WheelSpeed_Update"),
-            five_ms.index("Safety_RequestMotor"),
+        self.assertIn(
+            "WheelSpeed_UpdateLogical(encoder.count_b, encoder.count_a",
+            five_ms,
         )
+        self.assertIn("Safety_RequestMotor", main)
+        self.assertLess(
+            five_ms.index("WheelSpeed_UpdateLogical"),
+            five_ms.index("Main_RequestLogicalWheelPWM"),
+        )
+        self.assertIn(
+            "right_pwm * CHASSIS_MOTOR_A_FORWARD_SIGN", main
+        )
+        self.assertIn(
+            "left_pwm * CHASSIS_MOTOR_B_FORWARD_SIGN", main
+        )
+        vehicle_config = (ROOT / "Config" / "vehicle_config.h").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("CHASSIS_MOTOR_A_FORWARD_SIGN        (-1)", vehicle_config)
+        self.assertIn("CHASSIS_MOTOR_B_FORWARD_SIGN        (-1)", vehicle_config)
         self.assertIn("SAFETY_FAULT_ENCODER_INVALID", safety)
         self.assertIn("SAFETY_FAULT_WHEEL_STALL", safety)
         self.assertIn("j=left k=right b=both speed test", diagnostics)
@@ -72,9 +86,15 @@ class M3ControlTests(unittest.TestCase):
         config = (ROOT / "Config" / "control_config.h").read_text(
             encoding="utf-8"
         )
-        self.assertIn("WHEEL_DIAMETER_MM                    46.0f", config)
-        self.assertIn("ENCODER_A_COUNTS_PER_WHEEL_REV      530.0f", config)
-        self.assertIn("ENCODER_B_COUNTS_PER_WHEEL_REV      531.4f", config)
+        self.assertIn("WHEEL_DIAMETER_MM                    65.0f", config)
+        self.assertIn(
+            "ENCODER_LEFT_COUNTS_PER_WHEEL_REV   736.4f", config
+        )
+        self.assertIn(
+            "ENCODER_RIGHT_COUNTS_PER_WHEEL_REV  732.6f", config
+        )
+        self.assertIn("ENCODER_LEFT_FORWARD_SIGN                1", config)
+        self.assertIn("ENCODER_RIGHT_FORWARD_SIGN              -1", config)
 
 
 if __name__ == "__main__":

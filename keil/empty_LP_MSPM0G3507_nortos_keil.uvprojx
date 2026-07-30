@@ -639,6 +639,16 @@
               <FileType>1</FileType>
               <FilePath>../Control/line_follow.c</FilePath>
             </File>
+            <File>
+              <FileName>line_yaw_assist.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/line_yaw_assist.c</FilePath>
+            </File>
+            <File>
+              <FileName>h_course_profile.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/h_course_profile.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

@@ -71,7 +71,8 @@ static bool WheelSpeed_ConfigValid(const WheelSpeedConfig_t *config)
             (config->ki[i] < 0.0f) || (config->ki[i] > 10.0f) ||
             !WheelSpeed_IsFinite(config->static_feedforward_pwm[i]) ||
             (config->static_feedforward_pwm[i] < 0.0f) ||
-            (config->static_feedforward_pwm[i] > WHEEL_SPEED_PWM_LIMIT) ||
+            (config->static_feedforward_pwm[i] >
+             WHEEL_FEEDFORWARD_PARAM_MAX) ||
             !WheelSpeed_IsFinite(
                 config->velocity_feedforward_pwm_per_mm_s[i]) ||
             (config->velocity_feedforward_pwm_per_mm_s[i] < 0.0f) ||
@@ -127,10 +128,10 @@ void WheelSpeed_GetDefaultConfig(WheelSpeedConfig_t *config)
 {
     if (config == NULL) return;
     memset(config, 0, sizeof(*config));
-    config->kp[WHEEL_SPEED_LEFT] = WHEEL_SPEED_KP_A;
-    config->ki[WHEEL_SPEED_LEFT] = WHEEL_SPEED_KI_A;
-    config->kp[WHEEL_SPEED_RIGHT] = WHEEL_SPEED_KP_B;
-    config->ki[WHEEL_SPEED_RIGHT] = WHEEL_SPEED_KI_B;
+    config->kp[WHEEL_SPEED_LEFT] = WHEEL_SPEED_KP_LEFT;
+    config->ki[WHEEL_SPEED_LEFT] = WHEEL_SPEED_KI_LEFT;
+    config->kp[WHEEL_SPEED_RIGHT] = WHEEL_SPEED_KP_RIGHT;
+    config->ki[WHEEL_SPEED_RIGHT] = WHEEL_SPEED_KI_RIGHT;
     config->filter_alpha = WHEEL_SPEED_FILTER_ALPHA;
     config->accel_mm_s2 = WHEEL_SPEED_ACCEL_MM_S2;
     config->decel_mm_s2 = WHEEL_SPEED_DECEL_MM_S2;
@@ -263,15 +264,15 @@ static void WheelSpeed_ShapeTarget(uint32_t i, float dt_s)
     speed.ramped_mm_s[i] = next;
 }
 
-void WheelSpeed_Update(int32_t encoder_a, int32_t encoder_b,
-                       uint32_t now_ms)
+void WheelSpeed_UpdateLogical(int32_t encoder_left, int32_t encoder_right,
+                              uint32_t now_ms)
 {
     static const float counts_per_revolution[WHEEL_SPEED_COUNT] = {
-        ENCODER_A_COUNTS_PER_WHEEL_REV,
-        ENCODER_B_COUNTS_PER_WHEEL_REV
+        ENCODER_LEFT_COUNTS_PER_WHEEL_REV,
+        ENCODER_RIGHT_COUNTS_PER_WHEEL_REV
     };
     static const int8_t forward_sign[WHEEL_SPEED_COUNT] = {
-        ENCODER_A_FORWARD_SIGN, ENCODER_B_FORWARD_SIGN
+        ENCODER_LEFT_FORWARD_SIGN, ENCODER_RIGHT_FORWARD_SIGN
     };
     int32_t counts[WHEEL_SPEED_COUNT];
     uint32_t elapsed_ms;
@@ -280,11 +281,11 @@ void WheelSpeed_Update(int32_t encoder_a, int32_t encoder_b,
     float circumference_mm = WHEEL_DIAMETER_MM * PI_F;
     bool valid = true;
 
-    counts[WHEEL_SPEED_LEFT] = encoder_a;
-    counts[WHEEL_SPEED_RIGHT] = encoder_b;
+    counts[WHEEL_SPEED_LEFT] = encoder_left;
+    counts[WHEEL_SPEED_RIGHT] = encoder_right;
     if (!have_encoder_baseline) {
-        speed.encoder_count[WHEEL_SPEED_LEFT] = encoder_a;
-        speed.encoder_count[WHEEL_SPEED_RIGHT] = encoder_b;
+        speed.encoder_count[WHEEL_SPEED_LEFT] = encoder_left;
+        speed.encoder_count[WHEEL_SPEED_RIGHT] = encoder_right;
         speed.last_update_ms = now_ms;
         speed.sample_valid = false;
         have_encoder_baseline = true;

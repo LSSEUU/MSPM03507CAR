@@ -22,7 +22,15 @@ import uuid
 import zipfile
 
 from .models import LinkEvent, TelemetrySample, VisionUartChunk
-from .registry import ActionState, EventCode, LAYOUTS, REGISTRY, TELEMETRY
+from .registry import (
+    ActionReason,
+    ActionState,
+    EventCode,
+    LAYOUTS,
+    REGISTRY,
+    TELEMETRY,
+    TelemetryStream,
+)
 
 
 FORMAT_VERSION = "m6-dashboard-session-v1"
@@ -344,6 +352,7 @@ class DashboardRecordingManager:
         self._trigger: str | None = None
         self._action_id: int | None = None
         self._action_result: Any = None
+        self._action_motion_seen = False
         self._post_deadline: float | None = None
         self._disconnect_deadline: float | None = None
         self._stop = threading.Event()
@@ -382,6 +391,8 @@ class DashboardRecordingManager:
             self._append_active(dict(captured))
             if isinstance(event, LinkEvent):
                 self._handle_link_event(event, now)
+            elif isinstance(event, TelemetrySample):
+                self._handle_action_telemetry(event, now)
             self._tick_locked(now)
 
     def record_event(self, event: str, values: Mapping[str, Any] | None = None) -> None:
@@ -404,6 +415,20 @@ class DashboardRecordingManager:
                 self._disconnect_deadline = now + 3.0
             elif event == "connection_restored":
                 self._disconnect_deadline = None
+            elif event == "control_cancel" and self._trigger == "action":
+                self._set_action_terminal(
+                    now,
+                    state=ActionState.COMPLETE,
+                    reason=ActionReason.HOST_CANCEL,
+                    source="control_cancel",
+                )
+            elif event == "emergency_stop_requested" and self._trigger == "action":
+                self._set_action_terminal(
+                    now,
+                    state=ActionState.FAULT,
+                    reason=ActionReason.EMERGENCY,
+                    source="emergency_stop_requested",
+                )
 
     def update_identity(self, identity: Any) -> None:
         value = _json_safe(identity)
@@ -483,6 +508,7 @@ class DashboardRecordingManager:
             self._disconnect_deadline = None
             self._action_result = action
             self._action_id = self._extract_action_id(action)
+            self._action_motion_seen = False
             for item in pre:
                 self._append_active(item)
             self._append_active({
@@ -693,6 +719,24 @@ class DashboardRecordingManager:
         if int(event.code) == int(EventCode.RESET) and self._trigger == "action":
             self._finish_locked(complete=False, reason="device_restarted")
             return
+        if int(event.code) == int(EventCode.SAFETY_FAULT) and self._trigger == "action":
+            self._set_action_terminal(
+                now,
+                state=ActionState.FAULT,
+                reason=ActionReason.SAFETY_FAULT,
+                source="safety_fault",
+                device_time_ms=event.time_ms,
+            )
+            return
+        if int(event.code) == int(EventCode.EMERGENCY_STOP) and self._trigger == "action":
+            self._set_action_terminal(
+                now,
+                state=ActionState.FAULT,
+                reason=ActionReason.EMERGENCY,
+                source="emergency_stop",
+                device_time_ms=event.time_ms,
+            )
+            return
         if int(event.code) != int(EventCode.ACTION_STATE) or self._trigger != "action":
             return
         state_value = event.values.get("state")
@@ -706,6 +750,71 @@ class DashboardRecordingManager:
         if state in _TERMINAL_ACTION_STATES:
             self._action_result = _json_safe(event.values)
             self._post_deadline = now + POST_ROLL_SECONDS
+
+    def _handle_action_telemetry(self, sample: TelemetrySample, now: float) -> None:
+        """Infer a normal terminal edge when older firmware omits ACTION_STATE."""
+
+        if (
+            self._trigger != "action"
+            or self._post_deadline is not None
+            or int(sample.stream) != int(TelemetryStream.CORE)
+        ):
+            return
+        values = sample.values
+        try:
+            active = int(values.get("request_l_mm_s", 0)) != 0 or int(
+                values.get("request_r_mm_s", 0)
+            ) != 0
+            fault_bits = int(values.get("fault_bits", 0))
+        except (TypeError, ValueError):
+            return
+        if active:
+            self._action_motion_seen = True
+            return
+        if not self._action_motion_seen:
+            return
+        self._set_action_terminal(
+            now,
+            state=ActionState.FAULT if fault_bits else ActionState.COMPLETE,
+            reason=ActionReason.SAFETY_FAULT if fault_bits else ActionReason.COMPLETE,
+            source="core_target_zero",
+            device_time_ms=sample.time_ms,
+        )
+
+    def _set_action_terminal(
+        self,
+        now: float,
+        *,
+        state: ActionState,
+        reason: ActionReason,
+        source: str,
+        device_time_ms: int | None = None,
+    ) -> None:
+        if self._trigger != "action" or self._post_deadline is not None:
+            return
+        result = {
+            "action_id": self._action_id or 0,
+            "state": int(state),
+            "reason": int(reason),
+            "stopped_ms": device_time_ms,
+            "inferred": True,
+            "source": source,
+        }
+        self._action_result = result
+        self._post_deadline = now + POST_ROLL_SECONDS
+        self._append_active(
+            {
+                "_captured_at": now,
+                "host_time_utc": _iso_utc(self._utc_clock()),
+                "device_time_ms": device_time_ms,
+                "record_type": "dashboard_event",
+                "stream": None,
+                "event": "action_completion_inferred",
+                "sample_id": None,
+                "gap": False,
+                "values": result,
+            }
+        )
 
     def _tick_locked(self, now: float) -> None:
         while self._prebuffer and now - float(self._prebuffer[0]["_captured_at"]) > PRE_ROLL_SECONDS:
@@ -747,6 +856,7 @@ class DashboardRecordingManager:
         self._trigger = None
         self._action_id = None
         self._action_result = None
+        self._action_motion_seen = False
         self._post_deadline = None
         self._disconnect_deadline = None
 

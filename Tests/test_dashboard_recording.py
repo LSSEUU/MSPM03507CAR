@@ -9,7 +9,7 @@ import pytest
 
 from m6link.dashboard_recording import DashboardRecordingManager, FORMAT_VERSION
 from m6link.models import LinkEvent, TelemetrySample, VisionUartChunk
-from m6link.registry import ActionState, EventCode, TelemetryStream
+from m6link.registry import ActionReason, ActionState, EventCode, TelemetryStream
 
 
 class FakeClock:
@@ -165,6 +165,41 @@ def test_action_recording_includes_five_second_preroll_and_two_second_postroll(t
     assert manifest["stop_reason"] == "action_complete"
     assert [record["sample_id"] for record in telemetry] == [2, 3, 4, 5, 6, 7]
     assert telemetry[0]["elapsed_ms"] == 0
+
+
+def test_action_recording_infers_terminal_edge_from_core_targets(tmp_path: Path) -> None:
+    clock = FakeClock()
+    recording = manager(tmp_path, clock)
+    recording.start_action(
+        name="wheel-fallback",
+        action={"action_id": 9, "state": {"value": 2, "name": "RUNNING"}},
+    )
+    recording.ingest(TelemetrySample(
+        TelemetryStream.CORE,
+        1,
+        1000,
+        {"request_l_mm_s": 100, "request_r_mm_s": 0, "fault_bits": 0},
+    ))
+    clock.advance(1.0)
+    recording.ingest(TelemetrySample(
+        TelemetryStream.CORE,
+        2,
+        2000,
+        {"request_l_mm_s": 0, "request_r_mm_s": 0, "fault_bits": 0},
+    ))
+    assert recording.status()["post_roll"] is True
+    clock.advance(2.1)
+    recording.tick()
+
+    directory = session_directory(tmp_path / "recordings")
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    summary = json.loads((directory / "summary.json").read_text(encoding="utf-8"))
+    records = read_jsonl(directory / "timeline.jsonl")
+    assert manifest["stop_reason"] == "action_complete"
+    assert summary["action_result"]["state"] == int(ActionState.COMPLETE)
+    assert summary["action_result"]["reason"] == int(ActionReason.COMPLETE)
+    inferred = next(record for record in records if record["event"] == "action_completion_inferred")
+    assert inferred["values"]["source"] == "core_target_zero"
 
 
 def test_manual_recording_survives_reconnect_but_action_recording_does_not(tmp_path: Path) -> None:

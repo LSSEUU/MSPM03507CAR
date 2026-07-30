@@ -42,10 +42,10 @@ typedef struct {
 
 static const ControlParams_t k_defaults = {
     {
-        WHEEL_SPEED_KP_A,
-        WHEEL_SPEED_KI_A,
-        WHEEL_SPEED_KP_B,
-        WHEEL_SPEED_KI_B,
+        WHEEL_SPEED_KP_LEFT,
+        WHEEL_SPEED_KI_LEFT,
+        WHEEL_SPEED_KP_RIGHT,
+        WHEEL_SPEED_KI_RIGHT,
         WHEEL_SPEED_FILTER_ALPHA,
         WHEEL_SPEED_ACCEL_MM_S2,
         WHEEL_SPEED_DECEL_MM_S2,

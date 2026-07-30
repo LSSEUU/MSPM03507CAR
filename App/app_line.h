@@ -17,6 +17,15 @@ typedef struct {
     AppLineState_t state;
     uint32_t deadline_ms;
     uint32_t started_ms;
+    bool yaw_assist_active;
+    float sensor_correction_mm_s;
+    float desired_yaw_rate_deg_s;
+    float measured_yaw_rate_deg_s;
+    float yaw_rate_error_deg_s;
+    float yaw_assist_correction_mm_s;
+    float final_correction_mm_s;
+    float final_left_target_mm_s;
+    float final_right_target_mm_s;
     LineFollowSnapshot_t control;
 } AppLineSnapshot_t;
 

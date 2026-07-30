@@ -179,7 +179,7 @@ class FlashScriptTests(unittest.TestCase):
     def test_post_flash_probe_requires_identity_schema_revision_and_source(self):
         result = run_harness(
             f"$root = {ps_literal(ROOT)}\n"
-            "$runner = { param($Arguments) [pscustomobject]@{ExitCode=0; Output=@('{\"firmware\":\"M6-test\",\"schema\":1,\"revision\":9,\"source\":\"flash-a\"}')} }\n"
+            "$runner = { param($Arguments) [pscustomobject]@{ExitCode=0; Output=@('{\"firmware\":\"M6-test\",\"schema\":1,\"revision\":9,\"source\":\"persisted\"}')} }\n"
             "$identity = Invoke-M6ApplicationProbe -RepositoryRoot $root -FirmwarePrefix 'M6' -Schema 1 -PythonRunner $runner\n"
             "$badRunner = { param($Arguments) [pscustomobject]@{ExitCode=0; Output=@('{\"firmware\":\"M6-test\",\"schema\":2,\"revision\":9,\"source\":\"flash-a\"}')} }\n"
             "$rejected = $false\n"
@@ -188,7 +188,7 @@ class FlashScriptTests(unittest.TestCase):
         )
 
         self.assertEqual(result["Revision"], 9)
-        self.assertEqual(result["Source"], "flash-a")
+        self.assertEqual(result["Source"], "persisted")
         self.assertTrue(result["Rejected"])
 
 

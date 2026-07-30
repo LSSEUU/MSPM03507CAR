@@ -12,8 +12,13 @@ from . import compat
 from .dashboard import run_dashboard
 from .errors import M6Error
 from .monitor import run_monitor
-from .recording import Recorder, load_recording
-from .scoring import candidate_accepted, evidence_compatible, score_samples
+from .recording import (
+    Recorder,
+    convert_dashboard_recording,
+    load_recording,
+    score_loaded_recording,
+)
+from .scoring import candidate_accepted, evidence_compatible
 from .session import BAUD_RATE, DEFAULT_FIRMWARE_PREFIX, PARAMETER_SCHEMA, Session
 from .registry import TelemetryStream
 
@@ -30,6 +35,27 @@ def _create_parser() -> argparse.ArgumentParser:
         for action in parser._actions
         if isinstance(action, argparse._SubParsersAction)
     )
+    score = subparsers.choices["score"]
+    score.add_argument(
+        "--mode",
+        dest="score_mode",
+        choices=("wheel", "ground", "line"),
+        help="override a recording's inferred test mode",
+    )
+    score.add_argument(
+        "--speed",
+        dest="score_speed",
+        type=float,
+        help="override a recording's inferred requested speed in mm/s",
+    )
+    adapter = subparsers.add_parser(
+        "adapt-dashboard",
+        help="convert one dashboard recording directory into score CSV/JSON",
+    )
+    adapter.add_argument("recording", type=Path)
+    adapter.add_argument("output", type=Path)
+    adapter.add_argument("--mode", choices=("wheel", "ground", "line"))
+    adapter.add_argument("--speed", type=float)
     monitor = subparsers.add_parser(
         "monitor", help="display read-only V2 telemetry in real time"
     )
@@ -188,21 +214,46 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"{args.command} requires the V2 link; remove --legacy")
     if args.command == "score":
         try:
-            samples, metadata = load_recording(args.recording)
-            metrics = score_samples(
-                samples,
-                requested_speed=float(metadata["requested_speed"]),
-                mode=str(metadata["test_mode"]),
-                expected_period_ms=int(metadata.get("period_ms", 20)),
+            samples, metadata = load_recording(
+                args.recording,
+                test_mode=args.score_mode,
+                requested_speed=args.score_speed,
             )
+            metrics = score_loaded_recording(samples, metadata)
             output: dict[str, Any] = {"metrics": metrics}
             if args.baseline:
-                _, baseline_metadata = load_recording(args.baseline)
+                baseline_samples, baseline_metadata = load_recording(
+                    args.baseline,
+                    test_mode=args.score_mode,
+                    requested_speed=args.score_speed,
+                )
+                baseline_metrics = score_loaded_recording(
+                    baseline_samples, baseline_metadata
+                )
                 comparable = evidence_compatible(baseline_metadata, metadata)
-                accepted, improvement = candidate_accepted(baseline_metadata["metrics"], metrics) if comparable else (False, -1.0)
+                accepted, improvement = candidate_accepted(
+                    baseline_metrics, metrics
+                ) if comparable else (False, -1.0)
                 output.update(comparable=comparable, accepted=accepted, improvement=improvement)
             print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
             return 0
+        except Exception as exc:
+            print(f"M6 error: {exc}", file=sys.stderr)
+            return 2
+    if args.command == "adapt-dashboard":
+        try:
+            result = convert_dashboard_recording(
+                args.recording,
+                args.output,
+                test_mode=args.mode,
+                requested_speed=args.speed,
+            )
+            print(json.dumps({
+                "csv": str(result.csv_path),
+                "json": str(result.json_path),
+                "metrics": result.summary["metrics"],
+            }, indent=2, ensure_ascii=False, allow_nan=False))
+            return 3 if result.summary["metrics"].get("hard_failures") else 0
         except Exception as exc:
             print(f"M6 error: {exc}", file=sys.stderr)
             return 2

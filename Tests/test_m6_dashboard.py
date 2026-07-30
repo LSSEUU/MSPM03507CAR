@@ -469,6 +469,8 @@ def test_dashboard_controller_requires_safety_ack_and_two_phase_confirmation() -
         pass
     confirmed = controller.confirm({"arm_token": armed["arm_token"]})
     assert confirmed["action"]["action_id"] == 7
+    assert confirmed["action"]["spec"]["target_l_mm_s"] == 120
+    assert confirmed["action"]["spec"]["kind"]["name"] == "WHEEL_SPEED_TEST"
     assert len(session.confirmed) == 1
 
 
@@ -898,6 +900,7 @@ def test_recording_http_api_requires_token_and_supports_library_download(tmp_pat
             "recording": {"auto": True, "name": "自动循迹"},
         })
         assert confirmed["action"]["action_id"] == 7
+        assert confirmed["action"]["spec"]["kind"]["name"] == "LINE_FOLLOW"
         assert confirmed["recording"]["recording"] is True
         assert confirmed["recording"]["trigger"] == "action"
         post("/api/recordings/stop", {})

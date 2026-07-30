@@ -2,7 +2,14 @@
 
 from .errors import *
 from .models import *
-from .recording import Recorder, Replay, TelemetryRecorder, load_recording
+from .recording import (
+    Recorder,
+    Replay,
+    TelemetryRecorder,
+    convert_dashboard_recording,
+    load_recording,
+    score_loaded_recording,
+)
 from .registry import (
     ActionKind,
     ActionReason,

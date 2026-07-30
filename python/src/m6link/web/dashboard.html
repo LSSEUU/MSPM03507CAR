@@ -44,7 +44,7 @@
         <span><small>接收帧</small><strong id="sampleCount">0</strong></span>
         <span><small>帧间断</small><strong id="gapCount">0</strong></span>
         <span><small>显示刷新</small><strong>≤ 60 fps</strong></span>
-        <span><small>原始采样</small><strong>50 / 25 / 25 Hz</strong></span>
+        <span><small>观察采样</small><strong>25 / 25 / 10 Hz</strong></span>
       </div>
       <div class="toolbar-actions">
         <label for="windowSelect">时间窗口</label>
@@ -83,11 +83,11 @@
 
     <section class="chart-grid">
       <article class="panel chart-panel wide">
-        <div class="panel-heading"><div><h2>轮速跟随</h2><p>目标与实测 · CORE 50 Hz</p></div><div class="legend"><span class="cyan">左实测</span><span class="orange">右实测</span><span class="blue dash">左目标</span><span class="amber dash">右目标</span></div></div>
+        <div class="panel-heading"><div><h2>轮速跟随</h2><p>目标与实测 · CORE 25 Hz</p></div><div class="legend"><span class="cyan">左实测</span><span class="orange">右实测</span><span class="blue dash">左目标</span><span class="amber dash">右目标</span></div></div>
         <canvas id="speedChart" role="img" aria-label="左右轮目标和实测速度实时曲线"></canvas>
       </article>
       <article class="panel chart-panel">
-        <div class="panel-heading"><div><h2>电机输出</h2><p>PWM 与速度误差 · 25–50 Hz</p></div><div class="legend"><span class="cyan">PWM L</span><span class="orange">PWM R</span><span class="violet dash">Error L</span><span class="pink dash">Error R</span></div></div>
+        <div class="panel-heading"><div><h2>电机输出</h2><p>PWM 与速度误差 · 25 Hz</p></div><div class="legend"><span class="cyan">PWM L</span><span class="orange">PWM R</span><span class="violet dash">Error L</span><span class="pink dash">Error R</span></div></div>
         <canvas id="motorChart" role="img" aria-label="左右轮 PWM 和误差实时曲线"></canvas>
       </article>
       <article class="panel chart-panel visual-panel">
@@ -95,7 +95,7 @@
         <canvas id="lineChart" role="img" aria-label="车辆相对循迹中心的位置、置信度和五秒位置微趋势"></canvas>
       </article>
       <article class="panel chart-panel visual-panel wide">
-        <div class="panel-heading"><div><h2>陀螺仪姿态</h2><p>航向罗盘、角速度与 5 秒微趋势 · CORE 50 Hz</p></div><div class="legend"><span class="violet">偏航角</span><span class="pink">角速度</span></div></div>
+        <div class="panel-heading"><div><h2>陀螺仪姿态</h2><p>航向罗盘、角速度与 5 秒微趋势 · CORE 25 Hz</p></div><div class="legend"><span class="violet">偏航角</span><span class="pink">角速度</span></div></div>
         <canvas id="gyroChart" role="img" aria-label="车辆偏航罗盘、实时角速度和五秒角速度微趋势"></canvas>
       </article>
     </section>

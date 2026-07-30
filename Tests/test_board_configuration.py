@@ -277,6 +277,7 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("uint16_t adc[GRAYSCALE_CHANNEL_COUNT]", header)
         self.assertIn("bool adc_powered", header)
         self.assertIn("uint8_t raw_mask", header)
+        self.assertIn("uint8_t conditioned_mask", header)
         self.assertIn("uint32_t nack_count", header)
         self.assertIn("uint32_t bus_error_count", header)
         for stale_name in (

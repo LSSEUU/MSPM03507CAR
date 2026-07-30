@@ -447,6 +447,30 @@ def _rms(values: Iterable[float]) -> float:
     return math.sqrt(sum(value * value for value in data) / len(data))
 
 
+def _relative_unwrapped_degrees(values: Iterable[float]) -> list[float]:
+    """Return a continuous angle trace relative to its first sample.
+
+    The firmware reports yaw in the signed ``[-180, 180)`` representation.
+    A straight run that crosses that representation boundary must remain a
+    small deviation instead of appearing to jump by almost 360 degrees.
+    Accumulating the shortest sample-to-sample delta also preserves genuine
+    turns whose total angle exceeds 180 degrees.
+    """
+
+    angles = list(values)
+    if not angles:
+        return []
+    relative = [0.0]
+    previous = angles[0]
+    accumulated = 0.0
+    for current in angles[1:]:
+        delta = (current - previous + 180.0) % 360.0 - 180.0
+        accumulated += delta
+        relative.append(accumulated)
+        previous = current
+    return relative
+
+
 def _saturation_duration_ms(samples: Sequence[Mapping[str, int]]) -> int:
     longest = current = 0
     previous_time: int | None = None
@@ -526,20 +550,17 @@ def _rise_time_ms(
 ) -> float:
     if not samples:
         return math.inf
-    first_active = next(
-        (
-            sample
-            for sample in samples
-            if int(sample["request_l"]) != 0 or int(sample["request_r"]) != 0
-        ),
-        None,
-    )
-    if first_active is None:
+    active = [
+        sample
+        for sample in samples
+        if int(sample["request_l"]) != 0 or int(sample["request_r"]) != 0
+    ]
+    if not active:
         return float(int(samples[-1]["time_ms"]) - int(samples[0]["time_ms"]))
-    start = int(first_active["time_ms"])
+    start = int(active[0]["time_ms"])
     hold_ms = 300
     tolerance = max(1.0, abs(requested_speed) * 0.05)
-    for index, sample in enumerate(samples):
+    for index, sample in enumerate(active):
         active_pairs = [
             (measured, request)
             for measured, request in (
@@ -557,7 +578,7 @@ def _rise_time_ms(
         ):
             held = True
             end_seen = now
-            for later in samples[index:]:
+            for later in active[index:]:
                 later_time = int(later["time_ms"])
                 if later_time - now > hold_ms:
                     break
@@ -581,7 +602,9 @@ def _rise_time_ms(
                     break
             if held and end_seen - now >= hold_ms:
                 return float(now - start)
-    return float(int(samples[-1]["time_ms"]) - start)
+    # A failed settle belongs to the action interval. Dashboard recordings also
+    # contain post-roll idle rows, which must not inflate the rise-time penalty.
+    return float(int(active[-1]["time_ms"]) - start)
 
 
 def score_samples(
@@ -613,6 +636,15 @@ def score_samples(
     duration_ms = max(1, end_ms - start_ms)
     rise_time_ms = _rise_time_ms(ordered, target)
 
+    active_rows = [
+        sample
+        for sample in ordered
+        if int(sample["request_l"]) != 0 or int(sample["request_r"]) != 0
+    ]
+    action_started = bool(active_rows)
+    motion_rows = active_rows if active_rows else ordered
+    active_start_ms = int(active_rows[0]["time_ms"]) if active_rows else start_ms
+
     active_measurements: list[float] = []
     normalized_errors: list[float] = []
     for sample in ordered:
@@ -628,12 +660,6 @@ def score_samples(
         (max(0.0, speed - target) / max(target, 1.0) for speed in active_measurements),
         default=0.0,
     )
-    active_rows = [
-        sample
-        for sample in ordered
-        if int(sample["request_l"]) != 0 or int(sample["request_r"]) != 0
-    ]
-    action_started = bool(active_rows)
     active_end_ms = int(active_rows[-1]["time_ms"]) if active_rows else end_ms
     steady = [
         sample
@@ -653,7 +679,9 @@ def score_samples(
 
     zero_crossings = 0
     previous_sign: dict[str, int] = {}
-    crossing_start = start_ms + int(rise_time_ms if math.isfinite(rise_time_ms) else 0)
+    crossing_start = active_start_ms + int(
+        rise_time_ms if math.isfinite(rise_time_ms) else 0
+    )
     deadband = target * 0.01
     for sample in ordered:
         if int(sample["time_ms"]) < crossing_start:
@@ -672,28 +700,33 @@ def score_samples(
                 zero_crossings += 1
             previous_sign[measured] = sign
 
-    saturated = sum(1 for sample in ordered if int(sample["saturation_bits"]) & 0x03)
-    saturation_ratio = saturated / len(ordered)
-    yaw_origin = float(ordered[0]["yaw_x100"]) / 100.0
-    yaw_values = [float(sample["yaw_x100"]) / 100.0 - yaw_origin for sample in ordered]
+    saturated = sum(
+        1 for sample in motion_rows if int(sample["saturation_bits"]) & 0x03
+    )
+    saturation_ratio = saturated / len(motion_rows)
+    yaw_values = _relative_unwrapped_degrees(
+        float(sample["yaw_x100"]) / 100.0 for sample in motion_rows
+    )
     position_values = [
-        float(sample["pos_filter_x1000"]) / 1000.0 for sample in ordered
+        float(sample["pos_filter_x1000"]) / 1000.0 for sample in motion_rows
     ]
     correction_rates: list[float] = []
-    for previous, current in zip(ordered, ordered[1:]):
+    for previous, current in zip(motion_rows, motion_rows[1:]):
         dt = (int(current["time_ms"]) - int(previous["time_ms"])) / 1000.0
         if dt > 0:
             correction_rates.append(
                 (float(current["correction"]) - float(previous["correction"])) / dt
             )
     line_loss_events = 0
-    was_valid = True
-    for sample in ordered:
-        valid = _line_sample_usable(sample)
-        if was_valid and not valid:
-            line_loss_events += 1
-        was_valid = valid
-    line_loss_max_ms = _line_loss_duration_ms(ordered)
+    line_loss_max_ms = 0
+    if mode == "line":
+        was_valid = True
+        for sample in motion_rows:
+            valid = _line_sample_usable(sample)
+            if was_valid and not valid:
+                line_loss_events += 1
+            was_valid = valid
+        line_loss_max_ms = _line_loss_duration_ms(motion_rows)
 
     missed_tasks = _delta(ordered, "missed_tasks")
     uart_drops = _delta(ordered, "rx_dropped") + _delta(ordered, "tx_dropped")
@@ -727,9 +760,9 @@ def score_samples(
     if gaps:
         hard_failures.append("telemetry_gap")
 
-    yaw_rms = _rms(yaw_values)
-    position_rms = _rms(position_values)
-    correction_jerk_rms = _rms(correction_rates)
+    yaw_rms = _rms(yaw_values) if mode in {"ground", "line"} else 0.0
+    position_rms = _rms(position_values) if mode == "line" else 0.0
+    correction_jerk_rms = _rms(correction_rates) if mode == "line" else 0.0
     score = (
         rise_time_ms / 1000.0
         + overshoot * 4.0
@@ -852,8 +885,18 @@ def fit_feedforward(samples_by_speed: Mapping[int, Sequence[Mapping[str, int]]])
             samples = list(samples_by_speed[speed])
             if not samples:
                 raise ValueError(f"no samples at {speed} mm/s")
-            end = int(samples[-1]["time_ms"])
-            settled = [sample for sample in samples if int(sample["time_ms"]) >= end - 1000]
+            active = [
+                sample
+                for sample in samples
+                if int(sample["request_l"]) != 0
+                or int(sample["request_r"]) != 0
+            ]
+            if not active:
+                raise ValueError(f"action did not start at {speed} mm/s")
+            end = int(active[-1]["time_ms"])
+            settled = [
+                sample for sample in active if int(sample["time_ms"]) >= end - 1000
+            ]
             pwm = statistics.fmean(abs(float(sample[pwm_key])) for sample in settled)
             points.append((float(speed), pwm))
         mean_x = statistics.fmean(point[0] for point in points)

@@ -26,6 +26,8 @@
 #include <math.h>
 #include <string.h>
 
+#define M6_ACTION_SAFETY_GRACE_MS 250U
+
 _Static_assert(ZDT_STEPPER_NOT_READY_NO_STATUS ==
                M6_ZDT_NOT_READY_NO_MOTOR_STATUS, "ZDT ready detail mismatch");
 _Static_assert(ZDT_STEPPER_NOT_READY_STATUS_STALE ==
@@ -1107,7 +1109,12 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
             started = AppLine_StartTimed(now, s_action.duration_ms);
         } else {
             if (!SystemState_RequestRun()) return M6_RESULT_WRONG_STATE;
-            Safety_BeginAction(now, s_action.duration_ms,
+            /* M6Rpc_Service owns the normal duration stop.  Give Safety a
+             * separate, later deadline so scheduler ordering at the exact
+             * action deadline cannot turn a normal completion into an
+             * ACTION_TIMEOUT fault. */
+            Safety_BeginAction(now,
+                s_action.duration_ms + M6_ACTION_SAFETY_GRACE_MS,
                 s_action.kind == M6_ACTION_KIND_WHEEL_SPEED_TEST ? 0U :
                 SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO));
             WheelSpeed_Enable();

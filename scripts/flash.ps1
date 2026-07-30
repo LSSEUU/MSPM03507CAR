@@ -3,7 +3,7 @@
 param(
     [string]$ProbeSerial = '4041840e',
     [string]$ExpectedFirmwarePrefix = 'M6',
-    [string]$ExpectedFirmwareId = 'M6-runtime-20260729-r16',
+    [string]$ExpectedFirmwareId = 'M6-runtime-20260730-r35',
     [ValidateRange(1, 65535)]
     [int]$ExpectedSchema = 1,
     [string]$Port,
@@ -351,7 +351,7 @@ function Invoke-M6ApplicationProbe {
     if ($null -eq $identity.revision -or [int]$identity.revision -lt 0) {
         throw 'Flash Verify OK, but the parameter revision is missing.'
     }
-    if ([string]$identity.source -notmatch '^(defaults|flash[-_]a|flash[-_]b)$') {
+    if ([string]$identity.source -notmatch '^(defaults|persisted|flash[-_]a|flash[-_]b)$') {
         throw "Flash Verify OK, but parameter load source is invalid: $($identity.source)"
     }
     return $identity
@@ -361,7 +361,7 @@ function Invoke-M6Flash {
     param(
         [string]$SerialNumber = '4041840e',
         [string]$FirmwarePrefix = 'M6',
-        [string]$FirmwareId = 'M6-runtime-20260729-r16',
+        [string]$FirmwareId = 'M6-runtime-20260730-r35',
         [int]$Schema = 1,
         [string]$SerialPort,
         [switch]$OnlyPreflight

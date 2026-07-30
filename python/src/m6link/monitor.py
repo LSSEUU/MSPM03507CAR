@@ -18,9 +18,16 @@ from .session import Session
 
 
 MONITOR_SUBSCRIPTIONS: Mapping[TelemetryStream, int] = {
-    TelemetryStream.CORE: 20,
+    # The dashboard is an observer; the firmware wheel loop remains 5 ms.
+    # Matching CORE to WHEEL at 25 Hz avoids P2 slot replacement while the
+    # page also polls action/parameter RPC state.
+    TelemetryStream.CORE: 40,
     TelemetryStream.WHEEL: 40,
-    TelemetryStream.LINE: 40,
+    # Keep headroom below the 7000 B/s admission ceiling for escaped wire
+    # bytes.  The old 40 ms profile estimated 6689 B/s before escaping and
+    # produced real P2 gaps on COM10 even while the vehicle was idle. Wheel
+    # tuning does not consume LINE dynamics; T6 uses a dedicated line profile.
+    TelemetryStream.LINE: 100,
     TelemetryStream.HEALTH: 1000,
 }
 _RECONNECT_SILENCE_S = 2.0

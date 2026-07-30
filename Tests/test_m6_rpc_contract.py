@@ -50,6 +50,14 @@ class M6RpcContractTests(unittest.TestCase):
         self.assertIn("line.state != APP_LINE_RUNNING", service)
         self.assertIn("s_action.duration_ms != M6_LINE_ACTION_CONTINUOUS_DURATION_MS", service)
 
+    def test_action_safety_deadline_has_grace_after_normal_deadline(self):
+        confirm = self._opcode_block("ACTION_CONFIRM", "ACTION_CANCEL")
+        self.assertIn("#define M6_ACTION_SAFETY_GRACE_MS 250U", self.source)
+        self.assertIn(
+            "s_action.duration_ms + M6_ACTION_SAFETY_GRACE_MS",
+            " ".join(confirm.split()),
+        )
+
     def test_parameter_reads_distinguish_length_from_reserved_bytes(self):
         for opcode, next_opcode in (
             ("PARAM_VALUE_GET", "PARAM_DESCRIPTOR_GET"),

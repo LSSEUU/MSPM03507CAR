@@ -15,7 +15,7 @@ from .compat import (
     TELEMETRY_HEADER,
     TELEMETRY_PREFIX,
     TelemetryRecorder,
-    load_recording,
+    load_recording as _load_legacy_recording,
     score_samples,
     utc_now,
 )
@@ -114,7 +114,7 @@ def _merge_v2_sample(row: dict[str, int], sample: TelemetrySample) -> bool:
             row[target] = int(values[source])
     elif stream == int(TelemetryStream.LINE):
         row["gray_mask"] = int(values["active_mask"])
-        row["line_info"] = (int(values["active_count"]) & 0x0F) | ((int(values["cluster_count"]) & 0x0F) << 4)
+        row["line_info"] = ((int(values["active_count"]) & 0x0F) << 4) | (int(values["cluster_count"]) & 0x0F)
         mapping = {
             "raw_position_x1000": "pos_raw_x1000", "position_x1000": "pos_filter_x1000",
             "derivative_x1000": "derivative_x1000", "dynamic_base_mm_s": "dynamic_base",
@@ -292,15 +292,82 @@ class Replay:
         return tuple(self.metadata.get("events", ()))
 
     def score(self) -> Mapping[str, Any]:
-        return score_samples(
-            self.samples,
-            requested_speed=float(self.metadata["requested_speed"]),
-            mode=str(self.metadata["test_mode"]),
-            expected_period_ms=int(self.metadata.get("period_ms", 20)),
+        return score_loaded_recording(self.samples, self.metadata)
+
+
+def load_recording(
+    path: Path,
+    *,
+    test_mode: str | None = None,
+    requested_speed: float | None = None,
+) -> tuple[list[dict[str, int]], dict[str, Any]]:
+    """Load legacy CSV/JSON evidence or one dashboard session directory."""
+
+    source = Path(path)
+    if source.is_dir():
+        from .dashboard_adapter import load_dashboard_recording
+
+        return load_dashboard_recording(
+            source,
+            test_mode=test_mode,
+            requested_speed=requested_speed,
         )
+    samples, metadata = _load_legacy_recording(source)
+    metadata = dict(metadata)
+    if test_mode is not None:
+        metadata["test_mode"] = str(test_mode)
+    if requested_speed is not None:
+        metadata["requested_speed"] = float(requested_speed)
+    return samples, metadata
+
+
+def score_loaded_recording(
+    samples: Iterable[Mapping[str, int]], metadata: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Score samples without dropping transport/action failures in metadata."""
+
+    rows = [dict(sample) for sample in samples]
+    metrics = score_samples(
+        rows,
+        requested_speed=float(metadata["requested_speed"]),
+        mode=str(metadata["test_mode"]),
+        expected_period_ms=int(metadata.get("period_ms", 20)),
+    )
+    inherited: list[str] = []
+    inherited.extend(str(item) for item in metadata.get("adapter_hard_failures", ()))
+    stored = metadata.get("metrics")
+    if isinstance(stored, Mapping):
+        inherited.extend(str(item) for item in stored.get("hard_failures", ()))
+    abort_reason = metadata.get("abort_reason")
+    if abort_reason:
+        inherited.append(str(abort_reason))
+    for reason in inherited:
+        if reason and reason not in metrics["hard_failures"]:
+            metrics["hard_failures"].append(reason)
+    return metrics
+
+
+def convert_dashboard_recording(
+    path: Path,
+    output_base: Path,
+    *,
+    test_mode: str | None = None,
+    requested_speed: float | None = None,
+) -> RecordingResult:
+    """Convert a dashboard session to the stable score CSV/JSON format."""
+
+    from .dashboard_adapter import convert_dashboard_recording as convert
+
+    return convert(
+        path,
+        output_base,
+        test_mode=test_mode,
+        requested_speed=requested_speed,
+    )
 
 
 __all__ = [
     "Recorder", "Replay", "RecordingResult", "TelemetryRecorder",
-    "load_recording", "score_samples",
+    "convert_dashboard_recording", "load_recording", "score_loaded_recording",
+    "score_samples",
 ]

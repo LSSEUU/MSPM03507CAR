@@ -155,6 +155,24 @@ static void test_continuous_action_keeps_sensor_watchdog(void)
     assert((snapshot.fault_bits & SAFETY_FAULT_GRAYSCALE_TIMEOUT) != 0U);
 }
 
+static void test_normal_action_end_clears_requested_pwm(void)
+{
+    SafetySnapshot_t snapshot;
+    enter_idle();
+    Safety_Init(0U);
+    assert(SystemState_RequestRun());
+    Safety_BeginAction(2000U, 1000U, 0U);
+    assert(Safety_RequestMotor(123, -45));
+    Safety_EndAction();
+    Safety_GetSnapshot(&snapshot);
+    assert(!snapshot.action_active);
+    assert(snapshot.requested_motor_a == 0);
+    assert(snapshot.requested_motor_b == 0);
+    assert(snapshot.applied_motor_a == 0);
+    assert(snapshot.applied_motor_b == 0);
+    assert(motor_a == 0 && motor_b == 0);
+}
+
 int main(void)
 {
     test_state_machine();
@@ -162,6 +180,7 @@ int main(void)
     test_action_timeout_and_motor_veto();
     test_sensor_timeout_and_emergency_stop();
     test_continuous_action_keeps_sensor_watchdog();
+    test_normal_action_end_clears_requested_pwm();
     assert(motor_stop_count > 0U);
     return 0;
 }

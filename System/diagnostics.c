@@ -273,13 +273,13 @@ static const char *Diagnostics_SpeedSelectionName(void)
 static void Diagnostics_PrintWheelSpeed(void)
 {
     WheelSpeedSnapshot_t s;
-    float kp_a;
-    float ki_a;
-    float kp_b;
-    float ki_b;
+    float kp_left;
+    float ki_left;
+    float kp_right;
+    float ki_right;
     WheelSpeed_GetSnapshot(&s);
-    WheelSpeed_GetGains(WHEEL_SPEED_LEFT, &kp_a, &ki_a);
-    WheelSpeed_GetGains(WHEEL_SPEED_RIGHT, &kp_b, &ki_b);
+    WheelSpeed_GetGains(WHEEL_SPEED_LEFT, &kp_left, &ki_left);
+    WheelSpeed_GetGains(WHEEL_SPEED_RIGHT, &kp_right, &ki_right);
     debug_printf("WHEEL enabled=%u valid=%u target=%ld,%ld ramp=%ld,%ld speed=%ld,%ld raw=%ld,%ld pwm=%d,%d faults=0x%02lX invalid=%lu\r\n",
         s.enabled, s.sample_valid,
         (long)Diagnostics_Round(s.requested_mm_s[WHEEL_SPEED_LEFT]),
@@ -293,19 +293,19 @@ static void Diagnostics_PrintWheelSpeed(void)
         s.pwm[WHEEL_SPEED_LEFT], s.pwm[WHEEL_SPEED_RIGHT],
         (unsigned long)s.fault_bits,
         (unsigned long)s.invalid_sample_count);
-    debug_printf("TUNE selection=%s test=%ldmm/s A(kp_x100=%lu ki_x100=%lu) B(kp_x100=%lu ki_x100=%lu) filter_x100=%lu cpr=%lu/%lu wheel_x10=%lu\r\n",
+    debug_printf("TUNE selection=%s test=%ldmm/s L(kp_x100=%lu ki_x100=%lu) R(kp_x100=%lu ki_x100=%lu) filter_x100=%lu cpr_lr=%lu/%lu wheel_x10=%lu raw_map=B/A\r\n",
         Diagnostics_SpeedSelectionName(),
         (long)Diagnostics_Round(speed_diag_target_mm_s),
-        (unsigned long)Diagnostics_ScalePositive(kp_a, 100.0f),
-        (unsigned long)Diagnostics_ScalePositive(ki_a, 100.0f),
-        (unsigned long)Diagnostics_ScalePositive(kp_b, 100.0f),
-        (unsigned long)Diagnostics_ScalePositive(ki_b, 100.0f),
+        (unsigned long)Diagnostics_ScalePositive(kp_left, 100.0f),
+        (unsigned long)Diagnostics_ScalePositive(ki_left, 100.0f),
+        (unsigned long)Diagnostics_ScalePositive(kp_right, 100.0f),
+        (unsigned long)Diagnostics_ScalePositive(ki_right, 100.0f),
         (unsigned long)Diagnostics_ScalePositive(
             WHEEL_SPEED_FILTER_ALPHA, 100.0f),
         (unsigned long)Diagnostics_Round(
-            ENCODER_A_COUNTS_PER_WHEEL_REV),
+            ENCODER_LEFT_COUNTS_PER_WHEEL_REV),
         (unsigned long)Diagnostics_Round(
-            ENCODER_B_COUNTS_PER_WHEEL_REV),
+            ENCODER_RIGHT_COUNTS_PER_WHEEL_REV),
         (unsigned long)Diagnostics_ScalePositive(WHEEL_DIAMETER_MM, 10.0f));
 }
 
@@ -669,10 +669,13 @@ static void Diagnostics_SetMotorPhase(uint32_t now_ms)
     static const int16_t pwm_b[4] = {
         0, 0, DIAGNOSTIC_MOTOR_PWM, -DIAGNOSTIC_MOTOR_PWM
     };
+    static const char *phase_name[4] = {"A+", "A-", "B+", "B-"};
     if (!Safety_RequestMotor(pwm_a[motor_diag_phase], pwm_b[motor_diag_phase])) {
         motor_diag_state = MOTOR_DIAG_IDLE;
         return;
     }
+    debug_printf("Motor raw phase=%s pwm=%u\r\n",
+        phase_name[motor_diag_phase], (unsigned int)DIAGNOSTIC_MOTOR_PWM);
     motor_diag_driving = true;
     motor_diag_deadline_ms = now_ms + DIAGNOSTIC_MOTOR_PHASE_MS;
 }
@@ -819,14 +822,14 @@ static void Diagnostics_FinishSpeedTest(void)
         if ((speed_diag_wheel_mask & (1U << i)) == 0U) continue;
         if (speed_diag_samples[i] == 0U) {
             debug_printf("M3 RESULT wheel=%c no steady samples\r\n",
-                (i == (uint32_t)WHEEL_SPEED_LEFT) ? 'A' : 'B');
+                (i == (uint32_t)WHEEL_SPEED_LEFT) ? 'L' : 'R');
         } else {
             float percent = (speed_diag_error_sum[i] * 100.0f) /
                 ((float)speed_diag_samples[i] * speed_diag_target_mm_s);
             uint32_t percent_x100 = Diagnostics_ScalePositive(
                 percent, 100.0f);
             debug_printf("M3 RESULT wheel=%c mean_abs_error=%lu.%02lu%% samples=%lu sign_changes=%u target=%ldmm/s\r\n",
-                (i == (uint32_t)WHEEL_SPEED_LEFT) ? 'A' : 'B',
+                (i == (uint32_t)WHEEL_SPEED_LEFT) ? 'L' : 'R',
                 (unsigned long)(percent_x100 / 100U),
                 (unsigned long)(percent_x100 % 100U),
                 (unsigned long)speed_diag_samples[i],
@@ -1207,7 +1210,7 @@ void Diagnostics_PrintHelp(void)
 {
     if (!legacy_text_enabled) return;
     debug_println("Commands: h=help s=status d=all e=encoder y=gyro q=grayscale t=IR capture");
-    debug_println("          o=OLED pattern p/f=confirm l=LED c=comm m=motor A=arm");
+    debug_println("          o=OLED pattern p/f=confirm l=LED c=comm m=raw A/B motor A=arm");
     debug_println("          j=left k=right b=both speed test; n=wheel snapshot");
     debug_println("          +/- target, [/]=Kp, ,/.=Ki for selected wheel(s)");
     debug_println("          g=heading z=calibrate u=+90 i=-90 w=straight; A=arm");

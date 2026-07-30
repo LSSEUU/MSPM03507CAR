@@ -63,8 +63,8 @@ void WheelSpeed_GetDefaultConfig(WheelSpeedConfig_t *config);
 void WheelSpeed_GetConfig(WheelSpeedConfig_t *config);
 bool WheelSpeed_ApplyConfig(const WheelSpeedConfig_t *config,
                             bool reset_controllers);
-void WheelSpeed_Update(int32_t encoder_a, int32_t encoder_b,
-                       uint32_t now_ms);
+void WheelSpeed_UpdateLogical(int32_t encoder_left, int32_t encoder_right,
+                              uint32_t now_ms);
 void WheelSpeed_ClearFaults(void);
 void WheelSpeed_GetSnapshot(WheelSpeedSnapshot_t *snapshot);
 

@@ -117,9 +117,11 @@ int main(void)
     assert(snapshot.raw_mask == 0x80U);
     assert(snapshot.scan_count == 1U && snapshot.last_update_ms == 3000U);
 #if GRAYSCALE_IR1_ON_RIGHT
+    assert(snapshot.conditioned_mask == 0x01U);
     assert(snapshot.adc[0] == GRAYSCALE_PROXY_LINE_ADC);
     assert(snapshot.adc[7] == GRAYSCALE_PROXY_BACKGROUND_ADC);
 #else
+    assert(snapshot.conditioned_mask == 0x80U);
     assert(snapshot.adc[0] == GRAYSCALE_PROXY_BACKGROUND_ADC);
     assert(snapshot.adc[7] == GRAYSCALE_PROXY_LINE_ADC);
 #endif
@@ -168,6 +170,7 @@ int main(void)
     request_and_run(3100U);
     Grayscale_GetSnapshot(&snapshot);
     assert(snapshot.last_scan_ok && snapshot.raw_mask == 0x18U);
+    assert(snapshot.conditioned_mask == 0x18U);
     assert(snapshot.consecutive_error_count == 0U);
     assert(snapshot.error_count == 3U);
     return 0;

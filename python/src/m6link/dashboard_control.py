@@ -546,7 +546,9 @@ class DashboardController:
             self._require_link_available()
             status = self.session.confirm_action(armed)
             self._status = None
-        return {"ok": True, "action": _object_payload(status)}
+        action = _object_payload(status)
+        action["spec"] = _object_payload(armed.spec)
+        return {"ok": True, "action": action}
 
     def cancel(self) -> dict[str, Any]:
         self._require_link_available()

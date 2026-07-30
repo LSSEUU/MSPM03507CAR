@@ -6,7 +6,9 @@
 
 ## 1. 当前基线
 
-- 平台为 MSPM0G3507-64P 两轮差速小车，32 MHz，Keil ARM Compiler 6.22；入口为 `Source/main.c`，冻结板级配置修订号 `20260729`，当前固件标识为 `M6-runtime-20260729-r16`。
+- 平台为 MSPM0G3507-64P 三轮差速底盘（两只前置动力轮、一只万向轮），32 MHz，Keil ARM Compiler 6.22；入口为 `Source/main.c`，冻结板级配置修订号 `20260729`，当前固件标识为 `M6-runtime-20260730-r35`。
+- 新底盘轮径为 `65.0 mm`；物理左轮使用原始编码器 B（`736.4 count/rev`，前进为正），物理右轮使用原始编码器 A（`732.6 count/rev`，前进为负）；唯一输出映射为电机 `A=-逻辑右 PWM`、`B=-逻辑左 PWM`，循迹左右符号不交换。
+- r35 已冻结固定 H 赛道的红外/陀螺协同循迹基线；当前候选仅在 RAM Apply：弯道 `160 mm/s`、直线 `240 mm/s`、`Kp=55`、`Kd=10`、修正上限 `60 mm/s`，尚未 Save 到参数 Flash。
 - `m6link.Session` 是 UART0/DAPLink 的唯一主机串口所有者。网页仪表盘、控制、参数、录制和回放均复用该会话。
 - M6 V2 冻结 registry 已加入 `MANUAL_DRIVE` bit 25、`VISION_UART_MONITOR` bit 26 和 `GRAYSCALE_CALIBRATION` bit 27，以及对应 RPC、状态与批量数据合同；旧固件仍可连接，但不得启用未协商能力。
 - 参数 Flash 双槽记录当前使用 208 字节 V2，同时接受 168 字节 V1；V2 在控制参数后携带八路白底/黑线标定和有效标志。
@@ -20,6 +22,7 @@
 - 网页自动重连使用单一后台状态机并固定原 COM 端口；串口打开或握手阻塞时 HTTP 状态仍可读取，断线会撤销 Arm、手动驾驶租约和待发控制，恢复后只重建 V2 会话、遥测订阅和 UART1 监视。
 - 参数弹窗提供 35 项中文引导、常用/全部/已修改筛选、用途与调大/调小影响说明，以及不触发设备 RPC 的本地微调按钮；参数仍必须显式执行“暂存、应用、写入 Flash”。
 - 支持流式遥测录制、动作前 5 秒/后 2 秒联动录制、标记、会话库、ZIP 下载和同页离线回放。会话以 UTF-8 JSON/JSONL、schema、索引和摘要保存，适合 AI 分析。
+- dashboard 原生多流 session 可由 `m6-tune score` 直接评分，或由 `m6-tune adapt-dashboard` 按设备时间、sample id 和 gap 标志转换为稳定 CSV/JSON；动作 spec、身份、参数及 reset/gap/abort/incomplete 硬失败均保留。
 - 支持网页 WASD 实时遥控：W/S 前后、A/D 原地转向，组合键为弧线；最高速度 50–400 mm/s，转向力度 10–100%。按键变化立即发送，按住每 100 ms 续租。
 - `AppManualDrive` 统一网页、红外和未来视觉控制的左右轮目标与停车逻辑。优先级为急停 > HOST_RPC > UART1 视觉 > PB11 红外。
 - 网页指令租约为 300 ms，由 20 ms 任务检查；松键、失焦、断线或租约到期执行普通停车，不锁存 Safety 故障。500 ms Safety deadline 仅作为调度异常的最后保护。
@@ -44,14 +47,16 @@
 - 灰度标定只能从无故障、无动作、无待应用参数且电机/轮速输出全零的 `IDLE` 进入；标定状态下除急停外的运动和参数应用/保存均被拒绝。
 - 网页和红外标定所有者互斥；网页会话断开、Safety 故障、急停、超时、取消或写入失败均丢弃候选并保留旧标定。
 - 电机、编码器、灰度和外接模块是否在线不作为网页握手或遥测连接门槛；它们只影响诊断状态和对应运动安全条件。
+- dashboard 录制适配与评分均为只读离线操作，不连接串口、不启动动作；监督式调参仍要求每次 Arm 后由操作员在网页逐次 Confirm，主机不得自动确认。
 
 ## 4. 有效验证
 
 - 2026-07-27：用户完成当前版本实车验证，WASD 遥控功能确认成功。
-- 2026-07-30：`scripts/test.ps1` 共 161 项 Python/C/协议自动化测试全部通过；新增 OUT.8IR.B 测试覆盖两种安装方向、3 秒启动宽限、20 ms 限速、ACK/NACK、SCL 超时和 9 脉冲恢复。
+- 2026-07-30：`scripts/test.ps1` 共 161 项 Python/C/协议自动化测试全部通过；A0 专项 `pytest` 为 81 项和 10 个子测试通过，覆盖异步多流合并、缺口、重启、取消、不完整记录、设备时间回绕、CLI 直接评分/转换及动作 spec 留存。
+- 2026-07-31：r35 完整回归共 169 项通过；160/240 mm/s 定向段和整圈完成，无丢线、反转、故障、轮速饱和或目标钳制。首弯超过计划出口航向由 r34 的 `3.04°` 降为 `0°`；关键录制见 `docs/2026-07-31-r35-line-baseline.md`。
 - 冻结 M6 V2 registry、schema、生成向量及 Python/C 常量一致性检查通过。
-- Keil Rebuild：0 error、0 warning；`Code=73116, RO-data=10504, RW-data=12, ZI-data=30772`。
-- 固件普通镜像最高字节 `0x000146B7`，低于 `0x0001F800` 参数保留区；`write_sector_from_ram` 位于 SRAM 地址 `0x20200001`。
+- Keil Rebuild：0 error、0 warning；`Code=77132, RO-data=10540, RW-data=12, ZI-data=30956`。
+- 固件普通镜像最高字节 `0x00015687`，低于 `0x0001F800` 参数保留区；`write_sector_from_ram` 位于 SRAM 地址 `0x20200001`。
 - 手动驾驶核心覆盖启动、续租、来源优先级、普通停车、租约到期和故障；原 PB11 红外回归测试通过。
 - 仪表盘接口覆盖鉴权、单网页控制权、输入序号、轮速混合、300 ms 租约、心跳去重、录制事件、重连不重放和标定明确 Flash 确认。
 - 标定向导已在 375×812 竖屏和 812×375 横屏验证无横向溢出，操作按钮不小于 44 px。
@@ -59,12 +64,13 @@
 
 ## 5. 下一步
 
-1. 实板连续保存两次参数，确认 A/B 槽轮换和 generation 增长；断电重上电确认来源为 Flash A/B、参数恢复，并验证蓝牙 SPP 固定原端口自动重连。
-2. 上板确认 K1 未按下时 PA12 为低且蜂鸣器静音，按住时 PA12 为高并持续鸣叫，松开后立即关闭。
-3. 完成 OUT.8IR.B 最终接线电平复核、物理按键校准、八路掩码/左右方向、网页/红外资格验证、SDA 断线 300 ms 停车及 100/160 mm/s 循迹验收。
-4. 确定摄像头/视觉模块型号、输出数据和定位方案，再为 UART1 增加带版本、长度、序号和校验的解析协议。
-5. 将视觉识别结果先转换为统一左右轮目标，通过 `AppManualDrive_SubmitVision()` 接入，不新增直接 PWM 路径。
-6. 为视觉接口补充目标丢失、坐标超界、数据超时和来源切换的实车验收。
+1. 以 r35 为可回退基线，根据 H 题第二题目标速度、`214.2 mm` 轮距和 `500 mm` 弯道半径先计算理论角速度、左右轮目标及修正余量，再按录制的实际角速度/位置误差设计速度规划；不盲目同时提高直线和弯道速度。
+2. 启动唯一 dashboard 会话，完成 2 s 无运动遥测预检并导出当前参数 golden profile；不写 Flash。
+3. 架空车轮，按 `100 mm/s` 分别执行左轮、右轮、双轮，每次由操作员单独 Confirm；用首个真实 session 完成 A0 合并结果、动作事件、停止段与网页观察的交叉验证。
+4. A0 实车交叉验证通过后，按 CAR-TUNE 的 T2/T3 顺序自动计算候选、Stage/Apply、评分并接受或回滚，继续保持人工 Confirm 和最终 Save 明示授权。
+5. 完成 OUT.8IR.B 最终接线电平复核、物理按键校准、八路掩码/左右方向、网页/红外资格验证、SDA 断线 300 ms 停车及 100/160 mm/s 循迹验收。
+6. 实板连续保存两次参数，确认 A/B 槽轮换和 generation 增长；断电重上电确认来源为 Flash A/B、参数恢复，并验证蓝牙 SPP 固定原端口自动重连。
+7. 确定摄像头识别输出协议并通过 `AppManualDrive_SubmitVision()` 接入统一左右轮目标，不新增直接 PWM 路径；补充目标丢失、坐标超界、数据超时和来源切换验收。
 
 ## 6. 常用入口
 
@@ -72,9 +78,12 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Mode Rebuild
 m6-tune --port COM10 dashboard
+m6-tune score <dashboard-session-dir>
+m6-tune adapt-dashboard <dashboard-session-dir> <output-base>
 ```
 
 - Keil 工程：`keil/empty_LP_MSPM0G3507_nortos_keil.uvprojx`
 - 接线说明：`docs/接线说明.md`
 - OUT.8IR.B 校准与资格验证手册：`docs/灰度传感器自动标定操作手册.md`
 - V2 合同：`Tests/vectors/m6_v2_wire_v1.json`
+- 自动调参规范：`docs/Reference/Codex自动调参模式SPEC.md`

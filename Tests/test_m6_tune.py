@@ -277,6 +277,25 @@ class TelemetryAndScoringTests(unittest.TestCase):
             self.assertIn(key, metrics)
         self.assertFalse(metrics["hard_failures"])
 
+    def test_ground_yaw_scoring_unwraps_signed_angle_boundary(self):
+        yaws = [17990, 17998, -17998, -17990]
+        samples = [
+            sample(
+                index * 20,
+                request_l=100,
+                request_r=100,
+                filter_l=100,
+                filter_r=100,
+                yaw_x100=yaw,
+            )
+            for index, yaw in enumerate(yaws)
+        ]
+
+        metrics = m6.score_samples(samples, requested_speed=100, mode="ground")
+
+        self.assertLess(metrics["yaw_peak_deg"], 0.25)
+        self.assertLess(metrics["yaw_rms_deg"], 0.15)
+
     def test_rise_and_steady_error_ignore_pre_arm_and_post_stop_idle_rows(self):
         samples = [sample(0, request_l=0, request_r=0, filter_l=0, filter_r=0)]
         samples += [sample(t) for t in range(20, 1020, 20)]
@@ -289,6 +308,49 @@ class TelemetryAndScoringTests(unittest.TestCase):
 
         self.assertEqual(metrics["rise_time_ms"], 0)
         self.assertEqual(metrics["steady_error_pct"], 0)
+
+    def test_failed_settle_rise_time_ends_with_action_not_post_roll(self):
+        samples = [
+            sample(t, request_l=0, request_r=0, filter_l=0, filter_r=0)
+            for t in range(0, 1000, 20)
+        ]
+        samples += [
+            sample(t, request_l=100, request_r=0, filter_l=80, filter_r=0)
+            for t in range(1000, 2000, 20)
+        ]
+        samples += [
+            sample(t, request_l=0, request_r=0, filter_l=0, filter_r=0)
+            for t in range(2000, 3000, 20)
+        ]
+
+        metrics = m6.score_samples(samples, requested_speed=100, mode="wheel")
+
+        self.assertEqual(metrics["rise_time_ms"], 980)
+
+    def test_wheel_score_ignores_line_and_heading_only_soft_metrics(self):
+        samples = [
+            sample(
+                t,
+                request_l=100,
+                request_r=100,
+                filter_l=100,
+                filter_r=100,
+                yaw_x100=t * 10,
+                line_info=0,
+                pos_filter_x1000=500,
+                correction=t * 100,
+            )
+            for t in range(0, 1000, 20)
+        ]
+
+        metrics = m6.score_samples(samples, requested_speed=100, mode="wheel")
+
+        self.assertEqual(metrics["yaw_rms_deg"], 0)
+        self.assertEqual(metrics["line_position_rms"], 0)
+        self.assertEqual(metrics["correction_jerk_rms"], 0)
+        self.assertEqual(metrics["line_loss_events"], 0)
+        self.assertEqual(metrics["line_loss_max_ms"], 0)
+        self.assertEqual(metrics["score"], 0)
 
     def test_requested_motion_that_never_starts_is_a_hard_failure(self):
         idle = [
@@ -394,6 +456,36 @@ class TelemetryAndScoringTests(unittest.TestCase):
         self.assertTrue(m6.feedforward_evidence_passed(base, good)[0])
         del good[300]
         self.assertFalse(m6.feedforward_evidence_passed(base, good)[0])
+
+    def test_feedforward_fit_uses_active_tail_not_dashboard_post_roll(self):
+        samples_by_speed = {}
+        for speed in (100, 160, 220, 300):
+            rows = [
+                sample(t, request_l=0, request_r=0, pwm_l=0, pwm_r=0)
+                for t in range(0, 1000, 20)
+            ]
+            rows += [
+                sample(
+                    t,
+                    request_l=speed,
+                    request_r=speed,
+                    pwm_l=10 + 0.5 * speed,
+                    pwm_r=20 + 0.4 * speed,
+                )
+                for t in range(1000, 3000, 20)
+            ]
+            rows += [
+                sample(t, request_l=0, request_r=0, pwm_l=0, pwm_r=0)
+                for t in range(3000, 4000, 20)
+            ]
+            samples_by_speed[speed] = rows
+
+        fitted = m6.fit_feedforward(samples_by_speed)
+
+        self.assertAlmostEqual(fitted["wheel.left.ks"], 10.0)
+        self.assertAlmostEqual(fitted["wheel.left.kv"], 0.5)
+        self.assertAlmostEqual(fitted["wheel.right.ks"], 20.0)
+        self.assertAlmostEqual(fitted["wheel.right.kv"], 0.4)
 
     def test_record_writes_csv_and_json_metadata(self):
         values = [sample(t) for t in (0, 20, 40)]

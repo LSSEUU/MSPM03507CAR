@@ -28,6 +28,8 @@ typedef struct {
     uint32_t recovery_count;
     uint32_t consecutive_error_count;
     uint8_t raw_mask;
+    /* Active-high line mask ordered from vehicle left to vehicle right. */
+    uint8_t conditioned_mask;
     GrayscaleI2CStatus_t last_i2c_status;
     bool last_scan_ok;
     bool startup_ready;

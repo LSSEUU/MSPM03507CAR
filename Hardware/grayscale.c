@@ -218,12 +218,16 @@ static bool Gray_ReadRawMask(uint8_t *raw_mask,
 static void Gray_ConvertMask(uint8_t raw_mask)
 {
     uint8_t channel;
+    uint8_t conditioned_mask = 0U;
     for (channel = 0U; channel < GRAYSCALE_CHANNEL_COUNT; channel++) {
         uint8_t bit = (GRAYSCALE_IR1_ON_RIGHT != 0U) ?
             (uint8_t)(7U - channel) : channel;
-        gray_state.adc[channel] = ((raw_mask & (uint8_t)(1U << bit)) != 0U) ?
-            GRAYSCALE_PROXY_LINE_ADC : GRAYSCALE_PROXY_BACKGROUND_ADC;
+        bool active = (raw_mask & (uint8_t)(1U << bit)) != 0U;
+        if (active) conditioned_mask |= (uint8_t)(1U << channel);
+        gray_state.adc[channel] = active ? GRAYSCALE_PROXY_LINE_ADC :
+                                          GRAYSCALE_PROXY_BACKGROUND_ADC;
     }
+    gray_state.conditioned_mask = conditioned_mask;
 }
 
 static void Gray_UpdateStartupReady(uint32_t now_ms)

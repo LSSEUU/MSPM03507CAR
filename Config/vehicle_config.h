@@ -16,6 +16,14 @@
 /* WWDT0 uses LFCLK (nominally 32.768 kHz): 2^10 ticks is about 31 ms. */
 #define WATCHDOG_PERIOD_DESCRIPTION_MS     31U
 
+/* New powered-wheel-first chassis: motor A is the physical right wheel and
+ * motor B is the physical left wheel.  Both raw motor polarities are opposite
+ * to the new vehicle-forward direction. */
+#define CHASSIS_MOTOR_A_FORWARD_SIGN        (-1)
+#define CHASSIS_MOTOR_B_FORWARD_SIGN        (-1)
+/* Measured contact-patch centre distance between the powered wheels. */
+#define CHASSIS_DRIVE_TRACK_MM             214.2f
+
 #define DIAGNOSTIC_MOTOR_PWM              250
 #define DIAGNOSTIC_MOTOR_PHASE_MS         500U
 #define DIAGNOSTIC_MOTOR_GAP_MS           150U
