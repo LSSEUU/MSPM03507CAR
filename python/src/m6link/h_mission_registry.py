@@ -12,7 +12,7 @@ from .errors import IntegrityError
 from .registry import canonical_digest
 
 
-EXTENSION_SHA256 = "973cb83992eaa81bd4a021391e8c98498e78ddf261c7c13949c163338bab9b67"
+EXTENSION_SHA256 = "ab018fd70060e42f7a7ac40237032f394e98f1e1afcb35cebf16ceeb4d055a9a"
 
 
 def _find() -> Path | None:
@@ -59,5 +59,5 @@ def assert_layout(name: str, size: int) -> None:
         raise IntegrityError(f"H mission extension layout {name} mismatch")
 
 
-assert_layout("h_mission_command_request", 32)
+assert_layout("h_mission_command_request", 30)
 assert_layout("h_mission_snapshot", 64)

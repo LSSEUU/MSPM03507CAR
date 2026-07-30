@@ -964,6 +964,26 @@ def test_run_dashboard_subscribes_and_unsubscribes() -> None:
     assert session.subscriptions[-1] == {}
 
 
+def test_dashboard_preloads_parameters_before_high_rate_telemetry() -> None:
+    dashboard_source = (
+        Path(__file__).parents[1] / "python" / "src" / "m6link" / "dashboard.py"
+    ).read_text(encoding="utf-8")
+    control_source = (
+        Path(__file__).parents[1]
+        / "python"
+        / "src"
+        / "m6link"
+        / "dashboard_control.py"
+    ).read_text(encoding="utf-8")
+    assert dashboard_source.index("controller.parameter_state(force=True)") < dashboard_source.index(
+        "session.subscribe(MONITOR_SUBSCRIPTIONS)"
+    )
+    reconnect = control_source.index("def reconnect(")
+    parameter_read = control_source.index("parameters = parameter_reader()", reconnect)
+    subscribe = control_source.index("self.session.subscribe(subscriptions)", reconnect)
+    assert parameter_read < subscribe
+
+
 def test_run_dashboard_reconnects_a_live_com_port_after_vehicle_reboot(monkeypatch) -> None:
     import m6link.dashboard as dashboard_module
 

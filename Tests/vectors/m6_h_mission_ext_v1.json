@@ -12,13 +12,14 @@
     "APPLY": 2,
     "REVERT": 3,
     "SELECT_MODE": 4,
-    "ABORT": 5
+    "ABORT": 5,
+    "START": 6
   },
   "modes": {"H2": 2, "H4": 4, "H5": 5},
   "layouts": [
     {
       "name": "h_mission_command_request",
-      "size": 32,
+      "size": 30,
       "fields": [
         {"name": "boot_id", "offset": 0, "size": 4, "type": "u32"},
         {"name": "expected_active_revision", "offset": 4, "size": 4, "type": "u32"},
@@ -31,7 +32,7 @@
         {"name": "h5_straight_speed_mm_s", "offset": 20, "size": 2, "type": "u16"},
         {"name": "h5_curve_speed_mm_s", "offset": 22, "size": 2, "type": "u16"},
         {"name": "development_end_distance_mm", "offset": 24, "size": 2, "type": "u16"},
-        {"name": "reserved", "offset": 26, "size": 6, "type": "bytes"}
+        {"name": "reserved", "offset": 26, "size": 4, "type": "bytes"}
       ]
     },
     {
@@ -72,7 +73,7 @@
   "semantics": {
     "ram_only": true,
     "save_supported": false,
-    "idle_only_commands": ["STAGE", "APPLY", "REVERT", "SELECT_MODE"],
+    "idle_only_commands": ["STAGE", "APPLY", "REVERT", "SELECT_MODE", "START"],
     "abort_allowed_while_running": true
   }
 }

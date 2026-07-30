@@ -180,11 +180,16 @@
  * an outer probe is reached. */
 #define H_COURSE_STRAIGHT_FULL_SPEED_POSITION_MAX              0.30f
 #define H_COURSE_STRAIGHT_FALLBACK_POSITION                    0.60f
-/* The measured mean curvature already matches the 500 mm geometry.  The
- * visible corner cut came from entry timing, so retain nominal feed-forward
- * after separating early deceleration from the steering transition. */
+/* BC matches the 500 mm geometry at nominal feed-forward.  Loaded-chassis
+ * telemetry on DA showed a repeatable slow lateral oscillation: nominal
+ * feed-forward cut the first half inside, while a fixed 0.90 scale improved
+ * entry but ran out of authority after the midpoint.  Ramp only DA from a
+ * soft entry to modest late-curve authority; the r67 correction cap remains
+ * the final bound and BC is unchanged. */
 #define H_COURSE_BC_CURVE_FEEDFORWARD_SCALE                     1.00f
-#define H_COURSE_DA_CURVE_FEEDFORWARD_SCALE                     1.00f
+#define H_COURSE_DA_CURVE_FEEDFORWARD_START_SCALE               0.90f
+#define H_COURSE_DA_CURVE_FEEDFORWARD_SCALE                     1.10f
+#define H_COURSE_DA_CURVE_FEEDFORWARD_RAMP_DEG                  90.0f
 
 /* The evaluation fixes one reference point on the vehicle centreline and
  * specifies its launch placement.  The official placement used from r51

@@ -40,6 +40,7 @@ typedef struct {
 } AppH2PanelSnapshot_t;
 
 void AppH2Panel_Init(uint32_t now_ms);
+AppH2StartStatus_t AppH2Panel_CheckStart(uint32_t now_ms);
 void AppH2Panel_Task20ms(uint32_t now_ms);
 void AppH2Panel_Task100ms(uint32_t now_ms);
 void AppH2Panel_GetSnapshot(AppH2PanelSnapshot_t *snapshot);

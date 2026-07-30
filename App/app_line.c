@@ -3,6 +3,7 @@
 #include "control_config.h"
 #include "h_course_profile.h"
 #include "h2_control_profile.h"
+#include "h_mission_control_profile.h"
 #include "heading.h"
 #include "line_trace.h"
 #include "line_yaw_assist.h"
@@ -18,12 +19,17 @@
 
 #define APP_LINE_TIMED_SAFETY_GRACE_MS 250U
 #define APP_H4_AB_DISTANCE_MM          1500.0f
+#define APP_H4_HEADING_HOLD_DISTANCE_MM 1400.0f
 #define APP_H_MISSION_WHITE_LIMIT_MS      250U
 #define APP_H_MISSION_OUTER_LIMIT_MS     1200U
 #define APP_H_MISSION_SATURATION_MS      1200U
-#define APP_H_MISSION_STOP_TIMEOUT_MS    2000U
+#define APP_H4_MISSION_STOP_TIMEOUT_MS   1500U
+#define APP_H5_MISSION_STOP_TIMEOUT_MS   2000U
+#define APP_H_MISSION_STOP_DISTANCE_MM    250.0f
 #define APP_H_MISSION_STOPPED_SPEED_MM_S    5.0f
 #define APP_H_MISSION_TASK_PERIOD_S         0.020f
+#define APP_H4_STOP_CORRECTION_RATIO         0.20f
+#define APP_H5_CURVE_CORRECTION_MARGIN        1.15f
 
 static AppLineSnapshot_t app_line;
 static uint16_t mission_white_ms;
@@ -31,6 +37,10 @@ static uint16_t mission_outer_ms;
 static uint16_t mission_saturation_ms;
 static uint32_t mission_stop_started_ms;
 static float mission_stop_base_mm_s;
+static float mission_stop_started_distance_mm;
+static bool mission_stop_heading_valid;
+static float mission_stop_heading_deg;
+static bool mission_h4_heading_hold_active;
 
 static void AppLine_ResetYawAssist(void)
 {
@@ -56,7 +66,9 @@ static int16_t AppLine_ScaleSigned(float value, float scale)
 
 static void AppLine_ReturnIdle(void)
 {
-    if (!H2ControlProfile_Restore()) {
+    bool restored = HMissionControlProfile_Restore();
+    restored = H2ControlProfile_Restore() && restored;
+    if (!restored) {
         Safety_EmergencyStop(SystemTime_Now());
     }
     app_line.state = APP_LINE_IDLE;
@@ -81,6 +93,10 @@ static void AppLine_ResetMissionGuards(void)
     mission_saturation_ms = 0U;
     mission_stop_started_ms = 0U;
     mission_stop_base_mm_s = 0.0f;
+    mission_stop_started_distance_mm = 0.0f;
+    mission_stop_heading_valid = false;
+    mission_stop_heading_deg = 0.0f;
+    mission_h4_heading_hold_active = false;
 }
 
 static void AppLine_FaultAbort(uint32_t now_ms,
@@ -162,6 +178,14 @@ static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms,
         AppLine_ReturnIdle();
         return false;
     }
+    if (h_mission &&
+        ((mission_mode == H_MISSION_MODE_H4) ||
+         (mission_mode == H_MISSION_MODE_H5)) &&
+        !HMissionControlProfile_Activate(mission_mode)) {
+        (void)SystemState_RequestIdle();
+        AppLine_ReturnIdle();
+        return false;
+    }
     if (!LineFollow_Start(now_ms)) {
         (void)SystemState_RequestIdle();
         AppLine_ReturnIdle();
@@ -179,7 +203,6 @@ static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms,
     HCourse_Start(now_ms);
     AppLine_ResetFinish(h_mission &&
         (mission_mode == H_MISSION_MODE_H2));
-    HCourse_SetFixedCourseStart(h_mission);
     if (app_line.h2_finish_enabled) {
         HCourse_SetFinishEnabled(true);
     } else {
@@ -206,6 +229,7 @@ void AppLine_Init(void)
     HCourse_Init();
     HMission_Init();
     H2ControlProfile_Init();
+    HMissionControlProfile_Init();
     LineTrace_Init();
 }
 
@@ -354,7 +378,10 @@ void AppLine_Task20ms(uint32_t now_ms)
     LineYawAssistSnapshot_t yaw_assist;
     bool gyro_usable;
     bool guarded_mission;
+    bool mission_path_guard_active;
+    bool h4_heading_hold;
     bool latch_development;
+    float yaw_correction_limit_mm_s;
     if (app_line.state == APP_LINE_ARMED) {
         if (SystemTime_Reached(now_ms, app_line.deadline_ms))
             AppLine_ReturnIdle();
@@ -380,6 +407,8 @@ void AppLine_Task20ms(uint32_t now_ms)
     HMission_GetSnapshot(&mission);
     guarded_mission = HMission_IsActive() &&
         (mission.running_mode != H_MISSION_MODE_H2);
+    mission_path_guard_active = guarded_mission &&
+        (mission.state == H_MISSION_RUNNING);
     gyro_usable = heading.calibrated &&
         (heading.rate_source == HEADING_RATE_GYRO_FRAME) &&
         ((uint32_t)(now_ms - heading.last_rate_update_ms) <=
@@ -390,10 +419,12 @@ void AppLine_Task20ms(uint32_t now_ms)
         return;
     }
     if (guarded_mission) {
-        mission_white_ms = (control.active_mask == 0U) ?
+        mission_white_ms = mission_path_guard_active &&
+            (control.active_mask == 0U) ?
             AppLine_AddGuardTime(mission_white_ms) : 0U;
-        mission_outer_ms = ((control.active_mask == 0x01U) ||
-                            (control.active_mask == 0x80U)) ?
+        mission_outer_ms = mission_path_guard_active &&
+            ((control.active_mask == 0x01U) ||
+             (control.active_mask == 0x80U)) ?
             AppLine_AddGuardTime(mission_outer_ms) : 0U;
         mission_saturation_ms = (wheel.saturated[WHEEL_SPEED_LEFT] ||
                                  wheel.saturated[WHEEL_SPEED_RIGHT]) ?
@@ -423,6 +454,16 @@ void AppLine_Task20ms(uint32_t now_ms)
         control.line_valid && !control.ambiguous,
         control.active_mask, control.position);
     HCourse_GetSnapshot(&course);
+    if (guarded_mission &&
+        (mission.state == H_MISSION_RUNNING) &&
+        (mission.running_mode == H_MISSION_MODE_H4) &&
+        !mission_h4_heading_hold_active &&
+        (course.total_distance_mm >= APP_H4_HEADING_HOLD_DISTANCE_MM)) {
+        mission_h4_heading_hold_active = true;
+        mission_stop_heading_valid = gyro_usable;
+        mission_stop_heading_deg = heading.yaw_deg;
+        LineYawAssist_Reset();
+    }
     if (app_line.h2_finish_enabled && course.finish_line_detected) {
         app_line.finish_line_detected = true;
         app_line.finish_crawl_active = true;
@@ -471,15 +512,33 @@ void AppLine_Task20ms(uint32_t now_ms)
                  mission.active.h5_straight_speed_mm_s);
         }
         mission_stop_started_ms = now_ms;
+        mission_stop_started_distance_mm = course.total_distance_mm;
+        if ((mission.running_mode == H_MISSION_MODE_H4) &&
+            !mission_h4_heading_hold_active) {
+            mission_h4_heading_hold_active = true;
+            mission_stop_heading_valid = gyro_usable;
+            mission_stop_heading_deg = heading.yaw_deg;
+            LineYawAssist_Reset();
+        }
         app_line.finished_ms = now_ms;
         app_line.elapsed_ms = (uint32_t)(now_ms - app_line.started_ms);
         HMission_BeginStopping();
         HMission_GetSnapshot(&mission);
     }
     if (mission.state == H_MISSION_STOPPING) {
+        uint32_t stop_timeout_ms =
+            (mission.running_mode == H_MISSION_MODE_H4) ?
+            APP_H4_MISSION_STOP_TIMEOUT_MS :
+            APP_H5_MISSION_STOP_TIMEOUT_MS;
         if ((uint32_t)(now_ms - mission_stop_started_ms) >
-            APP_H_MISSION_STOP_TIMEOUT_MS) {
+            stop_timeout_ms) {
             AppLine_FaultAbort(now_ms, H_MISSION_STOP_TIMEOUT,
+                                 SAFETY_FAULT_ACTION_TIMEOUT);
+            return;
+        }
+        if ((course.total_distance_mm - mission_stop_started_distance_mm) >
+            APP_H_MISSION_STOP_DISTANCE_MM) {
+            AppLine_FaultAbort(now_ms, H_MISSION_STOP_DISTANCE,
                                  SAFETY_FAULT_ACTION_TIMEOUT);
             return;
         }
@@ -500,7 +559,23 @@ void AppLine_Task20ms(uint32_t now_ms)
             return;
         }
     }
+    h4_heading_hold = guarded_mission &&
+        mission_h4_heading_hold_active &&
+        (mission.running_mode == H_MISSION_MODE_H4);
     assisted_control = control;
+    if (h4_heading_hold) {
+        assisted_control.active_mask = 0x18U;
+        assisted_control.active_count = 2U;
+        assisted_control.cluster_count = 1U;
+        assisted_control.line_valid = true;
+        assisted_control.ambiguous = false;
+        assisted_control.raw_position = 0.0f;
+        assisted_control.position = 0.0f;
+        assisted_control.raw_derivative = 0.0f;
+        assisted_control.filtered_derivative = 0.0f;
+        assisted_control.raw_correction_mm_s = 0.0f;
+        assisted_control.correction_mm_s = 0.0f;
+    }
     assisted_control.dynamic_base_mm_s = HCourse_SelectBaseSpeed(
         control.dynamic_base_mm_s, line_config.speed_min_mm_s,
         line_config.speed_max_mm_s,
@@ -521,22 +596,34 @@ void AppLine_Task20ms(uint32_t now_ms)
             assisted_control.dynamic_base_mm_s = mission_stop_base_mm_s;
     }
     assisted_control.left_target_mm_s =
-        assisted_control.dynamic_base_mm_s + control.correction_mm_s;
+        assisted_control.dynamic_base_mm_s +
+        assisted_control.correction_mm_s;
     assisted_control.right_target_mm_s =
-        assisted_control.dynamic_base_mm_s - control.correction_mm_s;
-    LineYawAssist_SetMode(HCourse_IsCurvePhase() ?
+        assisted_control.dynamic_base_mm_s -
+        assisted_control.correction_mm_s;
+    LineYawAssist_SetMode(h4_heading_hold ?
+        LINE_YAW_ASSIST_MODE_STRAIGHT : HCourse_IsCurvePhase() ?
         LINE_YAW_ASSIST_MODE_CURVE_POSITIVE :
         LINE_YAW_ASSIST_MODE_STRAIGHT);
     LineYawAssist_SetCurveFeedforwardScale(
-        (course.phase == H_COURSE_BC_CURVE) ?
-        H_COURSE_BC_CURVE_FEEDFORWARD_SCALE :
-        (course.phase == H_COURSE_DA_CURVE) ?
-        H_COURSE_DA_CURVE_FEEDFORWARD_SCALE : 1.0f);
-    LineYawAssist_SetStraightReference(
-        course.straight_heading_target_valid,
+        HCourse_SelectCurveFeedforwardScale());
+    LineYawAssist_SetStraightReference(h4_heading_hold ?
+        mission_stop_heading_valid : course.straight_heading_target_valid,
+        h4_heading_hold ? mission_stop_heading_deg :
         course.straight_heading_target_deg);
+    yaw_correction_limit_mm_s = line_config.correction_limit_mm_s;
+    if (guarded_mission &&
+        (mission.running_mode == H_MISSION_MODE_H5) &&
+        HCourse_IsCurvePhase()) {
+        float geometric_curve_correction =
+            assisted_control.dynamic_base_mm_s * CHASSIS_DRIVE_TRACK_MM /
+            (2.0f * LINE_CURVE_RADIUS_MM) *
+            APP_H5_CURVE_CORRECTION_MARGIN;
+        if (yaw_correction_limit_mm_s > geometric_curve_correction)
+            yaw_correction_limit_mm_s = geometric_curve_correction;
+    }
     LineYawAssist_Update(&assisted_control,
-        line_config.correction_limit_mm_s,
+        yaw_correction_limit_mm_s,
         heading.yaw_deg, heading.yaw_rate_deg_s,
         heading_config.straight_kp, heading_config.straight_kd,
         gyro_usable, now_ms);
@@ -548,12 +635,16 @@ void AppLine_Task20ms(uint32_t now_ms)
     app_line.yaw_rate_error_deg_s = yaw_assist.rate_error_deg_s;
     app_line.yaw_assist_correction_mm_s =
         yaw_assist.assist_correction_mm_s;
-    if (guarded_mission && (mission.state == H_MISSION_STOPPING)) {
+    if ((guarded_mission && (mission.state == H_MISSION_STOPPING)) ||
+        h4_heading_hold) {
         float correction = yaw_assist.final_correction_mm_s;
-        if (correction > assisted_control.dynamic_base_mm_s)
-            correction = assisted_control.dynamic_base_mm_s;
-        if (correction < -assisted_control.dynamic_base_mm_s)
-            correction = -assisted_control.dynamic_base_mm_s;
+        float correction_limit = assisted_control.dynamic_base_mm_s;
+        if (h4_heading_hold)
+            correction_limit *= APP_H4_STOP_CORRECTION_RATIO;
+        if (correction > correction_limit)
+            correction = correction_limit;
+        if (correction < -correction_limit)
+            correction = -correction_limit;
         app_line.final_correction_mm_s = correction;
         app_line.final_left_target_mm_s =
             assisted_control.dynamic_base_mm_s + correction;

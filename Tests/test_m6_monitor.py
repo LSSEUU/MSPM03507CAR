@@ -63,6 +63,7 @@ def sample(
 class TelemetryAggregatorTests(unittest.TestCase):
     def test_live_profile_keeps_rpc_and_escape_headroom(self):
         self.assertEqual(MONITOR_SUBSCRIPTIONS[TelemetryStream.CORE], 40)
+        self.assertEqual(MONITOR_SUBSCRIPTIONS[TelemetryStream.WHEEL], 60)
         self.assertEqual(MONITOR_SUBSCRIPTIONS[TelemetryStream.LINE], 100)
         rules = {item["value"]: item for item in REGISTRY["telemetry"]["streams"]}
         estimated = sum(
@@ -70,8 +71,8 @@ class TelemetryAggregatorTests(unittest.TestCase):
             * (17 + int(rules[int(stream)]["payload_size"]))
             for stream, period in MONITOR_SUBSCRIPTIONS.items()
         )
-        self.assertEqual(estimated, 4169)
-        self.assertLessEqual(estimated, 4200)
+        self.assertEqual(estimated, 3553)
+        self.assertLessEqual(estimated, 3600)
 
     def test_aggregator_keeps_latest_sample_and_marks_stale_streams(self):
         aggregator = TelemetryAggregator(clock=lambda: 1.0)

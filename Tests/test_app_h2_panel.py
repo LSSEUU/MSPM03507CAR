@@ -38,6 +38,7 @@ class AppH2PanelTests(unittest.TestCase):
     def test_production_wiring_uses_panel_instead_of_raw_buzzer(self):
         main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")
         app_line = (ROOT / "App" / "app_line.c").read_text(encoding="utf-8")
+        panel = (ROOT / "App" / "app_h2_panel.c").read_text(encoding="utf-8")
         project = (
             ROOT / "keil" / "empty_LP_MSPM0G3507_nortos_keil.uvprojx"
         ).read_text(encoding="utf-8")
@@ -47,6 +48,7 @@ class AppH2PanelTests(unittest.TestCase):
         self.assertNotIn("if (Key1_IsPressed()) Buzzer_On();", main)
         self.assertIn("../App/app_h2_panel.c", project)
         self.assertIn("bool AppLine_StartH2", app_line)
+        self.assertIn("AppH2StartStatus_t AppH2Panel_CheckStart", panel)
         self.assertIn("SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO)", app_line)
         self.assertIn("SAFETY_FAULT_GYRO_TIMEOUT", app_line)
         self.assertIn("app_line.elapsed_ms", app_line)

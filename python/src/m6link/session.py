@@ -909,7 +909,7 @@ class Session:
         stage_revision = current.stage_revision if current is not None else 0
         values = config or HMissionConfig(0, 0, 0, 0, 0)
         body = struct.pack(
-            "<IIIBBH5H6x", identity.boot_id, active_revision, stage_revision,
+            "<IIIBBH5H4x", identity.boot_id, active_revision, stage_revision,
             int(command), int(mode), int(flags),
             values.h4_straight_speed_mm_s, values.h4_b_margin_mm,
             values.h5_straight_speed_mm_s, values.h5_curve_speed_mm_s,
@@ -947,6 +947,11 @@ class Session:
         return self._h_mission_command(
             HMissionCommand.ABORT, flags=1 if telemetry_gap else 0
         )
+
+    def start_h_mission(
+        self, *, snapshot: HMissionSnapshot | None = None,
+    ) -> HMissionSnapshot:
+        return self._h_mission_command(HMissionCommand.START, snapshot=snapshot)
 
     def get_identity(self) -> Identity:
         if self.mode == "legacy":

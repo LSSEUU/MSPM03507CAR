@@ -812,11 +812,11 @@ class DashboardRecordingManager:
             if self._writer is None:
                 try:
                     self._start(
-                        name="K1 HMission 自动录制",
-                        notes="由车载本地按键启动边沿自动触发；包含前5秒和后2秒。",
+                        name="HMission 自动录制",
+                        notes="由本地按键或远程安全启动边沿自动触发；包含前5秒和后2秒。",
                         trigger="action",
                         include_preroll=True,
-                        action={"source": "local_key", "kind": "h_mission"},
+                        action={"source": "onboard_h_mission", "kind": "h_mission"},
                     )
                 except (OSError, ValueError) as exc:
                     self._last_error = str(exc)

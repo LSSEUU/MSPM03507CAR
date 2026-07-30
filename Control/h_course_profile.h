@@ -46,7 +46,7 @@ void HCourse_Init(void);
 void HCourse_Start(uint32_t now_ms);
 void HCourse_Stop(void);
 void HCourse_SetFinishEnabled(bool enabled);
-void HCourse_SetFixedCourseStart(bool enabled);
+void HCourse_SetH2OfficialStart(void);
 void HCourse_SetFinishMode(HCourseFinishMode_t mode);
 void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
                     float left_speed_mm_s, float right_speed_mm_s,
@@ -55,6 +55,7 @@ void HCourse_Update(uint32_t now_ms, bool wheel_sample_valid,
                     uint8_t active_mask, float line_position);
 void HCourse_GetSnapshot(HCourseSnapshot_t *snapshot);
 bool HCourse_IsCurvePhase(void);
+float HCourse_SelectCurveFeedforwardScale(void);
 float HCourse_SelectBaseSpeed(float tracking_base_mm_s,
                               float curve_base_mm_s,
                               float straight_base_mm_s,

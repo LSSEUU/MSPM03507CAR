@@ -597,7 +597,7 @@ class DashboardController:
             "none", "h2_finish", "h4_distance", "h5_finish_line",
             "development_distance", "user_cancel", "fault", "gyro",
             "line_white", "outer_sensor", "negative_target", "saturation",
-            "stop_timeout", "telemetry_gap",
+            "stop_timeout", "telemetry_gap", "stop_distance",
         )
         payload["selected_mode_name"] = mode_names.get(snapshot.selected_mode, "unknown")
         payload["running_mode_name"] = mode_names.get(snapshot.running_mode, "unknown")
@@ -649,6 +649,8 @@ class DashboardController:
                 snapshot = self.session.abort_h_mission(
                     telemetry_gap=bool(request.get("telemetry_gap", False))
                 )
+            elif method == "start":
+                snapshot = self.session.start_h_mission(snapshot=current)
             else:
                 raise ValueError("未知 HMission 命令")
             self._h_mission = snapshot
@@ -829,15 +831,15 @@ class DashboardController:
                 except TypeError:
                     self.session.close()
                 raise Disconnected("dashboard stopped during reconnect")
-            self.session.subscribe(subscriptions)
+            parameter_reader = getattr(self.session, "get_parameters", None)
+            parameters = parameter_reader() if callable(parameter_reader) else None
             if stopping is not None and stopping.is_set():
                 try:
                     self.session.close(clean=False)
                 except TypeError:
                     self.session.close()
                 raise Disconnected("dashboard stopped during reconnect")
-            parameter_reader = getattr(self.session, "get_parameters", None)
-            parameters = parameter_reader() if callable(parameter_reader) else None
+            self.session.subscribe(subscriptions)
             if stopping is not None and stopping.is_set():
                 try:
                     self.session.close(clean=False)

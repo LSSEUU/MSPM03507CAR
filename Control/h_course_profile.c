@@ -57,6 +57,22 @@ static void HCourse_UpdateFinishDetector(uint8_t active_mask)
         (active_count >= H2_FINISH_MIN_ACTIVE_CHANNELS) &&
         (HCourse_MaxContiguousCount(active_mask) >=
          H2_FINISH_MIN_CONTIGUOUS_CHANNELS);
+    /* H5 can pass short, wide painted features while it is still in the
+     * second semicircle.  Distance alone cannot distinguish those features
+     * from A, especially when the loaded chassis cuts the inside of DA.
+     * Arm the H5 finish only after gyro-owned course progress has completed
+     * both semicircles.  H2 keeps its verified distance-only behaviour. */
+    if ((course.finish_mode == H_COURSE_FINISH_H5_LATCH) &&
+        (course.lap_count == 0U)) {
+        course.finish_candidate_samples = 0U;
+        if (ordinary_line) {
+            if (course.finish_preline_samples < 0xFFU)
+                course.finish_preline_samples++;
+        } else {
+            course.finish_preline_samples = 0U;
+        }
+        return;
+    }
     if ((course.total_distance_mm < H2_FINISH_WINDOW_MIN_MM) ||
         (course.total_distance_mm > H2_FINISH_WINDOW_MAX_MM)) {
         course.finish_candidate_samples = 0U;
@@ -148,10 +164,9 @@ void HCourse_SetFinishEnabled(bool enabled)
                           H_COURSE_FINISH_NONE);
 }
 
-void HCourse_SetFixedCourseStart(bool enabled)
+void HCourse_SetH2OfficialStart(void)
 {
-    if (enabled &&
-        !course.initial_ab_offset_applied &&
+    if (!course.initial_ab_offset_applied &&
         (course.phase == H_COURSE_AB_STRAIGHT) &&
         (course.total_distance_mm <= 0.01f)) {
         course.phase_distance_mm +=
@@ -164,7 +179,7 @@ void HCourse_SetFinishMode(HCourseFinishMode_t mode)
 {
     course.finish_mode = mode;
     course.finish_enabled = mode != H_COURSE_FINISH_NONE;
-    if (course.finish_enabled) HCourse_SetFixedCourseStart(true);
+    if (mode == H_COURSE_FINISH_H2_STOP) HCourse_SetH2OfficialStart();
     course.finish_preline_samples = 0U;
     course.finish_candidate_samples = 0U;
     course.finish_line_detected = false;
@@ -175,6 +190,21 @@ bool HCourse_IsCurvePhase(void)
 {
     return (course.phase == H_COURSE_BC_CURVE) ||
            (course.phase == H_COURSE_DA_CURVE);
+}
+
+float HCourse_SelectCurveFeedforwardScale(void)
+{
+    float blend;
+    if (course.phase == H_COURSE_BC_CURVE)
+        return H_COURSE_BC_CURVE_FEEDFORWARD_SCALE;
+    if (course.phase != H_COURSE_DA_CURVE) return 1.0f;
+    blend = course.curve_progress_deg /
+        H_COURSE_DA_CURVE_FEEDFORWARD_RAMP_DEG;
+    if (blend < 0.0f) blend = 0.0f;
+    if (blend > 1.0f) blend = 1.0f;
+    return H_COURSE_DA_CURVE_FEEDFORWARD_START_SCALE +
+        (H_COURSE_DA_CURVE_FEEDFORWARD_SCALE -
+         H_COURSE_DA_CURVE_FEEDFORWARD_START_SCALE) * blend;
 }
 
 float HCourse_SelectBaseSpeed(float tracking_base_mm_s,

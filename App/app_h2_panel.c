@@ -42,7 +42,7 @@ static float AppH2Panel_Abs(float value)
     return (value < 0.0f) ? -value : value;
 }
 
-static AppH2StartStatus_t AppH2Panel_Preflight(uint32_t now_ms)
+AppH2StartStatus_t AppH2Panel_CheckStart(uint32_t now_ms)
 {
     AppLineSnapshot_t line;
     HeadingSnapshot_t heading;
@@ -258,7 +258,7 @@ void AppH2Panel_Task20ms(uint32_t now_ms)
         &panel.snapshot.release_armed);
     if (!key1_edge) return;
     panel.snapshot.key_presses++;
-    status = AppH2Panel_Preflight(now_ms);
+    status = AppH2Panel_CheckStart(now_ms);
     panel.snapshot.selected_mode = HMission_SelectedMode();
     if ((status == APP_H2_START_READY) &&
         AppLine_StartMission(panel.snapshot.selected_mode, now_ms)) {
@@ -298,7 +298,7 @@ void AppH2Panel_Task100ms(uint32_t now_ms)
     AppLine_GetSnapshot(&line);
     HMission_GetSnapshot(&mission);
     panel.snapshot.selected_mode = HMission_SelectedMode();
-    status = AppH2Panel_Preflight(now_ms);
+    status = AppH2Panel_CheckStart(now_ms);
     if ((line.state == APP_LINE_RUNNING) && HMission_IsActive()) {
         display = APP_H2_PANEL_RUNNING;
         elapsed_ms = (uint32_t)(now_ms - line.started_ms);

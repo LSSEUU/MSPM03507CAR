@@ -11,7 +11,8 @@ int main(void)
     HMission_GetSnapshot(&snapshot);
     assert(snapshot.selected_mode == H_MISSION_MODE_H2);
     assert(snapshot.active.h4_straight_speed_mm_s == 220.0f);
-    assert(snapshot.active.h5_straight_speed_mm_s == 250.0f);
+    assert(snapshot.active.h4_b_margin_mm == 0.0f);
+    assert(snapshot.active.h5_straight_speed_mm_s == 230.0f);
     assert(snapshot.active.h5_curve_speed_mm_s == 210.0f);
     assert(snapshot.active_revision == 1U);
     assert(!snapshot.dirty);

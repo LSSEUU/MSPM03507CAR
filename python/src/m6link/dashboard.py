@@ -335,6 +335,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/h-mission/revert": lambda controller, body: controller.h_mission_command("revert", body),
             "/api/h-mission/select": lambda controller, body: controller.h_mission_command("select", body),
             "/api/h-mission/abort": lambda controller, body: controller.h_mission_command("abort", body),
+            "/api/h-mission/start": lambda controller, body: controller.h_mission_command("start", body),
             "/api/parameters/stage": lambda controller, body: controller.parameter_command("stage", body),
             "/api/parameters/apply": lambda controller, body: controller.parameter_command("apply", body),
             "/api/parameters/revert": lambda controller, body: controller.parameter_command("revert", body),
@@ -640,6 +641,12 @@ def run_dashboard(
         identity_data["port"] = port_name
     buffer = DashboardBuffer(identity_data)
     controller = DashboardController(session, identity)
+    parameter_reader = getattr(session, "get_parameters", None)
+    if callable(parameter_reader) and bool(getattr(session, "connected", True)):
+        # Populate the recording snapshot before high-rate telemetry starts.
+        # Reading the full registry after motion begins can briefly fill the
+        # device's low-priority telemetry queue and create a false gap abort.
+        controller.parameter_state(force=True)
     session.subscribe(MONITOR_SUBSCRIPTIONS)
     camera_capable = bool(
         int(getattr(session, "capabilities", 0)) & int(Capability.VISION_UART_MONITOR)

@@ -3,6 +3,7 @@
 #include "app_manual_drive.h"
 #include "app_remote.h"
 #include "app_line.h"
+#include "app_h2_panel.h"
 #include "control_params.h"
 #include "diagnostics.h"
 #include "grayscale.h"
@@ -828,7 +829,21 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
             return M6_RESULT_STALE_STAGE_REVISION;
         }
         if (flags != 0U) return M6_RESULT_INVALID_ARGUMENT;
-        if (command == M6_H_MISSION_COMMAND_STAGE) {
+        if (command == M6_H_MISSION_COMMAND_START) {
+            AppH2StartStatus_t status;
+            if ((body[13] | body[16] | body[17] | body[18] | body[19] |
+                 body[20] | body[21] | body[22] | body[23] |
+                 body[24] | body[25]) != 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            status = AppH2Panel_CheckStart(SystemTime_Now());
+            if (status != APP_H2_START_READY) {
+                *detail = (uint32_t)status;
+                return M6_RESULT_WRONG_STATE;
+            }
+            if (!AppLine_StartMission(snapshot.selected_mode,
+                                      SystemTime_Now()))
+                return M6_RESULT_WRONG_STATE;
+        } else if (command == M6_H_MISSION_COMMAND_STAGE) {
             if (body[13] != 0U) return M6_RESULT_INVALID_ARGUMENT;
             config.h4_straight_speed_mm_s = (float)u16(&body[16]);
             config.h4_b_margin_mm = (float)u16(&body[18]);

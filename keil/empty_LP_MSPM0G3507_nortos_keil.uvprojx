@@ -675,6 +675,11 @@
               <FilePath>../App/h2_control_profile.c</FilePath>
             </File>
             <File>
+              <FileName>h_mission_control_profile.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/h_mission_control_profile.c</FilePath>
+            </File>
+            <File>
               <FileName>app_remote.c</FileName>
               <FileType>1</FileType>
               <FilePath>../App/app_remote.c</FilePath>

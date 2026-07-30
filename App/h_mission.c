@@ -17,8 +17,8 @@ static HMissionConfig_t HMission_DefaultConfig(void)
 {
     HMissionConfig_t config;
     config.h4_straight_speed_mm_s = 220.0f;
-    config.h4_b_margin_mm = 30.0f;
-    config.h5_straight_speed_mm_s = 250.0f;
+    config.h4_b_margin_mm = 0.0f;
+    config.h5_straight_speed_mm_s = 230.0f;
     config.h5_curve_speed_mm_s = 210.0f;
     config.development_end_distance_mm = 0.0f;
     return config;

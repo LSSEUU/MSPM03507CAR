@@ -304,6 +304,34 @@ static void test_second_curve_completes_lap(void)
     assert(result.lap_count == 1U);
 }
 
+static void test_second_curve_feedforward_ramps_without_changing_first_curve(void)
+{
+    uint32_t curve_steps;
+    float scale;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+    advance(200.0f, 0.0f, true, 0x18U, 0.0f, 375U);
+    assert(snapshot().phase == H_COURSE_BC_CURVE);
+    assert(fabsf(HCourse_SelectCurveFeedforwardScale() -
+                 H_COURSE_BC_CURVE_FEEDFORWARD_SCALE) < 0.001f);
+
+    curve_steps = (uint32_t)(H_COURSE_CURVE_EXIT_DEG /
+                             (18.0f * 0.02f)) + 1U;
+    advance(160.0f, -18.0f, true, 0x20U, 0.4f, curve_steps);
+    advance(200.0f, 0.0f, true, 0x18U, 0.0f, 375U);
+    assert(snapshot().phase == H_COURSE_DA_CURVE);
+    assert(fabsf(HCourse_SelectCurveFeedforwardScale() -
+                 H_COURSE_DA_CURVE_FEEDFORWARD_START_SCALE) < 0.001f);
+
+    advance(160.0f, -18.0f, true, 0x18U, 0.0f, 125U);
+    scale = HCourse_SelectCurveFeedforwardScale();
+    assert(scale > H_COURSE_DA_CURVE_FEEDFORWARD_START_SCALE);
+    assert(scale < H_COURSE_DA_CURVE_FEEDFORWARD_SCALE);
+    advance(160.0f, -18.0f, true, 0x18U, 0.0f, 126U);
+    assert(fabsf(HCourse_SelectCurveFeedforwardScale() -
+                 H_COURSE_DA_CURVE_FEEDFORWARD_SCALE) < 0.001f);
+}
+
 static void test_h2_finish_line_uses_window_and_qualified_crossbar(void)
 {
     HCourseSnapshot_t result;
@@ -370,6 +398,56 @@ static void test_h2_official_start_offsets_only_initial_ab_phase(void)
     assert(snapshot().phase == H_COURSE_BC_CURVE);
 }
 
+static void test_h5_finish_mode_does_not_reuse_h2_start_offset(void)
+{
+    HCourseSnapshot_t result;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+    HCourse_SetFinishMode(H_COURSE_FINISH_H5_LATCH);
+    result = snapshot();
+    assert(result.finish_enabled);
+    assert(result.finish_mode == H_COURSE_FINISH_H5_LATCH);
+    assert(!result.initial_ab_offset_applied);
+    assert(fabsf(result.total_distance_mm) < 0.01f);
+    assert(fabsf(result.phase_distance_mm) < 0.01f);
+}
+
+static void test_h5_finish_rejects_wide_line_until_second_curve_completes(void)
+{
+    HCourseSnapshot_t result;
+    uint32_t curve_steps;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+    HCourse_SetFinishMode(H_COURSE_FINISH_H5_LATCH);
+
+    advance(200.0f, 0.0f, true, 0x18U, 0.0f, 375U);
+    curve_steps = (uint32_t)(H_COURSE_CURVE_EXIT_DEG /
+                             (18.0f * 0.02f)) + 1U;
+    advance(160.0f, -18.0f, true, 0x20U, 0.4f, curve_steps);
+    advance(200.0f, 0.0f, true, 0x18U, 0.0f, 375U);
+    assert(snapshot().phase == H_COURSE_DA_CURVE);
+
+    while (snapshot().total_distance_mm < H2_FINISH_WINDOW_MIN_MM)
+        advance(160.0f, -18.0f, true, 0x18U, 0.0f, 1U);
+    advance(160.0f, -18.0f, true, 0x18U, 0.0f,
+            H2_FINISH_PRELINE_SAMPLES);
+    advance(160.0f, -18.0f, false, 0x3CU, 0.0f,
+            H2_FINISH_QUALIFY_SAMPLES);
+    result = snapshot();
+    assert(result.lap_count == 0U);
+    assert(!result.finish_line_detected);
+
+    while (snapshot().lap_count == 0U)
+        advance(160.0f, -18.0f, true, 0x18U, 0.0f, 1U);
+    advance(160.0f, 0.0f, true, 0x18U, 0.0f,
+            H2_FINISH_PRELINE_SAMPLES);
+    advance(160.0f, 0.0f, false, 0x3CU, 0.0f,
+            H2_FINISH_QUALIFY_SAMPLES);
+    result = snapshot();
+    assert(result.lap_count == 1U);
+    assert(result.finish_line_detected);
+}
+
 static void test_h2_student_selected_stop_uses_verified_calibration(void)
 {
     assert(fabsf(H2_FINISH_STOP_OFFSET_MM - 58.0f) < 0.01f);
@@ -417,8 +495,11 @@ int main(void)
     test_initial_ab_heading_is_owned_until_curve();
     test_fixed_straight_learns_bounded_track_tangent();
     test_second_curve_completes_lap();
+    test_second_curve_feedforward_ramps_without_changing_first_curve();
     test_h2_finish_line_uses_window_and_qualified_crossbar();
     test_h2_official_start_offsets_only_initial_ab_phase();
+    test_h5_finish_mode_does_not_reuse_h2_start_offset();
+    test_h5_finish_rejects_wide_line_until_second_curve_completes();
     test_h2_student_selected_stop_uses_verified_calibration();
     test_h2_finish_approach_does_not_affect_generic_line_action();
     return 0;

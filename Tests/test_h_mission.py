@@ -9,7 +9,7 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED = "973cb83992eaa81bd4a021391e8c98498e78ddf261c7c13949c163338bab9b67"
+EXPECTED = "ab018fd70060e42f7a7ac40237032f394e98f1e1afcb35cebf16ceeb4d055a9a"
 
 
 class HMissionTests(unittest.TestCase):
@@ -40,6 +40,7 @@ class HMissionTests(unittest.TestCase):
         self.assertEqual(registry["capability"]["bit"], 29)
         self.assertEqual(registry["rpc_opcodes"]["H_MISSION_STATUS_GET"], 15)
         self.assertEqual(registry["rpc_opcodes"]["H_MISSION_COMMAND"], 0x8309)
+        self.assertEqual(registry["commands"]["START"], 6)
         header = (ROOT / "System" / "m6_h_mission_ext.h").read_text(encoding="utf-8")
         binding = (ROOT / "python" / "src" / "m6link" / "h_mission_registry.py").read_text(encoding="utf-8")
         self.assertIn(EXPECTED, header)
@@ -51,6 +52,7 @@ class HMissionTests(unittest.TestCase):
         self.assertIn('"/api/h-mission/stage"', dashboard)
         self.assertIn('"/api/h-mission/apply"', dashboard)
         self.assertIn('"/api/h-mission/revert"', dashboard)
+        self.assertIn('"/api/h-mission/start"', dashboard)
         self.assertNotIn('"/api/h-mission/save"', dashboard)
         self.assertIn('"save_supported": False', controller)
 
@@ -68,7 +70,20 @@ class HMissionTests(unittest.TestCase):
         self.assertEqual(snapshot.staged.development_end_distance_mm, 500)
         self.assertEqual(snapshot.distance_mm, 1530.5)
         self.assertEqual(snapshot.final_left_target_mm_s, -1)
-        self.assertEqual(struct.calcsize("<IIIBBH5H6x"), 32)
+        command_body_size = struct.calcsize("<IIIBBH5H4x")
+        self.assertEqual(command_body_size, 30)
+        self.assertLessEqual(2 + command_body_size, 32)
+
+    def test_command_fits_frozen_rpc_request_limit(self):
+        from m6link.protocol.v2_binary import encode_rpc
+
+        body = struct.pack(
+            "<IIIBBH5H4x", 4, 1, 1, 1, 0, 0,
+            160, 30, 250, 210, 0,
+        )
+        request = encode_rpc(0x8309, body)
+        self.assertEqual(len(body), 30)
+        self.assertEqual(len(request), 32)
 
 
 if __name__ == "__main__":
