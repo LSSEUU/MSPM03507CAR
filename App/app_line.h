@@ -17,6 +17,8 @@ typedef struct {
     AppLineState_t state;
     uint32_t deadline_ms;
     uint32_t started_ms;
+    uint32_t finished_ms;
+    uint32_t elapsed_ms;
     bool yaw_assist_active;
     float sensor_correction_mm_s;
     float desired_yaw_rate_deg_s;
@@ -39,6 +41,7 @@ void AppLine_Init(void);
 bool AppLine_Arm(uint32_t now_ms);
 bool AppLine_ConfirmStart(uint32_t now_ms);
 bool AppLine_StartTimed(uint32_t now_ms, uint32_t duration_ms);
+bool AppLine_StartH2(uint32_t now_ms);
 bool AppLine_Stop(uint32_t now_ms);
 void AppLine_ProcessGrayscale(const GrayscaleSnapshot_t *gray);
 void AppLine_Task20ms(uint32_t now_ms);

@@ -57,7 +57,7 @@ static void AppLine_ResetFinish(bool enabled)
     app_line.finish_travel_mm = 0.0f;
 }
 
-static void AppLine_CompleteFinish(void)
+static void AppLine_CompleteFinish(uint32_t now_ms)
 {
     WheelSpeed_Disable();
     Safety_EndAction();
@@ -68,6 +68,8 @@ static void AppLine_CompleteFinish(void)
     LineTrace_Freeze();
     app_line.finish_crawl_active = false;
     app_line.finish_complete = true;
+    app_line.finished_ms = now_ms;
+    app_line.elapsed_ms = (uint32_t)(now_ms - app_line.started_ms);
     AppLine_ReturnIdle();
 }
 
@@ -85,7 +87,8 @@ static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms)
     }
     if (duration_ms == M6_LINE_ACTION_CONTINUOUS_DURATION_MS)
         Safety_BeginContinuousAction(now_ms,
-            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE));
+            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE) |
+            SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO));
     else
         Safety_BeginAction(now_ms, duration_ms,
             SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE));
@@ -97,6 +100,8 @@ static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms)
     HCourse_SetFinishEnabled(app_line.h2_finish_enabled);
     app_line.state = APP_LINE_RUNNING;
     app_line.started_ms = now_ms;
+    app_line.finished_ms = 0U;
+    app_line.elapsed_ms = 0U;
     app_line.deadline_ms = now_ms + duration_ms;
     LineTrace_Start();
     return true;
@@ -149,6 +154,12 @@ bool AppLine_StartTimed(uint32_t now_ms, uint32_t duration_ms)
             SAFETY_SENSOR_BIT(SAFETY_SENSOR_GRAYSCALE));
     }
     return started;
+}
+
+bool AppLine_StartH2(uint32_t now_ms)
+{
+    return AppLine_StartTimed(now_ms,
+        M6_LINE_ACTION_CONTINUOUS_DURATION_MS);
 }
 
 bool AppLine_Stop(uint32_t now_ms)
@@ -245,6 +256,16 @@ void AppLine_Task20ms(uint32_t now_ms)
         (heading.rate_source == HEADING_RATE_GYRO_FRAME) &&
         ((uint32_t)(now_ms - heading.last_rate_update_ms) <=
          LINE_YAW_ASSIST_GYRO_FRESH_MS);
+    if (app_line.h2_finish_enabled && !gyro_usable) {
+        WheelSpeed_Disable();
+        LineTrace_Freeze();
+        LineFollow_Stop();
+        HCourse_Stop();
+        AppLine_ResetYawAssist();
+        Safety_RaiseFault(SAFETY_FAULT_GYRO_TIMEOUT, now_ms);
+        AppLine_ReturnIdle();
+        return;
+    }
     HCourse_Update(now_ms, wheel.sample_valid,
         wheel.filtered_mm_s[WHEEL_SPEED_LEFT],
         wheel.filtered_mm_s[WHEEL_SPEED_RIGHT],
@@ -262,7 +283,7 @@ void AppLine_Task20ms(uint32_t now_ms)
         app_line.finish_travel_mm = course.total_distance_mm -
             course.finish_line_distance_mm;
         if (app_line.finish_travel_mm >= H2_FINISH_STOP_OFFSET_MM) {
-            AppLine_CompleteFinish();
+            AppLine_CompleteFinish(now_ms);
             return;
         }
     }

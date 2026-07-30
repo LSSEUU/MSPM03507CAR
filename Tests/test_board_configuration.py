@@ -153,6 +153,7 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("../Hardware/zdt_stepper_uart.c", paths)
         self.assertIn("../Hardware/zdt_stepper.c", paths)
         self.assertIn("../Hardware/key.c", paths)
+        self.assertIn("../App/app_h2_panel.c", paths)
         self.assertIn("../Hardware/buzzer.c", paths)
         self.assertIn("../App/app_manual_drive.c", paths)
         self.assertIn("../Control/pid.c", paths)
@@ -210,7 +211,7 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertIn("ZdtStepper_EmergencyDisable()", stepper_test)
         self.assertIn("EMERGENCY_DISABLE_GAP_MS 5U", stepper_test)
 
-    def test_key1_drives_active_high_buzzer_for_board_validation(self):
+    def test_key1_is_active_high_and_owned_by_h2_panel(self):
         header = HEADER.read_text(encoding="utf-8")
         key_header = (ROOT / "Hardware" / "key.h").read_text(encoding="utf-8")
         key_driver = (ROOT / "Hardware" / "key.c").read_text(encoding="utf-8")
@@ -258,8 +259,10 @@ class FrozenBoardConfigurationTests(unittest.TestCase):
         self.assertLess(syscfg, buzzer_init)
         self.assertLess(buzzer_init, key_init)
         self.assertLess(key_init, checkpoint)
-        self.assertIn("if (Key1_IsPressed()) Buzzer_On();", main)
-        self.assertIn("else                  Buzzer_Off();", main)
+        self.assertIn("AppH2Panel_Init(SystemTime_Now());", main)
+        self.assertIn("AppH2Panel_Task20ms(started);", main)
+        self.assertIn("AppH2Panel_Task100ms(started);", main)
+        self.assertNotIn("if (Key1_IsPressed()) Buzzer_On();", main)
 
     def test_watchdog_and_scheduler_clock_start_after_boot_diagnostics(self):
         main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")

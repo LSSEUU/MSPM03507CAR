@@ -660,6 +660,11 @@
               <FilePath>../App/app_line.c</FilePath>
             </File>
             <File>
+              <FileName>app_h2_panel.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/app_h2_panel.c</FilePath>
+            </File>
+            <File>
               <FileName>app_remote.c</FileName>
               <FileType>1</FileType>
               <FilePath>../App/app_remote.c</FilePath>

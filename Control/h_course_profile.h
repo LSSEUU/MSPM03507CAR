@@ -27,6 +27,7 @@ typedef struct {
     uint8_t straight_capture_samples;
     uint8_t curve_evidence_samples;
     bool fast_straight_latched;
+    bool initial_ab_offset_applied;
     bool finish_enabled;
     uint8_t finish_preline_samples;
     uint8_t finish_candidate_samples;

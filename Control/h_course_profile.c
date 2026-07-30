@@ -144,6 +144,14 @@ void HCourse_Stop(void)
 
 void HCourse_SetFinishEnabled(bool enabled)
 {
+    if (enabled && !course.finish_enabled &&
+        !course.initial_ab_offset_applied &&
+        (course.phase == H_COURSE_AB_STRAIGHT) &&
+        (course.total_distance_mm <= 0.01f)) {
+        course.phase_distance_mm +=
+            H2_COURSE_INITIAL_AB_PHASE_OFFSET_MM;
+        course.initial_ab_offset_applied = true;
+    }
     course.finish_enabled = enabled;
     course.finish_preline_samples = 0U;
     course.finish_candidate_samples = 0U;

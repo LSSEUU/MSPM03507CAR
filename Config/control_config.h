@@ -186,13 +186,25 @@
 #define H_COURSE_BC_CURVE_FEEDFORWARD_SCALE                     1.00f
 #define H_COURSE_DA_CURVE_FEEDFORWARD_SCALE                     1.00f
 
+/* The evaluation fixes one reference point on the vehicle centreline and
+ * specifies its launch placement.  The official placement used from r51
+ * moved the observed first-curve features 116-118 mm earlier than the r50
+ * development placement.  Preload only the initial AB phase; later phases
+ * still start from their measured curve exits. */
+#define H2_COURSE_INITIAL_AB_PHASE_OFFSET_MM             117.0f
+
 /* H2 finish-line evidence from three r45 laps: the A crossbar appeared once
  * at 5.77-5.84 m as 0x1C/0x3C/0x3E.  Detect it independently from ordinary
  * single-line tracking, slow before the event for sampling and stopping
- * accuracy, then crawl from the qualified event to the initial offset. */
+ * accuracy, then crawl from the qualified event to the requested offset.
+ * The student may choose the vehicle-centreline measurement point.  The
+ * 58 mm / 80 mm/s r50-r52 calibration places the chosen point directly on
+ * the line and already completes the official-start lap below 20 seconds.
+ * Keep this stop calibration independent from the 117 mm initial-AB phase
+ * offset, which compensates only the official launch placement. */
 #define H2_FINISH_WINDOW_MIN_MM                         5300.0f
 #define H2_FINISH_WINDOW_MAX_MM                         6800.0f
-#define H2_FINISH_APPROACH_START_MM                     5500.0f
+#define H2_FINISH_APPROACH_START_MM                     5535.0f
 #define H2_FINISH_APPROACH_SPEED_MM_S                    180.0f
 #define H2_FINISH_CRAWL_SPEED_MM_S                        80.0f
 #define H2_FINISH_STOP_OFFSET_MM                          58.0f

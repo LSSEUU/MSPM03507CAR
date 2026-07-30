@@ -1,6 +1,7 @@
 #include "board.h"
 
 #include "app_line.h"
+#include "app_h2_panel.h"
 #include "app_remote.h"
 #include "app_manual_drive.h"
 #include "buzzer.h"
@@ -129,6 +130,7 @@ int main(void)
     Gyro_Init();
     LED_Init();
     OLED_Init();
+    AppH2Panel_Init(SystemTime_Now());
 
     if (Watchdog_WasResetCause(reset_cause)) {
         Safety_RaiseFault(SAFETY_FAULT_WATCHDOG_RESET, SystemTime_Now());
@@ -161,11 +163,6 @@ int main(void)
             Safety_RaiseFault(SAFETY_FAULT_SCHEDULER_DEADLINE,
                               SystemTime_Now());
         }
-
-        /* Temporary board-level validation: follow the raw KEY1 level. The
-         * carrier provides RC filtering; no edge/debounce state is needed. */
-        if (Key1_IsPressed()) Buzzer_On();
-        else                  Buzzer_Off();
 
         AppRemote_Poll();
         ZdtStepperTest_Poll(SystemTime_Now());
@@ -258,6 +255,7 @@ int main(void)
                 gyro.sample.yaw, gyro.valid_frames,
                 gyro.sample.yaw_rate_deg_s, gyro.rate_frames,
                 gyro.last_rate_update_ms, started);
+            AppH2Panel_Task20ms(started);
             Heading_GetSnapshot(&heading);
             if (heading.mode != HEADING_MODE_IDLE) {
                 WheelSpeed_SetTarget(heading.left_target_mm_s,
@@ -289,6 +287,7 @@ int main(void)
             uint32_t started = SystemTime_Now();
             ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_TASK_100MS);
             Diagnostics_Task100ms();
+            AppH2Panel_Task100ms(started);
             Main_CompleteTask(SCHEDULER_TASK_100MS, started,
                               TASK_100MS_PERIOD_MS);
         }

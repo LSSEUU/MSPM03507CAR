@@ -335,18 +335,69 @@ static void test_h2_finish_line_uses_window_and_qualified_crossbar(void)
     assert(fabsf(selected - H2_FINISH_CRAWL_SPEED_MM_S) < 0.01f);
 }
 
+static void test_h2_official_start_offsets_only_initial_ab_phase(void)
+{
+    HCourseSnapshot_t result;
+    uint32_t steps_before_force;
+    now_ms = 100U;
+    HCourse_Start(now_ms);
+    result = snapshot();
+    assert(fabsf(result.total_distance_mm) < 0.01f);
+    assert(fabsf(result.phase_distance_mm) < 0.01f);
+
+    HCourse_SetFinishEnabled(true);
+    result = snapshot();
+    assert(result.initial_ab_offset_applied);
+    assert(fabsf(result.total_distance_mm) < 0.01f);
+    assert(fabsf(result.phase_distance_mm -
+                 H2_COURSE_INITIAL_AB_PHASE_OFFSET_MM) < 0.01f);
+
+    HCourse_SetFinishEnabled(false);
+    HCourse_SetFinishEnabled(true);
+    result = snapshot();
+    assert(fabsf(result.phase_distance_mm -
+                 H2_COURSE_INITIAL_AB_PHASE_OFFSET_MM) < 0.01f);
+
+    steps_before_force = (uint32_t)(
+        (H_COURSE_FAST_STRAIGHT_FORCE_MM -
+         H2_COURSE_INITIAL_AB_PHASE_OFFSET_MM) /
+        (400.0f * 0.02f));
+    assert(steps_before_force > 1U);
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f,
+            steps_before_force - 1U);
+    assert(snapshot().phase == H_COURSE_AB_STRAIGHT);
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 2U);
+    assert(snapshot().phase == H_COURSE_BC_CURVE);
+}
+
+static void test_h2_student_selected_stop_uses_verified_calibration(void)
+{
+    assert(fabsf(H2_FINISH_STOP_OFFSET_MM - 58.0f) < 0.01f);
+    assert(fabsf(H2_FINISH_CRAWL_SPEED_MM_S - 80.0f) < 0.01f);
+}
+
 static void test_h2_finish_approach_does_not_affect_generic_line_action(void)
 {
     float selected;
+    uint32_t steps_before_approach;
     now_ms = 100U;
     HCourse_Start(now_ms);
-    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 690U);
+    steps_before_approach = (uint32_t)(
+        H2_FINISH_APPROACH_START_MM / (400.0f * 0.02f));
+    assert(steps_before_approach > 1U);
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f,
+            steps_before_approach - 1U);
     selected = HCourse_SelectBaseSpeed(280.0f, 280.0f, 400.0f,
                                        true, 0.0f);
     assert(fabsf(selected - 280.0f) < 0.01f);
 
     HCourse_SetFinishEnabled(true);
-    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 1U);
+    selected = HCourse_SelectBaseSpeed(280.0f, 280.0f, 400.0f,
+                                       true, 0.0f);
+    assert(fabsf(selected - 280.0f) < 0.01f);
+    advance(400.0f, 0.0f, true, 0x18U, 0.0f, 2U);
+    assert(snapshot().total_distance_mm >=
+           H2_FINISH_APPROACH_START_MM);
     selected = HCourse_SelectBaseSpeed(280.0f, 280.0f, 400.0f,
                                        true, 0.0f);
     assert(fabsf(selected - H2_FINISH_APPROACH_SPEED_MM_S) < 0.01f);
@@ -367,6 +418,8 @@ int main(void)
     test_fixed_straight_learns_bounded_track_tangent();
     test_second_curve_completes_lap();
     test_h2_finish_line_uses_window_and_qualified_crossbar();
+    test_h2_official_start_offsets_only_initial_ab_phase();
+    test_h2_student_selected_stop_uses_verified_calibration();
     test_h2_finish_approach_does_not_affect_generic_line_action();
     return 0;
 }
