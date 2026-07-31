@@ -375,6 +375,44 @@ class StepperSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class LeverCalibrationSnapshot:
+    time_ms: int
+    boot_id: int
+    generation: int
+    expected_generation: int
+    candidate_crc32: int
+    driver_config_fingerprint: int
+    reject_detail: int
+    state: int
+    result: int
+    flags: int
+    page: int
+    progress: int = 0
+    required: int = 54
+    expected_point: int = 0
+    expected_direction: int = 0
+    expected_repeat: int = 0
+    sample_count: int = 0
+    reference_encoder: int = 0
+    reference_spread_counts: int = 0
+    point_spread_counts: int = 0
+    repeatability_mdeg: int = 0
+    backlash_mdeg: int = 0
+    horizontal_offset_counts: int = 0
+    soft_min_angle_mdeg: int = 0
+    soft_max_angle_mdeg: int = 0
+    soft_min_counts: int = 0
+    soft_max_counts: int = 0
+    current_counts: int = 0
+    target_counts: int = 0
+    actuator_fault: int = 0
+    last_capture_counts: int = 0
+    angles_mdeg: tuple[int, ...] = ()
+    increasing_counts: tuple[int, ...] = ()
+    decreasing_counts: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class HMissionConfig:
     h4_straight_speed_mm_s: int
     h4_b_margin_mm: int

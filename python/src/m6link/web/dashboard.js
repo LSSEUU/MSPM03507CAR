@@ -27,6 +27,8 @@ let parametersLoading = false;
 let parameterLevel = "basic";
 let calibrationState = { available: false, active: false };
 let calibrationFetching = false;
+let leverCalibrationState = { available: false, active: false };
+let leverCalibrationFetching = false;
 let recordingState = { recording: false };
 let recordingFetching = false;
 const LAYOUT_STORAGE_KEY = "m6.dashboard.layout.v1";
@@ -38,10 +40,14 @@ const manualDrive = {
   sending: false, pending: false, lastTarget: [0, 0], lastBootId: null,
 };
 const CAMERA_BUFFER_LIMIT = 32 * 1024;
+const STEPPER_MOTOR_REFRESH_MS = 750;
+const CAMERA_RENDER_INTERVAL_MS = 500;
 const cameraView = {
   bytes: [], baseOffset: 0, autoScrollPaused: false,
   status: { available: false, enabled: false },
 };
+let cameraDataDirty = false;
+let cameraLastRenderAt = -Infinity;
 const playback = {
   active: false, sessionId: null, manifest: null, records: [], position: 0,
   after: 0, hasMore: false, loading: false, currentMs: 0, durationMs: 0,
@@ -49,7 +55,7 @@ const playback = {
 };
 const stepperView = {
   available: false, snapshot: null, fetching: false, busy: false,
-  samples: [], lastSequence: -1,
+  samples: [], lastSequence: -1, lastMotorRefreshAt: -Infinity,
 };
 
 const ACTION_LABELS = {
@@ -398,19 +404,31 @@ function appendCameraEvent(event) {
       cameraView.baseOffset += removed;
     }
   }
-  updateCameraStatus({
+  cameraView.status = { ...cameraView.status,
     available: true, enabled: true, message: event.gap ? "最近收到数据，期间存在遗漏" : "最近收到 UART1 数据",
     last_received_ms: event.received_ms, dashboard_now_ms: event.received_ms,
     rx_bytes: values.rx_bytes, tx_bytes: values.tx_bytes,
     rx_overflow: values.rx_overflow, tx_overflow: values.tx_overflow,
     bridge_dropped: values.bridge_dropped, hardware_errors: values.hardware_errors,
-  });
+  };
+  cameraDataDirty = true;
+}
+
+function flushCameraData(force = false) {
+  if (!cameraDataDirty) return;
+  const now = performance.now();
+  if (!force && now - cameraLastRenderAt < CAMERA_RENDER_INTERVAL_MS) return;
+  cameraDataDirty = false;
+  cameraLastRenderAt = now;
+  updateCameraStatus();
   renderCameraData();
 }
 
 function clearCameraDisplay() {
   cameraView.bytes.length = 0;
   cameraView.baseOffset = 0;
+  cameraDataDirty = false;
+  cameraLastRenderAt = performance.now();
   renderCameraData();
 }
 
@@ -449,6 +467,7 @@ async function poll() {
   } catch (_error) {
     updateConnection(null);
   } finally {
+    flushCameraData();
     fetching = false;
   }
 }
@@ -599,10 +618,13 @@ function renderStepper(state) {
 async function pollStepper(force = false) {
   if (stepperView.fetching || playback.active || !vehicleConnected) return;
   stepperView.fetching = true;
+  const active = [1, 2].includes(numeric(stepperView.snapshot?.state));
+  const refresh = force ? 1 : (!active && performance.now() - stepperView.lastMotorRefreshAt >= STEPPER_MOTOR_REFRESH_MS ? 4 : 0);
   try {
-    const response = await fetch(`/api/stepper?refresh=${force ? 1 : 0}`, {cache:"no-store"});
+    const response = await fetch(`/api/stepper?refresh=${refresh}`, {cache:"no-store"});
     const state = await response.json();
     if (!response.ok || !state.ok) throw new Error(state.error?.message || `HTTP ${response.status}`);
+    if (refresh) stepperView.lastMotorRefreshAt = performance.now();
     renderStepper(state);
   } catch (error) {
     $("stepperLinkBadge").className = "badge bad";
@@ -674,7 +696,8 @@ function calibrationStep(stateName, failedStage = 0) {
   return "white";
 }
 
-function setCalibrationInterlock(active) {
+function setCalibrationInterlock(_active) {
+  const active = Boolean(calibrationState.active || leverCalibrationState.active);
   document.body.classList.toggle("calibration-active", active);
   const selector = ".control-section button:not(.estop), .control-section input, .control-section select, #parameterDialog button, #parameterDialog input, #parameterDialog select";
   document.querySelectorAll(selector).forEach((element) => {
@@ -801,6 +824,146 @@ async function runCalibrationAction(action, button) {
     showToast(`标定操作失败：${error.message}`, true);
     await pollCalibration(true);
   }
+}
+
+function renderLeverCalibration(state) {
+  leverCalibrationState = state || {available:false, active:false};
+  const available = Boolean(leverCalibrationState.available);
+  const name = leverCalibrationState.state_name || "IDLE";
+  const pending = Boolean(leverCalibrationState.capture_pending);
+  const progress = numeric(leverCalibrationState.progress);
+  const required = numeric(leverCalibrationState.required, 54);
+  $("openLeverCalibrationButton").disabled = !available || playback.active;
+  setCalibrationInterlock(leverCalibrationState.active);
+  $("leverProgress").max = required;
+  $("leverProgress").value = progress;
+  $("leverProgressText").textContent = `${progress} / ${required}`;
+  const direction = numeric(leverCalibrationState.expected_direction) === 0 ? "递增" : "递减";
+  const nextText = `第 ${numeric(leverCalibrationState.expected_repeat) + 1} 轮 ${direction} · 点 ${numeric(leverCalibrationState.expected_point) + 1}/9`;
+  const messages = {
+    IDLE: ["等待开始", "先固定手机并完成正反放置零偏检查；本向导不会驱动电机。"],
+    WAIT_REFERENCE: ["人工轻放到底点", "确认电机失能且机构静止后，读取 3 个新的绝对编码器样本。"],
+    WAIT_HORIZONTAL: ["人工移到水平位", "手持机构到水平，确认手机读数在 ±0.2° 后读取 10 个样本。"],
+    CAPTURE_POINTS: [pending ? "正在只读采样" : `等待 ${nextText}`, pending ? "保持机构不动；MCU 正在逐个请求 10 个新鲜 0x31 响应。" : "按提示从完整安全单调区端点开始，人工移动到当前九点位置。"],
+    REVIEW: ["54 点严格检查通过", "复核双向查表、重复误差、回差、CRC、配置指纹与内缩软限位后再保存。"],
+    SAVING: ["写入并回读 Flash", "旧槽保持有效，只有新槽 CRC 和完整回读验证通过后才切换。"],
+    COMPLETE: ["本次上电坐标有效", leverCalibrationState.rearm_only ? "底点与水平位已核对；未进行任何自动脱离或运动。" : "完整标定已保存；H3 运行仍限制在 ±2°。"],
+    FAILED: ["标定被严格拒绝", `原因：${leverCalibrationState.result_name || "UNKNOWN"}，detail ${numeric(leverCalibrationState.reject_detail)}。不能强制忽略。`],
+    CANCELLED: ["标定已取消", "上一份有效记录保持不变；本次上电坐标无效。"],
+  };
+  const message = messages[name] || ["未知状态", "请刷新状态。"];
+  $("leverStatusTitle").textContent = message[0];
+  $("leverStatusDetail").textContent = message[1];
+  $("leverFingerprint").textContent = hex32(numeric(leverCalibrationState.driver_config_fingerprint));
+  $("leverCrc").textContent = hex32(numeric(leverCalibrationState.candidate_crc32));
+  $("leverErrors").textContent = `${numeric(leverCalibrationState.repeatability_mdeg)} / ${numeric(leverCalibrationState.backlash_mdeg)} mdeg`;
+  $("leverAngleLimits").textContent = `${fixed(numeric(leverCalibrationState.soft_min_angle_mdeg) / 1000, 3)}° … ${fixed(numeric(leverCalibrationState.soft_max_angle_mdeg) / 1000, 3)}°`;
+  $("leverCountLimits").textContent = `${numeric(leverCalibrationState.soft_min_counts)} … ${numeric(leverCalibrationState.soft_max_counts)} counts`;
+  $("leverReference").textContent = `${numeric(leverCalibrationState.reference_encoder)} / ${numeric(leverCalibrationState.horizontal_offset_counts)} counts`;
+  $("leverPointButton").textContent = pending ? "采样中…" : `采集 ${nextText}`;
+  const rows = $("leverCalibrationRows");
+  rows.replaceChildren();
+  for (let index = 0; index < 9; index += 1) {
+    const row = document.createElement("tr");
+    const values = [index + 1,
+      leverCalibrationState.angles_mdeg?.[index] == null ? "—" : `${fixed(leverCalibrationState.angles_mdeg[index] / 1000, 3)}°`,
+      leverCalibrationState.increasing_counts?.[index] ?? "—",
+      leverCalibrationState.decreasing_counts?.[index] ?? "—"];
+    values.forEach((value) => { const cell = document.createElement("td"); cell.textContent = value; row.appendChild(cell); });
+    rows.appendChild(row);
+  }
+  const disabled = !available || playback.active || pending;
+  $("leverStartButton").disabled = disabled || !["IDLE", "COMPLETE", "FAILED", "CANCELLED"].includes(name);
+  $("leverReferenceButton").disabled = disabled || name !== "WAIT_REFERENCE";
+  $("leverHorizontalButton").disabled = disabled || name !== "WAIT_HORIZONTAL";
+  $("leverPointButton").disabled = disabled || name !== "CAPTURE_POINTS" || progress >= required;
+  $("leverReviewButton").disabled = disabled || name !== "CAPTURE_POINTS" || progress !== required;
+  $("leverCommitButton").disabled = disabled || name !== "REVIEW";
+  $("leverCancelButton").disabled = !leverCalibrationState.active || playback.active;
+  $("leverExportJsonButton").disabled = !available;
+  $("leverExportCsvButton").disabled = !available;
+}
+
+async function pollLeverCalibration(force = false) {
+  if (leverCalibrationFetching || !vehicleConnected) return;
+  leverCalibrationFetching = true;
+  try {
+    const response = await fetch(`/api/lever-calibration${force ? "?refresh=1" : ""}`, {cache:"no-store"});
+    const state = await response.json();
+    if (!response.ok || !state.ok) throw new Error(state.error?.message || `HTTP ${response.status}`);
+    renderLeverCalibration(state);
+  } catch (error) {
+    $("leverStatusTitle").textContent = "摆杆标定状态读取失败";
+    $("leverStatusDetail").textContent = error.message;
+  } finally { leverCalibrationFetching = false; }
+}
+
+async function runLeverCalibrationAction(action, button) {
+  const generation = numeric(leverCalibrationState.active
+    ? leverCalibrationState.expected_generation : leverCalibrationState.generation);
+  const body = {expected_generation:generation};
+  if (action === "start") {
+    body.phone_zero_mdeg = Math.round(numeric($("leverPhoneZero").value) * 1000);
+    body.force_full = $("leverForceFull").checked;
+  } else if (action === "capture-horizontal") {
+    body.angle_mdeg = Math.round(numeric($("leverHorizontalAngle").value) * 1000);
+  } else if (action === "capture-point") {
+    body.point = numeric(leverCalibrationState.expected_point);
+    body.direction = numeric(leverCalibrationState.expected_direction);
+    body.repeat = numeric(leverCalibrationState.expected_repeat);
+    body.angle_mdeg = Math.round(numeric($("leverPointAngle").value) * 1000);
+  } else if (action === "commit") {
+    if (!window.confirm("确认双向九点表、误差指标、CRC、配置指纹和软限位均正确，并写入 Flash？")) return;
+    body.confirm = "WRITE_LEVER_CALIBRATION_TO_FLASH";
+  }
+  try {
+    renderLeverCalibration(await command(`/api/lever-calibration/${action}`, body, button));
+    showToast(action === "commit" ? "摆杆标定已写入并回读验证" : "只读标定步骤已完成");
+  } catch (error) {
+    showToast(`摆杆标定失败：${error.message}`, true);
+    await pollLeverCalibration(true);
+  }
+}
+
+function downloadLeverEvidence(format) {
+  const stamp = new Date().toISOString().replaceAll(":", "-");
+  let text;
+  let type;
+  if (format === "json") {
+    text = JSON.stringify(leverCalibrationState, null, 2);
+    type = "application/json";
+  } else {
+    const rows = [
+      ["metadata", "value"],
+      ["boot_id", leverCalibrationState.boot_id ?? ""],
+      ["generation", leverCalibrationState.generation ?? ""],
+      ["data_version", leverCalibrationState.data_version ?? ""],
+      ["candidate_crc32", hex32(numeric(leverCalibrationState.candidate_crc32))],
+      ["driver_config_fingerprint", hex32(numeric(leverCalibrationState.driver_config_fingerprint))],
+      ["soft_min_mdeg", leverCalibrationState.soft_min_mdeg ?? ""],
+      ["soft_max_mdeg", leverCalibrationState.soft_max_mdeg ?? ""],
+      ["repeat_error_mdeg", leverCalibrationState.repeat_error_mdeg ?? ""],
+      ["backlash_mdeg", leverCalibrationState.backlash_mdeg ?? ""],
+      [],
+      ["kind", "point", "direction", "repeat", "angle_mdeg", "counts", "spread_counts"],
+    ];
+    (leverCalibrationState.evidence || []).forEach((item) => rows.push([
+      item.kind ?? "", item.point ?? "", item.direction ?? "", item.repeat ?? "",
+      item.angle_mdeg ?? "", item.counts ?? "", item.spread_counts ?? "",
+    ]));
+    rows.push([], ["table_point", "angle_mdeg", "increasing_counts", "decreasing_counts"]);
+    for (let index = 0; index < 9; index += 1) rows.push([
+      index, leverCalibrationState.angles_mdeg?.[index] ?? "",
+      leverCalibrationState.increasing_counts?.[index] ?? "",
+      leverCalibrationState.decreasing_counts?.[index] ?? "",
+    ]);
+    text = rows.map((row) => row.join(",")).join("\n");
+    type = "text/csv";
+  }
+  const url = URL.createObjectURL(new Blob([text], {type:`${type};charset=utf-8`}));
+  const link = document.createElement("a");
+  link.href = url; link.download = `lever-calibration-${stamp}.${format}`; link.click();
+  URL.revokeObjectURL(url);
 }
 
 function renderFaultDetails(details, faultBits, statusError) {
@@ -1665,6 +1828,7 @@ function processPlaybackRecords(untilMs, announceMarkers = true) {
       showToast(`回放标记：${record.values?.label || "未命名"}`);
     }
   }
+  flushCameraData();
   $("sampleCount").textContent = Object.values(counts).reduce((a, b) => a + numeric(b), 0).toLocaleString();
   $("gapCount").textContent = Object.values(gaps).reduce((a, b) => a + numeric(b), 0).toLocaleString();
 }
@@ -1803,7 +1967,7 @@ function exitPlayback() {
   applyPlaybackLock(false);
   clearHistory(true);
   counts = {}; gaps = {}; lastServerOk = 0;
-  poll(); pollControl(); pollStepper();
+  poll(); pollControl(); pollStepper(true);
   showToast("已退出回放并恢复实时数据");
 }
 
@@ -1892,6 +2056,28 @@ $("calibrationPrimaryButton").addEventListener("click", () => {
   if (action) runCalibrationAction(action, $("calibrationPrimaryButton"));
 });
 $("cancelCalibrationButton").addEventListener("click", () => runCalibrationAction("cancel", $("cancelCalibrationButton")));
+$("openLeverCalibrationButton").addEventListener("click", async () => {
+  if (!$("leverCalibrationDialog").open) $("leverCalibrationDialog").showModal();
+  await pollLeverCalibration(true);
+});
+async function closeLeverCalibrationDialog() {
+  if (leverCalibrationState.active) {
+    if (!window.confirm("关闭向导将取消本次未保存的标定，且不会发送任何运动命令。继续？")) return;
+    await runLeverCalibrationAction("cancel", $("leverCancelButton"));
+  }
+  $("leverCalibrationDialog").close();
+}
+$("closeLeverCalibrationButton").addEventListener("click", closeLeverCalibrationDialog);
+$("leverCalibrationDialog").addEventListener("cancel", (event) => { event.preventDefault(); closeLeverCalibrationDialog(); });
+$("leverStartButton").addEventListener("click", () => runLeverCalibrationAction("start", $("leverStartButton")));
+$("leverReferenceButton").addEventListener("click", () => runLeverCalibrationAction("capture-reference", $("leverReferenceButton")));
+$("leverHorizontalButton").addEventListener("click", () => runLeverCalibrationAction("capture-horizontal", $("leverHorizontalButton")));
+$("leverPointButton").addEventListener("click", () => runLeverCalibrationAction("capture-point", $("leverPointButton")));
+$("leverReviewButton").addEventListener("click", () => runLeverCalibrationAction("review", $("leverReviewButton")));
+$("leverCommitButton").addEventListener("click", () => runLeverCalibrationAction("commit", $("leverCommitButton")));
+$("leverCancelButton").addEventListener("click", () => runLeverCalibrationAction("cancel", $("leverCancelButton")));
+$("leverExportJsonButton").addEventListener("click", () => downloadLeverEvidence("json"));
+$("leverExportCsvButton").addEventListener("click", () => downloadLeverEvidence("csv"));
 $("startRecordingButton").addEventListener("click", () => {
   $("autoRecording").checked = autoRecordingEnabled();
   if (!$("recordingDialog").open) $("recordingDialog").showModal();
@@ -2143,6 +2329,7 @@ setInterval(pollControl, 1000);
 setInterval(pollStepper, 250);
 setInterval(() => {
   if ($("calibrationDialog").open || calibrationState.active) pollCalibration(true);
+  if ($("leverCalibrationDialog").open || leverCalibrationState.active) pollLeverCalibration(true);
 }, 250);
 setInterval(pollRecordingStatus, 500);
 setInterval(updateCountdown, 100);
@@ -2157,7 +2344,8 @@ setInterval(() => {
 }, 500);
 poll();
 pollControl();
-pollStepper();
+pollStepper(true);
+pollLeverCalibration(true);
 pollCalibration(true);
 pollRecordingStatus();
 requestAnimationFrame(render);

@@ -89,35 +89,17 @@ static void test_startup_and_queries(void)
 static void test_velocity_deadline_and_stale_feedback(void)
 {
     ZdtStepperTestRequest_t request;
-    ZdtStepperTestSnapshot_t snapshot;
     ZdtStepperTest_Init(0U); ZdtStepperTest_Poll(5U); make_motor_ready(6U);
     request = velocity(10U, 100U);
-    assert(ZdtStepperTest_Command(&request, 7U) == ZDT_STEPPER_OK);
-    respond(2U, 0xF6U, ZDT_STEPPER_RESPONSE_ACCEPTED,
-            ZDT_STEPPER_MOTOR_ENABLED);
-    ZdtStepperTest_Poll(8U);
-    ZdtStepperTest_GetSnapshot(&snapshot, 8U);
-    assert(snapshot.state == ZDT_TEST_STATE_RUNNING);
-    ZdtStepperTest_Poll(107U);
-    ZdtStepperTest_GetSnapshot(&snapshot, 107U);
-    assert(snapshot.state == ZDT_TEST_STATE_COMPLETED);
-    assert(snapshot.stop_reason == ZDT_TEST_STOP_DURATION);
-
-    ZdtStepperTest_Init(0U); ZdtStepperTest_Poll(5U); make_motor_ready(6U);
-    request = velocity(11U, 1000U);
-    assert(ZdtStepperTest_Command(&request, 7U) == ZDT_STEPPER_OK);
-    respond(2U, 0xF6U, ZDT_STEPPER_RESPONSE_ACCEPTED,
-            ZDT_STEPPER_MOTOR_ENABLED);
-    ZdtStepperTest_Poll(8U); ZdtStepperTest_Poll(509U);
-    ZdtStepperTest_GetSnapshot(&snapshot, 509U);
-    assert(snapshot.state == ZDT_TEST_STATE_ERROR);
-    assert(snapshot.stop_reason == ZDT_TEST_STOP_COMMUNICATION);
+    assert(ZdtStepperTest_Command(&request, 7U) ==
+           ZDT_STEPPER_INVALID_ARGUMENT);
+    assert(ZdtStepperTest_GetLastRejectDetail() ==
+           ZDT_STEPPER_NOT_READY_INTERNAL);
 }
 
 static void test_position_completion_and_validation(void)
 {
     ZdtStepperTestRequest_t request;
-    ZdtStepperTestSnapshot_t snapshot;
     ZdtStepperTest_Init(0U); ZdtStepperTest_Poll(5U); make_motor_ready(6U);
     request = velocity(20U, 99U);
     assert(ZdtStepperTest_Command(&request, 7U) == ZDT_STEPPER_INVALID_ARGUMENT);
@@ -129,16 +111,10 @@ static void test_position_completion_and_validation(void)
     request.direction = ZDT_STEPPER_DIRECTION_CCW; request.speed_rpm = 60U;
     request.pulses = 100U; request.duration_or_timeout_ms = 500U;
     request.position_mode = ZDT_STEPPER_POSITION_RELATIVE_CURRENT;
-    assert(ZdtStepperTest_Command(&request, 8U) == ZDT_STEPPER_OK);
-    respond(2U, 0xFDU, ZDT_STEPPER_RESPONSE_ACCEPTED,
-            ZDT_STEPPER_MOTOR_ENABLED);
-    ZdtStepperTest_Poll(9U);
-    respond(3U, 0x3AU, ZDT_STEPPER_RESPONSE_DATA,
-            ZDT_STEPPER_MOTOR_ENABLED | ZDT_STEPPER_MOTOR_POSITION_REACHED);
-    ZdtStepperTest_Poll(20U);
-    ZdtStepperTest_GetSnapshot(&snapshot, 20U);
-    assert(snapshot.state == ZDT_TEST_STATE_COMPLETED);
-    assert(snapshot.stop_reason == ZDT_TEST_STOP_POSITION_REACHED);
+    assert(ZdtStepperTest_Command(&request, 8U) ==
+           ZDT_STEPPER_INVALID_ARGUMENT);
+    assert(ZdtStepperTest_GetLastRejectDetail() ==
+           ZDT_STEPPER_NOT_READY_INTERNAL);
 }
 
 static void test_motion_readiness_detail(void)
@@ -149,14 +125,13 @@ static void test_motion_readiness_detail(void)
     assert(ZdtStepperTest_Command(&request, 1U) ==
            ZDT_STEPPER_INVALID_ARGUMENT);
     assert(ZdtStepperTest_GetLastRejectDetail() ==
-           (ZDT_STEPPER_NOT_READY_NO_STATUS |
-            ZDT_STEPPER_NOT_READY_DISABLED));
+           ZDT_STEPPER_NOT_READY_INTERNAL);
 
     ZdtStepperTest_Init(0U); ZdtStepperTest_Poll(5U); make_motor_ready(6U);
     assert(ZdtStepperTest_Command(&request, 508U) ==
            ZDT_STEPPER_INVALID_ARGUMENT);
     assert(ZdtStepperTest_GetLastRejectDetail() ==
-           ZDT_STEPPER_NOT_READY_STATUS_STALE);
+           ZDT_STEPPER_NOT_READY_INTERNAL);
 
     ZdtStepperTest_Init(0U); ZdtStepperTest_Poll(5U);
     respond(1U, 0x3AU, ZDT_STEPPER_RESPONSE_DATA,
@@ -165,15 +140,17 @@ static void test_motion_readiness_detail(void)
     assert(ZdtStepperTest_Command(&request, 7U) ==
            ZDT_STEPPER_INVALID_ARGUMENT);
     assert(ZdtStepperTest_GetLastRejectDetail() ==
-           ZDT_STEPPER_NOT_READY_STALLED);
+           ZDT_STEPPER_NOT_READY_INTERNAL);
 
     ZdtStepperTest_Init(0U); ZdtStepperTest_Poll(5U);
     respond(1U, 0x3AU, ZDT_STEPPER_RESPONSE_DATA,
             ZDT_STEPPER_MOTOR_ENABLED |
             ZDT_STEPPER_MOTOR_POSITION_REACHED);
     ZdtStepperTest_Poll(6U);
-    assert(ZdtStepperTest_Command(&request, 7U) == ZDT_STEPPER_OK);
-    assert(ZdtStepperTest_GetLastRejectDetail() == 0U);
+    assert(ZdtStepperTest_Command(&request, 7U) ==
+           ZDT_STEPPER_INVALID_ARGUMENT);
+    assert(ZdtStepperTest_GetLastRejectDetail() ==
+           ZDT_STEPPER_NOT_READY_INTERNAL);
 }
 
 static void test_disable_is_sequenced_after_stop(void)

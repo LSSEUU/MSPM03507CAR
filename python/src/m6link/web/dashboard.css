@@ -261,6 +261,9 @@ canvas { display: block; width: 100%; height: 230px; }
 .calibration-table .channel-ok { color: var(--green); }
 .calibration-failures { padding: 11px 13px; border: 1px solid #f8717160; border-radius: 6px; background: #7f1d1d40; color: #fecaca; line-height: 1.6; }
 .calibration-actions { flex-wrap: wrap; }
+.lever-input-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.lever-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.lever-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 body.calibration-active .control-section button:not(.estop), body.calibration-active .parameter-section button, body.calibration-active .parameter-section input, body.calibration-active .parameter-section select { pointer-events: none; opacity: .42; }
 .utility-dialog.compact { width: min(500px, calc(100vw - 32px)); }
 .utility-form, .library-shell { display: grid; gap: 16px; padding: 18px; }
@@ -569,6 +572,7 @@ body[data-layout="cockpit"] footer { display: none; }
   .calibration-table td { display: grid; grid-template-columns: 105px 1fr; gap: 8px; padding: 4px 0; border: 0; }
   .calibration-table td::before { content: attr(data-label); color: var(--muted); font: 10px system-ui, sans-serif; }
   .calibration-actions > * { flex: 1 1 145px; }
+  .lever-input-grid, .lever-metrics { grid-template-columns: 1fr; }
   .stepper-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 500px) {

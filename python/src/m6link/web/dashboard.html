@@ -235,19 +235,20 @@
     </section>
 
     <section id="stepperTest" class="workspace-section stepper-section" aria-labelledby="stepperTitle">
-      <div class="stepper-warning" role="note"><strong>独立安全域：车辆急停和车辆 Safety 故障不会停止此步进电机。</strong><span>请始终使用本区域红色“步进立即停止”按钮。网页关闭或重连也不会停止正在运行的指令；定时测试由固件本地截止。</span></div>
+      <div class="stepper-warning" role="note"><strong>严格软件限位不是硬件失效保护。</strong><span>原始使能、速度测试和相对位置测试已关闭；断电重力下落或软件完全失效仍需机械措施防护。</span></div>
       <div class="workspace-heading">
-        <div><p class="section-kicker">UART3 · ZDT EMM5.0</p><h2 id="stepperTitle">步进电机测试与状态监控</h2><p>PB12 TX / PB13 RX · 115200 8N1 · 地址 1。使能和运动采用单次参数确认，不进入车辆 Arm / Confirm 流程。</p></div>
+        <div><p class="section-kicker">UART3 · ZDT EMM5.0</p><h2 id="stepperTitle">步进只读状态与安全停止</h2><p>PB12 TX / PB13 RX · 115200 8N1 · 地址 1。所有运动入口必须经过 LeverActuator 软件包络。</p></div>
         <button id="stepperStopButton" class="danger stepper-stop" type="button">步进立即停止</button>
       </div>
       <div class="stepper-grid">
         <article class="panel stepper-controls">
-          <div class="panel-heading"><div><h2>测试控制</h2><p>固件限制速度、时长、脉冲并在通信失效时停止</p></div><span id="stepperCapabilityBadge" class="badge waiting">读取能力中</span></div>
-          <div class="stepper-primary-actions">
-            <button id="stepperEnableButton" type="button">使能电机</button>
+          <div class="panel-heading"><div><h2>只读标定入口</h2><p>标定期间仅人工移动机构，网页不会驱动电机</p></div><span id="stepperCapabilityBadge" class="badge waiting">读取能力中</span></div>
+          <button id="openLeverCalibrationButton" type="button">打开摆杆只读标定向导</button>
+          <div class="stepper-primary-actions" hidden>
+            <button id="stepperEnableButton" type="button" hidden>使能电机</button>
             <button id="stepperDisableButton" class="warning" type="button">停止并失能</button>
           </div>
-          <form id="stepperVelocityForm" class="stepper-form">
+          <form id="stepperVelocityForm" class="stepper-form" hidden>
             <div class="stepper-form-title"><strong>定时速度测试</strong><small>到期自动停止 · 100–5000 ms</small></div>
             <label class="form-field" for="stepperVelocityDirection"><span>方向</span><select id="stepperVelocityDirection"><option value="0">CW 顺时针</option><option value="1">CCW 逆时针</option></select></label>
             <label class="form-field" for="stepperVelocitySpeed"><span>速度 RPM</span><input id="stepperVelocitySpeed" type="number" min="1" max="300" step="1" value="60"></label>
@@ -255,7 +256,7 @@
             <label class="form-field" for="stepperVelocityDuration"><span>持续时间 ms</span><input id="stepperVelocityDuration" type="number" min="100" max="5000" step="100" value="1000"></label>
             <button id="stepperVelocityButton" type="submit">确认并开始速度测试</button>
           </form>
-          <form id="stepperPositionForm" class="stepper-form">
+          <form id="stepperPositionForm" class="stepper-form" hidden>
             <div class="stepper-form-title"><strong>短距离位置测试</strong><small>固定相对当前位置 · 1–3200 脉冲</small></div>
             <label class="form-field" for="stepperPositionDirection"><span>方向</span><select id="stepperPositionDirection"><option value="0">CW 顺时针</option><option value="1">CCW 逆时针</option></select></label>
             <label class="form-field" for="stepperPositionSpeed"><span>速度 RPM</span><input id="stepperPositionSpeed" type="number" min="1" max="300" step="1" value="60"></label>
@@ -300,6 +301,37 @@
         <label class="switch-row" for="autoRecording"><input id="autoRecording" type="checkbox"><span><strong>动作 Confirm 时自动录制</strong><small>设置会保存在本浏览器；动作结束后自动停止。</small></span></label>
         <div class="dialog-footer"><small>开始前要求车辆在线且录制盘剩余至少 512 MB。</small><button id="beginManualRecordingButton" type="submit">开始手动录制</button></div>
       </form>
+    </dialog>
+
+    <dialog id="leverCalibrationDialog" class="calibration-dialog" aria-labelledby="leverCalibrationTitle">
+      <section class="calibration-shell">
+        <div class="dialog-heading"><div><p class="section-kicker">H42 · READ-ONLY LEVER CALIBRATION</p><h2 id="leverCalibrationTitle">摆杆只读标定</h2><p><strong>本页面不会驱动电机。</strong> 电机必须保持失能，由人员轻放到底点、移到水平位并完成九点六轮人工采样。</p></div><button id="closeLeverCalibrationButton" class="icon-close secondary" type="button">关闭</button></div>
+        <div class="stepper-warning" role="note"><strong>先固定手机倾角仪并做正反放置零偏检查，绝对差不得超过 0.2°。</strong><span>完整标定覆盖人工确认的顺畅单调区；保存后运行端点自动向内缩 max(0.5°，该侧跨度×10%)，H3 初期另限 ±2°。</span></div>
+        <div class="calibration-status" role="status" aria-live="polite"><strong id="leverStatusTitle">读取状态…</strong><span id="leverStatusDetail">请稍候</span></div>
+        <div class="calibration-progress"><div class="calibration-progress-label"><span>九点双向三轮</span><strong id="leverProgressText">0 / 54</strong></div><progress id="leverProgress" max="54" value="0">0 / 54</progress></div>
+        <div class="lever-input-grid">
+          <label class="form-field" for="leverPhoneZero"><span>手机正反零偏 °</span><input id="leverPhoneZero" type="number" min="-0.2" max="0.2" step="0.01" value="0"></label>
+          <label class="switch-row" for="leverForceFull"><input id="leverForceFull" type="checkbox" checked><span><strong>执行完整 54 点重标</strong><small>取消勾选时，有效旧标定只做本次上电底点→水平核对。</small></span></label>
+          <label class="form-field" for="leverHorizontalAngle"><span>水平确认读数 °</span><input id="leverHorizontalAngle" type="number" min="-0.2" max="0.2" step="0.01" value="0"></label>
+          <label class="form-field" for="leverPointAngle"><span>当前手机角度 °</span><input id="leverPointAngle" type="number" min="-30" max="30" step="0.01" value="0"></label>
+        </div>
+        <div class="lever-actions calibration-actions">
+          <button id="leverStartButton" type="button">开始只读标定</button>
+          <button id="leverReferenceButton" type="button">读取底点 3 次</button>
+          <button id="leverHorizontalButton" type="button">读取水平位 10 次</button>
+          <button id="leverPointButton" type="button">采集当前点 10 次</button>
+          <button id="leverReviewButton" type="button">严格检查 54 点</button>
+          <button id="leverCommitButton" class="warning" type="button">确认并写入 Flash</button>
+          <button id="leverCancelButton" class="secondary danger" type="button">取消</button>
+        </div>
+        <div class="calibration-table-wrap"><table class="calibration-table"><thead><tr><th>点</th><th>角度</th><th>递增表</th><th>递减表</th></tr></thead><tbody id="leverCalibrationRows"></tbody></table></div>
+        <dl class="health-list lever-metrics">
+          <div><dt>驱动配置指纹</dt><dd id="leverFingerprint">—</dd></div><div><dt>候选 CRC32</dt><dd id="leverCrc">—</dd></div>
+          <div><dt>重复误差 / 回差</dt><dd id="leverErrors">—</dd></div><div><dt>软角度限位</dt><dd id="leverAngleLimits">—</dd></div>
+          <div><dt>软计数限位</dt><dd id="leverCountLimits">—</dd></div><div><dt>底点 / 水平偏移</dt><dd id="leverReference">—</dd></div>
+        </dl>
+        <div class="dialog-footer calibration-actions"><small>导出包含当前完整查表、指标、指纹、CRC 和本次主机采样证据。</small><button id="leverExportJsonButton" class="secondary" type="button">导出 JSON</button><button id="leverExportCsvButton" class="secondary" type="button">导出 CSV</button></div>
+      </section>
     </dialog>
 
     <dialog id="markerDialog" class="utility-dialog compact" aria-labelledby="markerDialogTitle">

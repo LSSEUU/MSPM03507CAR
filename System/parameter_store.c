@@ -77,6 +77,13 @@ typedef struct {
 } ParameterPayloadV2_t;
 
 typedef struct {
+    ParameterPayloadV2_t legacy;
+    LeverCalibrationValues_t lever;
+    uint32_t lever_valid;
+    uint32_t reserved[2];
+} ParameterPayloadV3_t;
+
+typedef struct {
     uint32_t magic;
     uint16_t schema_version;
     uint16_t payload_length;
@@ -100,13 +107,30 @@ typedef struct {
     uint32_t commit_reserved;
 } ParameterRecordV2_t;
 
+typedef struct {
+    uint32_t magic;
+    uint16_t schema_version;
+    uint16_t payload_length;
+    uint32_t generation;
+    uint32_t parameter_revision;
+    ParameterPayloadV3_t payload;
+    uint32_t crc32;
+    uint32_t commit_marker;
+    uint32_t commit_reserved;
+} ParameterRecordV3_t;
+
 #define PARAMETER_STORE_SCHEMA_V1 1U
 #define PARAMETER_STORE_SCHEMA_V2 2U
+#define PARAMETER_STORE_SCHEMA_V3 3U
 
 _Static_assert(sizeof(ParameterPayloadV1_t) == 140U,
                "parameter payload V1 layout changed");
 _Static_assert(sizeof(ParameterPayloadV2_t) == 180U,
                "parameter payload V2 layout changed");
+_Static_assert(sizeof(LeverCalibrationValues_t) == 148U,
+               "lever calibration persisted layout changed");
+_Static_assert(sizeof(ParameterPayloadV3_t) == 340U,
+               "parameter payload V3 layout changed");
 _Static_assert(offsetof(ParameterRecordV1_t, crc32) == 156U,
                "parameter CRC coverage changed");
 _Static_assert(offsetof(ParameterRecordV1_t, commit_marker) == 160U,
@@ -119,14 +143,24 @@ _Static_assert(offsetof(ParameterRecordV2_t, crc32) == 196U,
                "parameter V2 CRC coverage changed");
 _Static_assert(offsetof(ParameterRecordV2_t, commit_marker) == 200U,
                "parameter V2 commit offset changed");
-_Static_assert(sizeof(ParameterRecordV2_t) == PARAMETER_STORE_RECORD_SIZE,
+_Static_assert(sizeof(ParameterRecordV2_t) == PARAMETER_STORE_RECORD_V2_SIZE,
                "parameter record V2 layout changed");
 _Static_assert((sizeof(ParameterRecordV2_t) % 8U) == 0U,
                "V2 record must use complete 64-bit flash words");
+_Static_assert(offsetof(ParameterRecordV3_t, crc32) == 356U,
+               "parameter V3 CRC coverage changed");
+_Static_assert(offsetof(ParameterRecordV3_t, commit_marker) == 360U,
+               "parameter V3 commit offset changed");
+_Static_assert(sizeof(ParameterRecordV3_t) == PARAMETER_STORE_RECORD_SIZE,
+               "parameter record V3 layout changed");
+_Static_assert((sizeof(ParameterRecordV3_t) % 8U) == 0U,
+               "V3 record must use complete 64-bit flash words");
 
 static ParameterStoreInfo_t s_info;
 static LineCalibrationValues_t s_loaded_calibration;
 static bool s_loaded_calibration_valid;
+static LeverCalibrationValues_t s_loaded_lever_calibration;
+static bool s_loaded_lever_calibration_valid;
 
 static bool calibration_values_valid(const LineCalibrationValues_t *values)
 {
@@ -137,6 +171,52 @@ static bool calibration_values_valid(const LineCalibrationValues_t *values)
             ((uint16_t)(values->white_adc[i] - values->black_adc[i]) < 512U))
             return false;
     }
+    return true;
+}
+
+static bool lever_values_valid(const LeverCalibrationValues_t *values)
+{
+    uint32_t i;
+    int32_t count_sign;
+    int32_t left_inset;
+    int32_t right_inset;
+    if ((values == NULL) ||
+        (values->data_version != LEVER_CALIBRATION_DATA_VERSION) ||
+        (values->driver_config_fingerprint == 0U) ||
+        (values->reserved != 0U) ||
+        (values->soft_min_angle_mdeg >= values->soft_max_angle_mdeg) ||
+        (values->soft_min_counts >= values->soft_max_counts) ||
+        (values->repeatability_mdeg > 200U) ||
+        (values->backlash_mdeg > 300U) ||
+        (values->reference_spread_counts > 32U) ||
+        (values->point_spread_counts > 16U)) return false;
+    count_sign = values->increasing_counts[1] >
+        values->increasing_counts[0] ? 1 : -1;
+    if (values->increasing_counts[1] == values->increasing_counts[0])
+        return false;
+    for (i = 1U; i < LEVER_CALIBRATION_POINT_COUNT; i++) {
+        if (values->angle_mdeg[i] <= values->angle_mdeg[i - 1U])
+            return false;
+        if (((values->increasing_counts[i] -
+              values->increasing_counts[i - 1U]) * count_sign <= 0) ||
+            ((values->decreasing_counts[i] -
+              values->decreasing_counts[i - 1U]) * count_sign <= 0))
+            return false;
+    }
+    if ((values->angle_mdeg[0] >= 0) ||
+        (values->angle_mdeg[LEVER_CALIBRATION_POINT_COUNT - 1U] <= 0))
+        return false;
+    left_inset = -values->angle_mdeg[0] / 10;
+    right_inset =
+        values->angle_mdeg[LEVER_CALIBRATION_POINT_COUNT - 1U] / 10;
+    if (left_inset < 500) left_inset = 500;
+    if (right_inset < 500) right_inset = 500;
+    if ((values->soft_min_angle_mdeg !=
+         values->angle_mdeg[0] + left_inset) ||
+        (values->soft_max_angle_mdeg !=
+         values->angle_mdeg[LEVER_CALIBRATION_POINT_COUNT - 1U] -
+         right_inset))
+        return false;
     return true;
 }
 
@@ -297,6 +377,49 @@ void ParameterStore_BuildRecordV2(void *destination,
     record->commit_reserved = 0xFFFFFFFFUL;
 }
 
+void ParameterStore_BuildRecordV3(void *destination,
+                                  const ControlParams_t *params,
+                                  const LineCalibrationValues_t *calibration,
+                                  bool calibration_valid,
+                                  const LeverCalibrationValues_t *lever,
+                                  bool lever_valid,
+                                  uint32_t generation,
+                                  uint32_t parameter_revision,
+                                  bool committed)
+{
+    ParameterRecordV3_t *record = (ParameterRecordV3_t *)destination;
+    uint32_t i;
+    if ((record == NULL) || (params == NULL)) return;
+    if (calibration_valid && !calibration_values_valid(calibration))
+        calibration_valid = false;
+    if (lever_valid && !lever_values_valid(lever)) lever_valid = false;
+    memset(record, 0xFF, sizeof(*record));
+    record->magic = PARAMETER_STORE_MAGIC;
+    record->schema_version = PARAMETER_STORE_SCHEMA_V3;
+    record->payload_length = (uint16_t)sizeof(record->payload);
+    record->generation = generation;
+    record->parameter_revision = parameter_revision;
+    encode_payload(&record->payload.legacy.controls, params);
+    for (i = 0U; i < GRAYSCALE_CALIBRATION_CHANNEL_COUNT; i++) {
+        record->payload.legacy.grayscale_white[i] = calibration_valid ?
+            calibration->white_adc[i] : 0U;
+        record->payload.legacy.grayscale_black[i] = calibration_valid ?
+            calibration->black_adc[i] : 0U;
+    }
+    record->payload.legacy.grayscale_valid = calibration_valid ? 1U : 0U;
+    record->payload.legacy.reserved = 0xFFFFFFFFUL;
+    if (lever_valid) record->payload.lever = *lever;
+    else memset(&record->payload.lever, 0, sizeof(record->payload.lever));
+    record->payload.lever_valid = lever_valid ? 1U : 0U;
+    record->payload.reserved[0] = 0xFFFFFFFFUL;
+    record->payload.reserved[1] = 0xFFFFFFFFUL;
+    record->crc32 = ParameterStore_Crc32(record,
+        offsetof(ParameterRecordV3_t, crc32));
+    record->commit_marker = committed ? PARAMETER_STORE_COMMIT_MARKER :
+                                        0xFFFFFFFFUL;
+    record->commit_reserved = 0xFFFFFFFFUL;
+}
+
 bool ParameterStore_DecodeRecord(const void *record_data,
                                  size_t available,
                                  ParameterStoreDecoded_t *decoded)
@@ -311,7 +434,8 @@ bool ParameterStore_DecodeRecord(const void *record_data,
         (available < sizeof(*record))) return false;
     if ((record->magic != PARAMETER_STORE_MAGIC) ||
         (record->schema_version != PARAMETER_STORE_SCHEMA_V1 &&
-         record->schema_version != PARAMETER_STORE_SCHEMA_V2)) return false;
+         record->schema_version != PARAMETER_STORE_SCHEMA_V2 &&
+         record->schema_version != PARAMETER_STORE_SCHEMA_V3)) return false;
     if (record->schema_version == PARAMETER_STORE_SCHEMA_V1) {
         if ((record->payload_length != sizeof(record->payload)) ||
             (record->commit_marker != PARAMETER_STORE_COMMIT_MARKER) ||
@@ -319,7 +443,7 @@ bool ParameterStore_DecodeRecord(const void *record_data,
             (record->crc32 != ParameterStore_Crc32(record,
                 offsetof(ParameterRecordV1_t, crc32)))) return false;
         decode_payload(&candidate, &record->payload);
-    } else {
+    } else if (record->schema_version == PARAMETER_STORE_SCHEMA_V2) {
         const ParameterRecordV2_t *record_v2 =
             (const ParameterRecordV2_t *)record_data;
         uint32_t i;
@@ -341,6 +465,37 @@ bool ParameterStore_DecodeRecord(const void *record_data,
             }
             if (!calibration_values_valid(&decoded->calibration)) return false;
             decoded->calibration_valid = true;
+        }
+    } else {
+        const ParameterRecordV3_t *record_v3 =
+            (const ParameterRecordV3_t *)record_data;
+        uint32_t i;
+        if ((available < sizeof(*record_v3)) ||
+            (record_v3->payload_length != sizeof(record_v3->payload)) ||
+            (record_v3->commit_marker != PARAMETER_STORE_COMMIT_MARKER) ||
+            (record_v3->commit_reserved != 0xFFFFFFFFUL) ||
+            (record_v3->payload.legacy.reserved != 0xFFFFFFFFUL) ||
+            (record_v3->payload.reserved[0] != 0xFFFFFFFFUL) ||
+            (record_v3->payload.reserved[1] != 0xFFFFFFFFUL) ||
+            (record_v3->payload.legacy.grayscale_valid > 1U) ||
+            (record_v3->payload.lever_valid > 1U) ||
+            (record_v3->crc32 != ParameterStore_Crc32(record_v3,
+                offsetof(ParameterRecordV3_t, crc32)))) return false;
+        decode_payload(&candidate, &record_v3->payload.legacy.controls);
+        if (record_v3->payload.legacy.grayscale_valid != 0U) {
+            for (i = 0U; i < GRAYSCALE_CALIBRATION_CHANNEL_COUNT; i++) {
+                decoded->calibration.white_adc[i] =
+                    record_v3->payload.legacy.grayscale_white[i];
+                decoded->calibration.black_adc[i] =
+                    record_v3->payload.legacy.grayscale_black[i];
+            }
+            if (!calibration_values_valid(&decoded->calibration)) return false;
+            decoded->calibration_valid = true;
+        }
+        if (record_v3->payload.lever_valid != 0U) {
+            decoded->lever_calibration = record_v3->payload.lever;
+            if (!lever_values_valid(&decoded->lever_calibration)) return false;
+            decoded->lever_calibration_valid = true;
         }
     }
     if (ControlParams_Validate(&candidate) != CONTROL_PARAMS_OK)
@@ -410,7 +565,7 @@ unprotect_parameter_group_from_ram(void)
 
 __attribute__((section(".ramfunc"), noinline))
 static bool write_sector_from_ram(uint32_t address,
-                                  const ParameterRecordV2_t *record)
+                                  const ParameterRecordV3_t *record)
 {
     const uint32_t *words = (const uint32_t *)record;
     uint32_t word_index;
@@ -448,7 +603,7 @@ static bool write_sector_from_ram(uint32_t address,
 
     /* Program all covered bytes first; the final 64-bit commit word is last. */
     for (word_index = 0U;
-         word_index < (sizeof(ParameterRecordV2_t) / 8U);
+         word_index < (sizeof(ParameterRecordV3_t) / 8U);
          word_index++) {
         uint32_t source_index = word_index * 2U;
         clear_flash_status_from_ram();
@@ -495,6 +650,9 @@ void ParameterStore_Init(void)
     memset(&s_info, 0, sizeof(s_info));
     memset(&s_loaded_calibration, 0, sizeof(s_loaded_calibration));
     s_loaded_calibration_valid = false;
+    memset(&s_loaded_lever_calibration, 0,
+           sizeof(s_loaded_lever_calibration));
+    s_loaded_lever_calibration_valid = false;
 #ifdef PARAMETER_STORE_HOST_TEST
     s_info.health = PARAMETER_STORE_HEALTH_DEGRADED;
     return;
@@ -514,6 +672,10 @@ void ParameterStore_Init(void)
             s_loaded_calibration = a.calibration;
             s_loaded_calibration_valid = true;
         }
+        if (a.lever_calibration_valid) {
+            s_loaded_lever_calibration = a.lever_calibration;
+            s_loaded_lever_calibration_valid = true;
+        }
         (void)ControlParams_BootRestore(&a.params, a.parameter_revision,
                                         CONTROL_PARAMS_SOURCE_PERSISTED);
     } else if (selected == PARAMETER_STORE_SLOT_B) {
@@ -521,6 +683,10 @@ void ParameterStore_Init(void)
         if (b.calibration_valid) {
             s_loaded_calibration = b.calibration;
             s_loaded_calibration_valid = true;
+        }
+        if (b.lever_calibration_valid) {
+            s_loaded_lever_calibration = b.lever_calibration;
+            s_loaded_lever_calibration_valid = true;
         }
         (void)ControlParams_BootRestore(&b.params, b.parameter_revision,
                                         CONTROL_PARAMS_SOURCE_PERSISTED);
@@ -559,13 +725,16 @@ ParameterStoreResult_t ParameterStore_LoadStaged(void)
 #endif
 }
 
-static ParameterStoreResult_t save_active_with_calibration(
+static ParameterStoreResult_t save_active_with_calibrations(
     const LineCalibrationValues_t *calibration, bool calibration_valid,
+    const LeverCalibrationValues_t *lever, bool lever_valid,
     uint32_t expected_generation, bool enforce_generation)
 {
 #ifdef PARAMETER_STORE_HOST_TEST
     (void)calibration;
     (void)calibration_valid;
+    (void)lever;
+    (void)lever_valid;
     (void)expected_generation;
     (void)enforce_generation;
     return PARAMETER_STORE_ERR_IO;
@@ -573,7 +742,7 @@ static ParameterStoreResult_t save_active_with_calibration(
     ParameterStoreDecoded_t a;
     ParameterStoreDecoded_t b;
     ParameterStoreDecoded_t verification;
-    ParameterRecordV2_t record;
+    ParameterRecordV3_t record;
     ParameterStoreSlot_t selected;
     ParameterStoreSlot_t target;
     uint32_t target_address;
@@ -585,6 +754,8 @@ static ParameterStoreResult_t save_active_with_calibration(
     if (ControlParams_Validate(ControlParams_Active()) != CONTROL_PARAMS_OK)
         return PARAMETER_STORE_ERR_PARAMS;
     if (calibration_valid && !calibration_values_valid(calibration))
+        return PARAMETER_STORE_ERR_PARAMS;
+    if (lever_valid && !lever_values_valid(lever))
         return PARAMETER_STORE_ERR_PARAMS;
     read_slots(&a, &b);
     selected = ParameterStore_Select(&a, &b);
@@ -599,8 +770,9 @@ static ParameterStoreResult_t save_active_with_calibration(
     next_generation = (selected == PARAMETER_STORE_SLOT_A) ?
         (a.generation + 1U) : ((selected == PARAMETER_STORE_SLOT_B) ?
         (b.generation + 1U) : 1U);
-    ParameterStore_BuildRecordV2(&record, ControlParams_Active(), calibration,
-        calibration_valid, next_generation, ControlParams_Revision(), true);
+    ParameterStore_BuildRecordV3(&record, ControlParams_Active(), calibration,
+        calibration_valid, lever, lever_valid, next_generation,
+        ControlParams_Revision(), true);
 
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_PARAMETER_FLASH);
     DL_FlashCTL_executeClearStatus(FLASHCTL);
@@ -625,9 +797,13 @@ static ParameterStoreResult_t save_active_with_calibration(
         (verification.generation != next_generation) ||
         (verification.parameter_revision != ControlParams_Revision()) ||
         (verification.calibration_valid != calibration_valid) ||
+        (verification.lever_calibration_valid != lever_valid) ||
         (calibration_valid &&
          memcmp(&verification.calibration, calibration,
-                sizeof(*calibration)) != 0)) {
+                sizeof(*calibration)) != 0) ||
+        (lever_valid &&
+         memcmp(&verification.lever_calibration, lever,
+                sizeof(*lever)) != 0)) {
         s_info.save_failures++;
         return PARAMETER_STORE_ERR_VERIFY;
     }
@@ -643,6 +819,14 @@ static ParameterStoreResult_t save_active_with_calibration(
         memset(&s_loaded_calibration, 0, sizeof(s_loaded_calibration));
         s_loaded_calibration_valid = false;
     }
+    if (lever_valid) {
+        s_loaded_lever_calibration = *lever;
+        s_loaded_lever_calibration_valid = true;
+    } else {
+        memset(&s_loaded_lever_calibration, 0,
+               sizeof(s_loaded_lever_calibration));
+        s_loaded_lever_calibration_valid = false;
+    }
     return PARAMETER_STORE_OK;
 #endif
 }
@@ -656,8 +840,9 @@ ParameterStoreResult_t ParameterStore_SaveActive(void)
     LineFollowSnapshot_t line;
     LineFollow_GetSnapshot(&line);
     LineFollow_GetCalibrationValues(&calibration, NULL);
-    return save_active_with_calibration(&calibration,
-                                        line.calibration.valid, 0U, false);
+    return save_active_with_calibrations(&calibration,
+        line.calibration.valid, &s_loaded_lever_calibration,
+        s_loaded_lever_calibration_valid, 0U, false);
 #endif
 }
 
@@ -665,14 +850,43 @@ ParameterStoreResult_t ParameterStore_SaveCalibration(
     const LineCalibrationValues_t *calibration,
     uint32_t expected_generation)
 {
-    return save_active_with_calibration(calibration, true,
-                                        expected_generation, true);
+    return save_active_with_calibrations(calibration, true,
+        &s_loaded_lever_calibration, s_loaded_lever_calibration_valid,
+        expected_generation, true);
+}
+
+ParameterStoreResult_t ParameterStore_SaveLeverCalibration(
+    const LeverCalibrationValues_t *calibration,
+    uint32_t expected_generation)
+{
+#ifdef PARAMETER_STORE_HOST_TEST
+    (void)calibration;
+    (void)expected_generation;
+    return PARAMETER_STORE_ERR_IO;
+#else
+    LineCalibrationValues_t line_calibration;
+    LineFollowSnapshot_t line;
+    LineFollow_GetSnapshot(&line);
+    LineFollow_GetCalibrationValues(&line_calibration, NULL);
+    return save_active_with_calibrations(&line_calibration,
+        line.calibration.valid, calibration, true,
+        expected_generation, true);
+#endif
 }
 
 bool ParameterStore_GetLoadedCalibration(LineCalibrationValues_t *calibration)
 {
     if ((calibration == NULL) || !s_loaded_calibration_valid) return false;
     *calibration = s_loaded_calibration;
+    return true;
+}
+
+bool ParameterStore_GetLoadedLeverCalibration(
+    LeverCalibrationValues_t *calibration)
+{
+    if ((calibration == NULL) || !s_loaded_lever_calibration_valid)
+        return false;
+    *calibration = s_loaded_lever_calibration;
     return true;
 }
 

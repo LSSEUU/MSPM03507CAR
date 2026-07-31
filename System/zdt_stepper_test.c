@@ -230,6 +230,16 @@ ZdtStepperResult_t ZdtStepperTest_Command(
          (request->command == ZDT_TEST_COMMAND_POSITION)) &&
         !request->confirmed) return ZDT_STEPPER_INVALID_ARGUMENT;
 
+    /* Raw host motion is permanently closed.  Bounded runtime motion is
+     * available only through LeverActuator, which owns calibration, session
+     * reference, direction and feedback checks. */
+    if ((request->command == ZDT_TEST_COMMAND_ENABLE) ||
+        (request->command == ZDT_TEST_COMMAND_VELOCITY) ||
+        (request->command == ZDT_TEST_COMMAND_POSITION)) {
+        s_controller.last_reject_detail = ZDT_STEPPER_NOT_READY_INTERNAL;
+        return ZDT_STEPPER_INVALID_ARGUMENT;
+    }
+
     if (request->command == ZDT_TEST_COMMAND_STOP ||
         request->command == ZDT_TEST_COMMAND_DISABLE) {
         result = ZdtStepper_EmergencyStop(false);

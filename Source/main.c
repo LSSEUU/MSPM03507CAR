@@ -16,6 +16,8 @@
 #include "heading.h"
 #include "key.h"
 #include "led.h"
+#include "lever_actuator.h"
+#include "lever_calibration.h"
 #include "motor.h"
 #include "m6_telemetry.h"
 #include "m6_rpc.h"
@@ -140,6 +142,8 @@ int main(void)
     AppManualDrive_Init();
     AppRemote_Init();
     GrayscaleCalibration_Init(SystemTime_Now());
+    LeverCalibration_Init(SystemTime_Now());
+    LeverActuator_Init(SystemTime_Now());
     if (!ControlRuntime_ApplyActive(NULL)) {
         Safety_EmergencyStop(SystemTime_Now());
     }
@@ -166,6 +170,8 @@ int main(void)
 
         AppRemote_Poll();
         ZdtStepperTest_Poll(SystemTime_Now());
+        LeverCalibration_Task(SystemTime_Now());
+        LeverActuator_Task(SystemTime_Now());
         Diagnostics_Poll();
 
         if (Scheduler_Take(SCHEDULER_TASK_5MS)) {

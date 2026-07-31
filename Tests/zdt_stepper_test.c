@@ -112,9 +112,11 @@ static void test_command_frames(void)
     const uint8_t home[] = {0x01U, 0x9AU, 0x05U, 0x00U, 0x6BU};
     const uint8_t abort_home[] = {0x01U, 0x9CU, 0x48U, 0x6BU};
     const uint8_t read_speed[] = {0x01U, 0x35U, 0x6BU};
+    const uint8_t read_encoder[] = {0x01U, 0x31U, 0x6BU};
     const uint8_t read_position[] = {0x01U, 0x36U, 0x6BU};
     const uint8_t read_motor[] = {0x01U, 0x3AU, 0x6BU};
     const uint8_t read_home[] = {0x01U, 0x3BU, 0x6BU};
+    const uint8_t read_config[] = {0x01U, 0x42U, 0x6CU, 0x6BU};
 
     ZdtStepper_Init();
     assert(tx_length == 0U);
@@ -152,12 +154,16 @@ static void test_command_frames(void)
     assert_frame(abort_home, sizeof(abort_home));
     assert(ZdtStepper_ReadSpeed() == ZDT_STEPPER_OK);
     assert_frame(read_speed, sizeof(read_speed));
+    assert(ZdtStepper_ReadEncoder() == ZDT_STEPPER_OK);
+    assert_frame(read_encoder, sizeof(read_encoder));
     assert(ZdtStepper_ReadPosition() == ZDT_STEPPER_OK);
     assert_frame(read_position, sizeof(read_position));
     assert(ZdtStepper_ReadMotorStatus() == ZDT_STEPPER_OK);
     assert_frame(read_motor, sizeof(read_motor));
     assert(ZdtStepper_ReadHomingStatus() == ZDT_STEPPER_OK);
     assert_frame(read_home, sizeof(read_home));
+    assert(ZdtStepper_ReadDriverConfig() == ZDT_STEPPER_OK);
+    assert_frame(read_config, sizeof(read_config));
 
     assert(ZdtStepper_RunVelocity((ZdtStepperDirection_t)2, 10U, 0U) ==
            ZDT_STEPPER_INVALID_ARGUMENT);
@@ -269,10 +275,80 @@ static void test_data_and_recovery(void)
            sizeof(motor_reached) + sizeof(damaged_stream));
 }
 
+static void test_encoder_wrap_and_variable_config(void)
+{
+    const uint8_t encoder[] = {0x01U, 0x31U, 0xFFU, 0xF8U, 0x6BU};
+    const uint8_t encoder_old_error[] = {0x01U, 0x31U, 0xE2U, 0x6BU};
+    const uint8_t config_old_error[] = {0x01U, 0x42U, 0xE2U, 0x6BU};
+    const uint8_t config[] = {
+        0x01U, 0x42U, 0x21U, 0x15U, 0x01U, 0x02U, 0x03U, 0x04U,
+        0x01U, 0x10U, 0x01U, 0x00U, 0x03U, 0x20U, 0x04U, 0x00U,
+        0x18U, 0x00U, 0x04U, 0x01U, 0x01U, 0x00U, 0x01U, 0x01U,
+        0x00U, 0x64U, 0x01U, 0x2CU, 0x00U, 0x32U, 0x00U, 0x0AU,
+        0x6BU
+    };
+    uint8_t damaged[sizeof(config)];
+    ZdtStepperSnapshot_t snapshot;
+    uint32_t before;
+
+    ZdtStepper_Init();
+    assert(sizeof(config) == 0x21U);
+    feed(encoder, sizeof(encoder));
+    ZdtStepper_Poll();
+    ZdtStepper_GetSnapshot(&snapshot);
+    assert(snapshot.encoder_valid && snapshot.encoder_raw == 65528U);
+    assert(snapshot.encoder_sequence == 1U);
+    assert(ZdtStepper_CircularDelta(4U, 65528U) == 12);
+    assert(ZdtStepper_CircularDelta(65528U, 4U) == -12);
+
+    feed(config, 7U);
+    ZdtStepper_Poll();
+    ZdtStepper_GetSnapshot(&snapshot);
+    assert(!snapshot.driver_config_valid);
+    feed(config + 7U, sizeof(config) - 7U);
+    ZdtStepper_Poll();
+    ZdtStepper_GetSnapshot(&snapshot);
+    assert(snapshot.driver_config_valid);
+    assert(snapshot.driver_config_sequence == 1U);
+    assert(snapshot.driver_config.length == 0x21U);
+    assert(snapshot.driver_config.communication_mode == 0x03U);
+    assert(snapshot.driver_config.direction == 0x01U);
+    assert(snapshot.driver_config.subdivision == 0x10U);
+    assert(snapshot.driver_config.stall_protection == 0x01U);
+    assert(snapshot.driver_config_fingerprint != 0U);
+
+    before = snapshot.response_sequence;
+    feed(config_old_error, 3U);
+    ZdtStepper_Poll();
+    ZdtStepper_GetSnapshot(&snapshot);
+    assert(snapshot.response_sequence == before);
+    feed(config_old_error + 3U, 1U);
+    ZdtStepper_Poll();
+    ZdtStepper_GetSnapshot(&snapshot);
+    assert(snapshot.response_sequence == before + 1U);
+    assert(snapshot.last_function == 0x42U);
+    assert(snapshot.last_response ==
+           ZDT_STEPPER_RESPONSE_PARAMETER_OR_STATE_ERROR);
+
+    before = snapshot.response_sequence;
+    memcpy(damaged, config, sizeof(config));
+    damaged[sizeof(damaged) - 1U] = 0x00U;
+    feed(damaged, sizeof(damaged));
+    feed(encoder_old_error, sizeof(encoder_old_error));
+    ZdtStepper_Poll();
+    ZdtStepper_GetSnapshot(&snapshot);
+    assert(snapshot.response_sequence == before + 1U);
+    assert(snapshot.last_function == 0x31U);
+    assert(snapshot.last_response ==
+           ZDT_STEPPER_RESPONSE_PARAMETER_OR_STATE_ERROR);
+    assert(snapshot.stats.checksum_errors >= 1U);
+}
+
 int main(void)
 {
     test_command_frames();
     test_response_codes();
     test_data_and_recovery();
+    test_encoder_wrap_and_variable_config();
     return 0;
 }

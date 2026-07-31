@@ -3,6 +3,7 @@
 
 #include "control_params.h"
 #include "grayscale_calibration_types.h"
+#include "lever_calibration_types.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -12,7 +13,8 @@
 #define PARAMETER_STORE_SLOT_A_ADDRESS   0x0001F800UL
 #define PARAMETER_STORE_SLOT_B_ADDRESS   0x0001FC00UL
 #define PARAMETER_STORE_RECORD_V1_SIZE   168U
-#define PARAMETER_STORE_RECORD_SIZE      208U
+#define PARAMETER_STORE_RECORD_V2_SIZE   208U
+#define PARAMETER_STORE_RECORD_SIZE      368U
 #define PARAMETER_STORE_MAGIC            0x4D365052UL
 #define PARAMETER_STORE_COMMIT_MARKER    0x434F4D54UL
 
@@ -43,6 +45,8 @@ typedef struct {
     ControlParams_t params;
     LineCalibrationValues_t calibration;
     bool calibration_valid;
+    LeverCalibrationValues_t lever_calibration;
+    bool lever_calibration_valid;
 } ParameterStoreDecoded_t;
 
 typedef struct {
@@ -67,6 +71,15 @@ void ParameterStore_BuildRecordV2(void *destination,
                                   uint32_t generation,
                                   uint32_t parameter_revision,
                                   bool committed);
+void ParameterStore_BuildRecordV3(void *destination,
+                                  const ControlParams_t *params,
+                                  const LineCalibrationValues_t *calibration,
+                                  bool calibration_valid,
+                                  const LeverCalibrationValues_t *lever,
+                                  bool lever_valid,
+                                  uint32_t generation,
+                                  uint32_t parameter_revision,
+                                  bool committed);
 bool ParameterStore_DecodeRecord(const void *record,
                                  size_t available,
                                  ParameterStoreDecoded_t *decoded);
@@ -81,7 +94,12 @@ ParameterStoreResult_t ParameterStore_SaveActive(void);
 ParameterStoreResult_t ParameterStore_SaveCalibration(
     const LineCalibrationValues_t *calibration,
     uint32_t expected_generation);
+ParameterStoreResult_t ParameterStore_SaveLeverCalibration(
+    const LeverCalibrationValues_t *calibration,
+    uint32_t expected_generation);
 bool ParameterStore_GetLoadedCalibration(LineCalibrationValues_t *calibration);
+bool ParameterStore_GetLoadedLeverCalibration(
+    LeverCalibrationValues_t *calibration);
 void ParameterStore_GetInfo(ParameterStoreInfo_t *info);
 const char *ParameterStore_SourceName(void);
 

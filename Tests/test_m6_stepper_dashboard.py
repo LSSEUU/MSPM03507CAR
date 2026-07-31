@@ -44,9 +44,33 @@ class FakeStepperSession:
         self.calls: list[tuple] = []
         self.estops = 0
         self.current = snapshot()
+        self.motor_refresh_pending = False
+        self.motor_refresh_delay_reads = 0
+        self.motor_refresh_never = False
 
     def get_stepper(self, refresh_mask=0):
-        self.calls.append(("get", int(refresh_mask)))
+        mask = int(refresh_mask)
+        self.calls.append(("get", mask))
+        if mask & 4:
+            self.motor_refresh_pending = True
+            return self.current
+        if mask == 0 and self.motor_refresh_pending and not self.motor_refresh_never:
+            if self.motor_refresh_delay_reads > 0:
+                self.motor_refresh_delay_reads -= 1
+                self.current = snapshot(
+                    response_sequence=self.current.response_sequence + 1,
+                    last_function=0x35,
+                )
+            else:
+                self.current = snapshot(
+                    response_sequence=self.current.response_sequence + 1,
+                    response_age_ms=5,
+                    last_function=0x3A,
+                    last_response=7,
+                    valid_flags=0x0F,
+                    motor_status=1,
+                )
+                self.motor_refresh_pending = False
         return self.current
 
     def enable_stepper(self):
@@ -118,6 +142,15 @@ def test_stepper_http_auth_origin_and_endpoints() -> None:
             state = json.load(response)
         assert state["available"] is True
         assert session.calls[-1] == ("get", 15)
+        with urlopen(base + "/api/stepper?refresh=4", timeout=2) as response:
+            assert json.load(response)["available"] is True
+        assert session.calls[-1] == ("get", 4)
+        try:
+            urlopen(base + "/api/stepper?refresh=16", timeout=2)
+            raise AssertionError("invalid stepper refresh mask must fail")
+        except HTTPError as exc:
+            assert exc.code == 400
+            exc.close()
 
         def request(path: str, payload: dict, *, token: str | None = None,
                     origin: str | None = None):
@@ -143,16 +176,20 @@ def test_stepper_http_auth_origin_and_endpoints() -> None:
             urlopen(request("/api/stepper/enable", {}, token=controller.token), timeout=2)
             raise AssertionError("missing fixed confirmation must fail")
         except HTTPError as exc:
-            assert exc.code == 400
+            assert exc.code == 405
             exc.close()
-        with urlopen(request(
-            "/api/stepper/enable", {"confirm": "ENABLE_ZDT_STEPPER"},
-            token=controller.token, origin=base,
-        ), timeout=2) as response:
-            assert json.load(response)["available"] is True
+        try:
+            urlopen(request(
+                "/api/stepper/enable", {"confirm": "ENABLE_ZDT_STEPPER"},
+                token=controller.token, origin=base,
+            ), timeout=2)
+            raise AssertionError("raw stepper enable route must remain closed")
+        except HTTPError as exc:
+            assert exc.code == 405
+            exc.close()
         with urlopen(request("/api/stepper/stop", {}, token=controller.token), timeout=2) as response:
             assert json.load(response)["ok"] is True
-        assert ("enable",) in session.calls and ("stop",) in session.calls
+        assert ("enable",) not in session.calls and ("stop",) in session.calls
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=1)
         controller.close()
@@ -199,6 +236,57 @@ def test_wrong_state_detail_is_translated_for_the_dashboard() -> None:
         controller.close()
 
 
+def test_motion_preflight_waits_for_exact_new_motor_status() -> None:
+    session = FakeStepperSession()
+    session.motor_refresh_delay_reads = 2
+    controller = DashboardController(
+        session, SimpleNamespace(enabled_capabilities=session.capabilities),
+        sleeper=lambda _seconds: None,
+    )
+    try:
+        controller.stepper_velocity({
+            "confirm": "START_ZDT_VELOCITY_TEST", "direction": 0,
+            "speed_rpm": 60, "acceleration": 20, "duration_ms": 1000,
+        })
+        velocity_index = next(
+            index for index, call in enumerate(session.calls)
+            if call[0] == "velocity"
+        )
+        assert session.calls[velocity_index - 4:velocity_index] == [
+            ("get", 4), ("get", 0), ("get", 0), ("get", 0),
+        ]
+    finally:
+        controller.close()
+
+
+def test_motion_preflight_timeout_never_submits_motion() -> None:
+    session = FakeStepperSession()
+    session.motor_refresh_never = True
+    now = [0.0]
+
+    def clock() -> float:
+        return now[0]
+
+    def sleeper(seconds: float) -> None:
+        now[0] += seconds
+
+    controller = DashboardController(
+        session, SimpleNamespace(enabled_capabilities=session.capabilities),
+        clock=clock, sleeper=sleeper,
+    )
+    try:
+        with unittest.TestCase().assertRaisesRegex(
+            M6Error, "未在 750 ms 内收到新的电机状态.*未发送运动命令"
+        ):
+            controller.stepper_velocity({
+                "confirm": "START_ZDT_VELOCITY_TEST", "direction": 0,
+                "speed_rpm": 60, "acceleration": 20, "duration_ms": 1000,
+            })
+        assert not any(call[0] == "velocity" for call in session.calls)
+    finally:
+        controller.close()
+
+
 def load_tests(_loader, _tests, _pattern):
     suite = unittest.TestSuite()
     for function in (
@@ -206,6 +294,8 @@ def load_tests(_loader, _tests, _pattern):
         test_stepper_http_auth_origin_and_endpoints,
         test_missing_capability_only_disables_stepper_panel,
         test_wrong_state_detail_is_translated_for_the_dashboard,
+        test_motion_preflight_waits_for_exact_new_motor_status,
+        test_motion_preflight_timeout_never_submits_motion,
     ):
         suite.addTest(unittest.FunctionTestCase(function))
     return suite

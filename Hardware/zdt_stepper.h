@@ -8,6 +8,7 @@
 #define ZDT_STEPPER_CHECK_BYTE                      (0x6BU)
 #define ZDT_STEPPER_MAX_SPEED_RPM                   (3000U)
 #define ZDT_STEPPER_POSITION_COUNTS_PER_REVOLUTION  (65536ULL)
+#define ZDT_STEPPER_DRIVER_CONFIG_MAX_BYTES          (40U)
 
 #define ZDT_STEPPER_MOTOR_ENABLED            (1U << 0)
 #define ZDT_STEPPER_MOTOR_POSITION_REACHED   (1U << 1)
@@ -78,6 +79,20 @@ typedef struct {
 } ZdtStepperStats_t;
 
 typedef struct {
+    uint8_t length;
+    uint8_t parameter_count;
+    uint8_t motor_type;
+    uint8_t pulse_mode;
+    uint8_t communication_mode;
+    uint8_t enable_mode;
+    uint8_t direction;
+    uint8_t subdivision;
+    uint8_t interpolation;
+    uint8_t response_mode;
+    uint8_t stall_protection;
+} ZdtStepperDriverConfig_t;
+
+typedef struct {
     uint32_t response_sequence;
     uint8_t last_function;
     ZdtStepperResponse_t last_response;
@@ -89,10 +104,20 @@ typedef struct {
     bool position_valid;
     bool position_negative;
     uint32_t position_raw;
+    uint32_t position_sequence;
+    /* Emm 0x31 linearly calibrated absolute encoder, modulo one turn. */
+    bool encoder_valid;
+    uint16_t encoder_raw;
+    uint32_t encoder_sequence;
     bool motor_status_valid;
     uint8_t motor_status;
+    uint32_t motor_status_sequence;
     bool homing_status_valid;
     uint8_t homing_status;
+    bool driver_config_valid;
+    uint32_t driver_config_sequence;
+    uint32_t driver_config_fingerprint;
+    ZdtStepperDriverConfig_t driver_config;
     ZdtStepperStats_t stats;
 } ZdtStepperSnapshot_t;
 
@@ -118,8 +143,13 @@ ZdtStepperResult_t ZdtStepper_ClearProtection(void);
 ZdtStepperResult_t ZdtStepper_StartHoming(ZdtStepperHomeMode_t mode);
 ZdtStepperResult_t ZdtStepper_AbortHoming(void);
 ZdtStepperResult_t ZdtStepper_ReadSpeed(void);
+ZdtStepperResult_t ZdtStepper_ReadEncoder(void);
 ZdtStepperResult_t ZdtStepper_ReadPosition(void);
 ZdtStepperResult_t ZdtStepper_ReadMotorStatus(void);
 ZdtStepperResult_t ZdtStepper_ReadHomingStatus(void);
+ZdtStepperResult_t ZdtStepper_ReadDriverConfig(void);
+
+/* Signed shortest circular distance in single-turn encoder counts. */
+int32_t ZdtStepper_CircularDelta(uint16_t value, uint16_t reference);
 
 #endif

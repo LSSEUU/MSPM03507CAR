@@ -38,6 +38,7 @@ from .models import (
     Identity,
     LinkEvent,
     LinkStats,
+    LeverCalibrationSnapshot,
     ManualDriveSnapshot,
     ParameterDescriptor,
     ParameterSnapshot,
@@ -99,6 +100,13 @@ from .registry import (
 )
 from .stepper_registry import CAPABILITY_MASK as STEPPER_CAPABILITY_MASK
 from .stepper_registry import RPC as STEPPER_RPC, StepperCommand, StepperRefresh
+from .lever_calibration_registry import (
+    CAPABILITY_MASK as LEVER_CALIBRATION_CAPABILITY_MASK,
+    RPC as LEVER_CALIBRATION_RPC,
+    LeverCalibrationCommand,
+    LeverCalibrationDirection,
+    LeverCalibrationPage,
+)
 from .h_mission_registry import CAPABILITY_MASK as H_MISSION_CAPABILITY_MASK
 from .h_mission_registry import HMissionCommand, HMissionMode
 from .h_mission_registry import RPC as H_MISSION_RPC
@@ -191,6 +199,7 @@ class Session:
         self._next_sequence = 1
         self._next_manual_command_id = 1
         self._next_stepper_command_id = 1
+        self._next_lever_command_id = 1
         self._session_id = 0
         self._outcome_unknown: OutcomeUnknown | None = None
         self._pending_lines: dict[int, _PendingLine] = {}
@@ -669,7 +678,8 @@ class Session:
         required = int(CAPABILITY_MASKS["HANDSHAKE_REQUIRED"])
         optional = (int(CAPABILITY_MASKS["HELLO_OPTIONAL"]) |
                     STEPPER_CAPABILITY_MASK |
-                    H_MISSION_CAPABILITY_MASK) & ~required
+                    H_MISSION_CAPABILITY_MASK |
+                    LEVER_CALIBRATION_CAPABILITY_MASK) & ~required
         payload = encode_hello(challenge, required, optional)
         frame = encode_frame(Frame(2, int(FrameType.HELLO), 0, 0, 0, payload))
         pending: queue.Queue[Frame] = queue.Queue(maxsize=1)
@@ -786,6 +796,11 @@ class Session:
         if int(self.capabilities) & H_MISSION_CAPABILITY_MASK != H_MISSION_CAPABILITY_MASK:
             raise UnsupportedCapability(H_MISSION_CAPABILITY_MASK)
 
+    def _require_lever_calibration_capability(self) -> None:
+        if (int(self.capabilities) & LEVER_CALIBRATION_CAPABILITY_MASK !=
+                LEVER_CALIBRATION_CAPABILITY_MASK):
+            raise UnsupportedCapability(LEVER_CALIBRATION_CAPABILITY_MASK)
+
     @staticmethod
     def _decode_stepper(body: bytes) -> StepperSnapshot:
         if len(body) != 88:
@@ -869,6 +884,145 @@ class Session:
             StepperCommand.POSITION_TEST, confirmed=True, direction=direction,
             speed_rpm=speed_rpm, acceleration=acceleration,
             duration_or_timeout_ms=timeout_ms, pulses=pulses, position_mode=2,
+        )
+
+    @staticmethod
+    def _decode_lever_calibration(body: bytes) -> LeverCalibrationSnapshot:
+        if len(body) != 88:
+            raise IntegrityError(
+                f"lever calibration snapshot has {len(body)} bytes; expected 88"
+            )
+        u16 = lambda offset: struct.unpack_from("<H", body, offset)[0]
+        u32 = lambda offset: struct.unpack_from("<I", body, offset)[0]
+        i32 = lambda offset: struct.unpack_from("<i", body, offset)[0]
+        page = body[31]
+        common = dict(
+            time_ms=u32(0), boot_id=u32(4), generation=u32(8),
+            expected_generation=u32(12), candidate_crc32=u32(16),
+            driver_config_fingerprint=u32(20), reject_detail=u32(24),
+            state=body[28], result=body[29], flags=body[30], page=page,
+        )
+        if page == int(LeverCalibrationPage.SUMMARY):
+            return LeverCalibrationSnapshot(
+                **common, progress=u16(32), required=u16(34),
+                expected_point=body[36], expected_direction=body[37],
+                expected_repeat=body[38], sample_count=body[39],
+                reference_encoder=u16(40), reference_spread_counts=u16(42),
+                point_spread_counts=u16(44), repeatability_mdeg=u16(46),
+                backlash_mdeg=u16(48), horizontal_offset_counts=i32(52),
+                soft_min_angle_mdeg=i32(56), soft_max_angle_mdeg=i32(60),
+                soft_min_counts=i32(64), soft_max_counts=i32(68),
+                current_counts=i32(72), target_counts=i32(76),
+                actuator_fault=u32(80), last_capture_counts=i32(84),
+            )
+        values = tuple(i32(32 + index * 4) for index in range(9))
+        if page == int(LeverCalibrationPage.ANGLES):
+            return LeverCalibrationSnapshot(**common, angles_mdeg=values)
+        if page == int(LeverCalibrationPage.INCREASING):
+            return LeverCalibrationSnapshot(**common, increasing_counts=values)
+        if page == int(LeverCalibrationPage.DECREASING):
+            return LeverCalibrationSnapshot(**common, decreasing_counts=values)
+        raise IntegrityError(f"unknown lever calibration status page {page}")
+
+    def get_lever_calibration(
+        self, page: int | LeverCalibrationPage = LeverCalibrationPage.SUMMARY,
+    ) -> LeverCalibrationSnapshot:
+        self._require_lever_calibration_capability()
+        page_value = int(page)
+        if page_value not in range(4):
+            raise ValueError("lever calibration page must be 0..3")
+        return self._decode_lever_calibration(self._rpc(
+            int(LEVER_CALIBRATION_RPC["LEVER_CALIBRATION_STATUS_GET"]),
+            struct.pack("<B3x", page_value),
+        ))
+
+    def get_lever_calibration_full(self) -> LeverCalibrationSnapshot:
+        summary = self.get_lever_calibration(LeverCalibrationPage.SUMMARY)
+        angles = self.get_lever_calibration(LeverCalibrationPage.ANGLES)
+        increasing = self.get_lever_calibration(LeverCalibrationPage.INCREASING)
+        decreasing = self.get_lever_calibration(LeverCalibrationPage.DECREASING)
+        for page in (angles, increasing, decreasing):
+            if (page.generation != summary.generation or
+                    page.candidate_crc32 != summary.candidate_crc32):
+                raise IntegrityError("lever calibration changed while reading pages")
+        return replace(
+            summary, angles_mdeg=angles.angles_mdeg,
+            increasing_counts=increasing.increasing_counts,
+            decreasing_counts=decreasing.decreasing_counts,
+        )
+
+    def _lever_calibration_command(
+        self, command: LeverCalibrationCommand, *, generation: int,
+        point: int = 0, direction: int = 0, repeat: int = 0,
+        angle_mdeg: int = 0, flags: int = 0,
+    ) -> LeverCalibrationSnapshot:
+        self._require_lever_calibration_capability()
+        identity = self._require_identity()
+        command_id = self._next_lever_command_id
+        self._next_lever_command_id = (
+            1 if command_id >= 0xFFFFFFFF else command_id + 1
+        )
+        body = struct.pack(
+            "<IIBBBBiH2xI", identity.boot_id, int(generation), int(command),
+            int(point), int(direction), int(repeat), int(angle_mdeg),
+            int(flags), command_id,
+        )
+        return self._decode_lever_calibration(self._rpc(
+            int(LEVER_CALIBRATION_RPC["LEVER_CALIBRATION_COMMAND"]), body
+        ))
+
+    def start_lever_calibration(
+        self, *, generation: int, phone_zero_mdeg: int, force_full: bool = True,
+    ) -> LeverCalibrationSnapshot:
+        if abs(phone_zero_mdeg) > 200:
+            raise ValueError("phone zero check must be within +/-200 mdeg")
+        flags = 1 | (2 if force_full else 0)
+        return self._lever_calibration_command(
+            LeverCalibrationCommand.START, generation=generation,
+            angle_mdeg=phone_zero_mdeg, flags=flags,
+        )
+
+    def capture_lever_reference(self, *, generation: int) -> LeverCalibrationSnapshot:
+        return self._lever_calibration_command(
+            LeverCalibrationCommand.CAPTURE_REFERENCE, generation=generation
+        )
+
+    def capture_lever_horizontal(
+        self, *, generation: int, angle_mdeg: int,
+    ) -> LeverCalibrationSnapshot:
+        if abs(angle_mdeg) > 200:
+            raise ValueError("horizontal reading must be within +/-200 mdeg")
+        return self._lever_calibration_command(
+            LeverCalibrationCommand.CAPTURE_HORIZONTAL, generation=generation,
+            angle_mdeg=angle_mdeg,
+        )
+
+    def capture_lever_point(
+        self, *, generation: int, point: int,
+        direction: int | LeverCalibrationDirection, repeat: int,
+        angle_mdeg: int,
+    ) -> LeverCalibrationSnapshot:
+        if point not in range(9) or int(direction) not in (0, 1) or repeat not in range(3):
+            raise ValueError("invalid lever point tuple")
+        return self._lever_calibration_command(
+            LeverCalibrationCommand.CAPTURE_POINT, generation=generation,
+            point=point, direction=int(direction), repeat=repeat,
+            angle_mdeg=angle_mdeg,
+        )
+
+    def review_lever_calibration(self, *, generation: int) -> LeverCalibrationSnapshot:
+        return self._lever_calibration_command(
+            LeverCalibrationCommand.REVIEW, generation=generation
+        )
+
+    def commit_lever_calibration(self, *, generation: int) -> LeverCalibrationSnapshot:
+        return self._lever_calibration_command(
+            LeverCalibrationCommand.COMMIT, generation=generation
+        )
+
+    def cancel_lever_calibration(self, *, generation: int) -> LeverCalibrationSnapshot:
+        return self._lever_calibration_command(
+            LeverCalibrationCommand.CANCEL, generation=generation
         )
 
     @staticmethod
@@ -1710,6 +1864,7 @@ class Session:
             self._next_sequence = 1
             self._next_manual_command_id = 1
             self._next_stepper_command_id = 1
+            self._next_lever_command_id = 1
             self._next_legacy_id = 1
             self._session_id = 0
             self.identity = None

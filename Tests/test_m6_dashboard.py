@@ -340,7 +340,10 @@ def test_dashboard_http_serves_assets_state_and_rejects_writes() -> None:
             assert b"TextDecoder" in javascript
             assert b"textContent" in javascript
             assert b"vision_uart_rx" in javascript
-            assert b"refresh=${force ? 1 : 0}" in javascript
+            assert b"refresh=${refresh}" in javascript
+            assert b"STEPPER_MOTOR_REFRESH_MS = 750" in javascript
+            assert b"CAMERA_RENDER_INTERVAL_MS = 500" in javascript
+            assert b"pollStepper(true)" in javascript
             assert b'/api/stepper?refresh=1' not in javascript
         with urlopen(base + "/dashboard.css", timeout=2) as response:
             stylesheet = response.read()

@@ -7,10 +7,12 @@
 
 #define ZDT_FUNCTION_ZERO_POSITION       0x0AU
 #define ZDT_FUNCTION_CLEAR_PROTECTION    0x0EU
+#define ZDT_FUNCTION_READ_ENCODER        0x31U
 #define ZDT_FUNCTION_READ_SPEED          0x35U
 #define ZDT_FUNCTION_READ_POSITION       0x36U
 #define ZDT_FUNCTION_READ_MOTOR_STATUS   0x3AU
 #define ZDT_FUNCTION_READ_HOME_STATUS    0x3BU
+#define ZDT_FUNCTION_READ_CONFIG         0x42U
 #define ZDT_FUNCTION_START_HOMING        0x9AU
 #define ZDT_FUNCTION_ABORT_HOMING        0x9CU
 #define ZDT_FUNCTION_ENABLE              0xF3U
@@ -25,7 +27,7 @@
 #define ZDT_RESPONSE_PARAMETER_ERROR     0xE2U
 #define ZDT_RESPONSE_FORMAT_ERROR        0xEEU
 
-#define ZDT_RESPONSE_BUFFER_SIZE           16U
+#define ZDT_RESPONSE_BUFFER_SIZE           48U
 #define ZDT_POLL_CHUNK_SIZE                32U
 
 static ZdtStepperSnapshot_t stepper;
@@ -118,6 +120,27 @@ static uint8_t ExpectedFrameLength(void)
     if (IsActionFunction(function)) return 4U;
     if ((function == ZDT_FUNCTION_READ_MOTOR_STATUS) ||
         (function == ZDT_FUNCTION_READ_HOME_STATUS)) return 4U;
+    if (function == ZDT_FUNCTION_READ_ENCODER) {
+        if ((response_length >= 4U) &&
+            (response_buffer[3] == ZDT_STEPPER_CHECK_BYTE) &&
+            IsWireResponse(response_buffer[2])) return 4U;
+        return 5U;
+    }
+    if (function == ZDT_FUNCTION_READ_CONFIG) {
+        /* 0x42 replies are addr,function,length,payload...,check.  Keep
+         * accepting the standard four-byte error response as well. */
+        if ((response_length >= 3U) &&
+            IsWireResponse(response_buffer[2])) {
+            if (response_length < 4U) return 0xFEU;
+            return response_buffer[3] == ZDT_STEPPER_CHECK_BYTE ? 4U : 0xFFU;
+        }
+        if (response_length < 3U) return 0xFEU;
+        /* Emm V5.0 defines this byte as the complete response length,
+         * including address, function, length and trailing check byte. */
+        if ((response_buffer[2] < 5U) ||
+            (response_buffer[2] > ZDT_RESPONSE_BUFFER_SIZE)) return 0xFFU;
+        return response_buffer[2];
+    }
     if ((function == ZDT_FUNCTION_READ_SPEED) ||
         (function == ZDT_FUNCTION_READ_POSITION)) {
         /* Read commands may return a short four-byte error frame. */
@@ -145,6 +168,16 @@ static bool ParseDataFrame(const uint8_t *frame, uint8_t length)
     if (IsActionFunction(function)) {
         if (!IsWireResponse(frame[2])) return false;
         stepper.last_response = DecodeWireResponse(frame[2]);
+    } else if (function == ZDT_FUNCTION_READ_ENCODER) {
+        if (length == 4U) {
+            stepper.last_response = DecodeWireResponse(frame[2]);
+        } else {
+            stepper.encoder_raw = (uint16_t)(((uint16_t)frame[2] << 8) |
+                                             (uint16_t)frame[3]);
+            stepper.encoder_valid = true;
+            stepper.encoder_sequence++;
+            stepper.last_response = ZDT_STEPPER_RESPONSE_DATA;
+        }
     } else if (function == ZDT_FUNCTION_READ_SPEED) {
         if (length == 4U) {
             stepper.last_response = DecodeWireResponse(frame[2]);
@@ -167,6 +200,44 @@ static bool ParseDataFrame(const uint8_t *frame, uint8_t length)
                                    ((uint32_t)frame[5] << 8) |
                                    (uint32_t)frame[6];
             stepper.position_valid = true;
+            stepper.position_sequence++;
+            stepper.last_response = ZDT_STEPPER_RESPONSE_DATA;
+        }
+    } else if (function == ZDT_FUNCTION_READ_CONFIG) {
+        uint8_t payload_length;
+        uint32_t fingerprint = 2166136261UL;
+        uint8_t index;
+        if (length == 4U) {
+            stepper.last_response = DecodeWireResponse(frame[2]);
+        } else {
+            payload_length = frame[2];
+            memset(&stepper.driver_config, 0,
+                   sizeof(stepper.driver_config));
+            stepper.driver_config.length = payload_length;
+            if (payload_length >= 8U) {
+                stepper.driver_config.parameter_count = frame[3];
+                stepper.driver_config.motor_type = frame[4];
+                stepper.driver_config.pulse_mode = frame[5];
+                stepper.driver_config.communication_mode = frame[6];
+                stepper.driver_config.enable_mode = frame[7];
+                stepper.driver_config.direction = frame[8];
+                stepper.driver_config.subdivision = frame[9];
+            }
+            if (payload_length >= 9U)
+                stepper.driver_config.interpolation = frame[10];
+            if (payload_length >= 21U)
+                stepper.driver_config.response_mode = frame[22];
+            if (payload_length >= 22U)
+                stepper.driver_config.stall_protection = frame[23];
+            /* Fingerprint the declared length and every configuration byte,
+             * excluding only address/function and the trailing check byte. */
+            for (index = 2U; index < (uint8_t)(length - 1U); index++) {
+                fingerprint ^= frame[index];
+                fingerprint *= 16777619UL;
+            }
+            stepper.driver_config_fingerprint = fingerprint;
+            stepper.driver_config_valid = true;
+            stepper.driver_config_sequence++;
             stepper.last_response = ZDT_STEPPER_RESPONSE_DATA;
         }
     } else if (function == ZDT_FUNCTION_READ_MOTOR_STATUS) {
@@ -178,6 +249,7 @@ static bool ParseDataFrame(const uint8_t *frame, uint8_t length)
             if ((frame[2] & (1U << 6)) != 0U) return false;
             stepper.motor_status = frame[2];
             stepper.motor_status_valid = true;
+            stepper.motor_status_sequence++;
             stepper.last_response = ZDT_STEPPER_RESPONSE_DATA;
         }
     } else if (function == ZDT_FUNCTION_READ_HOME_STATUS) {
@@ -209,7 +281,8 @@ static void ProcessBufferedResponses(void)
         }
         if (response_length < 2U) return;
         expected = ExpectedFrameLength();
-        if (expected == 0U) {
+        if (expected == 0xFEU) return;
+        if ((expected == 0U) || (expected == 0xFFU)) {
             stepper.stats.invalid_frames++;
             DiscardPrefixByte();
             continue;
@@ -419,6 +492,11 @@ ZdtStepperResult_t ZdtStepper_ReadSpeed(void)
     return SendRead(ZDT_FUNCTION_READ_SPEED);
 }
 
+ZdtStepperResult_t ZdtStepper_ReadEncoder(void)
+{
+    return SendRead(ZDT_FUNCTION_READ_ENCODER);
+}
+
 ZdtStepperResult_t ZdtStepper_ReadPosition(void)
 {
     return SendRead(ZDT_FUNCTION_READ_POSITION);
@@ -432,4 +510,20 @@ ZdtStepperResult_t ZdtStepper_ReadMotorStatus(void)
 ZdtStepperResult_t ZdtStepper_ReadHomingStatus(void)
 {
     return SendRead(ZDT_FUNCTION_READ_HOME_STATUS);
+}
+
+ZdtStepperResult_t ZdtStepper_ReadDriverConfig(void)
+{
+    const uint8_t frame[] = {
+        ZDT_STEPPER_ADDRESS, ZDT_FUNCTION_READ_CONFIG, 0x6CU,
+        ZDT_STEPPER_CHECK_BYTE
+    };
+    return SendFrame(frame, sizeof(frame));
+}
+
+int32_t ZdtStepper_CircularDelta(uint16_t value, uint16_t reference)
+{
+    uint16_t wrapped = (uint16_t)(value - reference);
+    return (wrapped < 0x8000U) ? (int32_t)wrapped :
+                                (int32_t)wrapped - 65536L;
 }

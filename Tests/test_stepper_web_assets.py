@@ -12,7 +12,8 @@ def test_stepper_panel_accessibility_and_safety_copy() -> None:
     html = (WEB / "dashboard.html").read_text(encoding="utf-8")
     assert 'id="stepperTest"' in html
     assert 'id="stepperStopButton"' in html
-    assert "车辆急停和车辆 Safety 故障不会停止此步进电机" in html
+    assert "严格软件限位不是硬件失效保护" in html
+    assert "本页面不会驱动电机" in html
     assert "车辆立即急停（不含步进）" in html
     assert 'aria-live="polite"' in html
     for identifier in (
@@ -37,7 +38,20 @@ def test_stepper_web_limits_routes_and_responsive_rules() -> None:
     for route in ("enable", "stop", "disable", "velocity", "position"):
         assert f'"/api/stepper/{route}"' in javascript
     assert "setInterval(pollStepper, 250)" in javascript
+    assert "STEPPER_MOTOR_REFRESH_MS = 750" in javascript
+    assert "CAMERA_RENDER_INTERVAL_MS = 500" in javascript
+    assert "const refresh = force ? 1" in javascript
+    assert "refresh=${refresh}" in javascript
+    assert "pollStepper(true);" in javascript
     assert "[1, 2].includes(numeric(stepperView.snapshot?.state))" in javascript
+
+    camera_append = javascript.split("function appendCameraEvent", 1)[1].split(
+        "function flushCameraData", 1
+    )[0]
+    assert "cameraDataDirty = true" in camera_append
+    assert "renderCameraData()" not in camera_append
+    assert "flushCameraData();" in javascript
+    assert "now - cameraLastRenderAt < CAMERA_RENDER_INTERVAL_MS" in javascript
 
 
 def test_dashboard_javascript_syntax() -> None:

@@ -43,5 +43,13 @@ from .stepper_registry import (
     ZDT_STEPPER_CONTROL,
     ZDT_STEPPER_STATUS_GET,
 )
+from .lever_calibration_registry import (
+    LeverCalibrationCommand,
+    LeverCalibrationDirection,
+    LeverCalibrationPage,
+    LEVER_CALIBRATION,
+    LEVER_CALIBRATION_COMMAND,
+    LEVER_CALIBRATION_STATUS_GET,
+)
 
 __all__ = [name for name in globals() if not name.startswith("_")]

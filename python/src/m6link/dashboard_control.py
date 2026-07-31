@@ -22,6 +22,7 @@ from .registry import (
 from .stepper_registry import CAPABILITY_MASK as STEPPER_CAPABILITY_MASK
 from .stepper_registry import StepperNotReady, StepperRefresh
 from .h_mission_registry import CAPABILITY_MASK as H_MISSION_CAPABILITY_MASK
+from .lever_calibration_registry import CAPABILITY_MASK as LEVER_CALIBRATION_CAPABILITY_MASK
 
 
 _DASHBOARD_ACTIONS = {
@@ -32,7 +33,11 @@ _DASHBOARD_ACTIONS = {
     ActionKind.LINE_FOLLOW,
 }
 _MAX_DASHBOARD_ACTION_MS = 10_000
-_STEPPER_MOTION_PREFLIGHT_S = 0.050
+_STEPPER_MOTION_PREFLIGHT_TIMEOUT_S = 0.750
+_STEPPER_MOTION_PREFLIGHT_POLL_S = 0.020
+_STEPPER_MOTOR_STATUS_FUNCTION = 0x3A
+_STEPPER_RESPONSE_DATA = 7
+_STEPPER_MOTOR_STATUS_VALID = 1 << 2
 
 
 def _stepper_not_ready_message(detail: int) -> str:
@@ -81,11 +86,13 @@ class DashboardController:
         identity: Any,
         *,
         clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         self.session = session
         self.identity = identity
         self.token = secrets.token_urlsafe(24)
         self._clock = clock
+        self._sleep = sleeper
         self._operation_lock = threading.Lock()
         self._link_lock = threading.Lock()
         self._link_available = True
@@ -95,6 +102,8 @@ class DashboardController:
         self._status_at = float("-inf")
         self._parameters: Any = None
         self._calibration: Any = None
+        self._lever_calibration: Any = None
+        self._lever_evidence: list[dict[str, Any]] = []
         self._stepper: Any = None
         self._stepper_at = float("-inf")
         self._h_mission: Any = None
@@ -159,6 +168,8 @@ class DashboardController:
         self._status = None
         self._parameters = parameters
         self._calibration = None
+        self._lever_calibration = None
+        self._lever_evidence = []
         self._stepper = None
         self._stepper_at = float("-inf")
         self._h_mission = None
@@ -376,6 +387,14 @@ class DashboardController:
                 )
         except Exception:
             pass
+        try:
+            state = self.lever_calibration_state(force=True)
+            if state.get("active"):
+                self.session.cancel_lever_calibration(
+                    generation=state["expected_generation"]
+                )
+        except Exception:
+            pass
         with self._manual_condition:
             self._manual_stop_worker = True
             self._manual_condition.notify_all()
@@ -448,6 +467,147 @@ class DashboardController:
             if command == "confirm":
                 self.identity = self.session.identity
         return self.calibration_state()
+
+    def _lever_available(self) -> bool:
+        return (int(self.capabilities) & LEVER_CALIBRATION_CAPABILITY_MASK ==
+                LEVER_CALIBRATION_CAPABILITY_MASK)
+
+    @staticmethod
+    def _lever_payload(status: Any) -> dict[str, Any]:
+        state_names = (
+            "IDLE", "WAIT_REFERENCE", "WAIT_HORIZONTAL", "CAPTURE_POINTS",
+            "REVIEW", "SAVING", "COMPLETE", "FAILED", "CANCELLED",
+        )
+        result_names = (
+            "OK", "BUSY", "WRONG_STATE", "WRONG_OWNER", "STALE_GENERATION",
+            "INVALID_REQUEST", "TIMEOUT", "MOTOR_NOT_DISABLED",
+            "MOTOR_PROTECTION", "STATUS_STALE", "CONFIG", "UNSTABLE",
+            "NON_MONOTONIC", "REPEATABILITY", "BACKLASH", "SLOPE",
+            "STORAGE", "CANCELLED",
+        )
+        payload = _object_payload(status)
+        payload["state_name"] = (
+            state_names[status.state] if status.state < len(state_names)
+            else f"STATE_{status.state}"
+        )
+        payload["result_name"] = (
+            result_names[status.result] if status.result < len(result_names)
+            else f"RESULT_{status.result}"
+        )
+        payload.update({
+            "capture_pending": bool(status.flags & (1 << 0)),
+            "persisted_valid": bool(status.flags & (1 << 1)),
+            "candidate_valid": bool(status.flags & (1 << 2)),
+            "session_zero_valid": bool(status.flags & (1 << 3)),
+            "rearm_only": bool(status.flags & (1 << 4)),
+            "actuator_armed": bool(status.flags & (1 << 5)),
+            "actuator_moving": bool(status.flags & (1 << 6)),
+            "actuator_calibration_valid": bool(status.flags & (1 << 7)),
+            "active": status.state in (1, 2, 3, 4, 5),
+            "owner_name": "HOST" if status.state in (1, 2, 3, 4, 5) else "NONE",
+        })
+        return payload
+
+    def lever_calibration_state(self, *, force: bool = False) -> dict[str, Any]:
+        self._require_link_available()
+        if not self._lever_available():
+            return {"ok": True, "available": False, "active": False}
+        with self._operation_lock:
+            self._require_link_available()
+            if force or self._lever_calibration is None:
+                self._lever_calibration = self.session.get_lever_calibration_full()
+            status = self._lever_calibration
+        return {
+            "ok": True, "available": True,
+            **self._lever_payload(status),
+            "evidence": list(self._lever_evidence),
+            "safety_notice": (
+                "严格软件运行包络；不能替代硬限位，也不能阻止断电重力下落或软件完全失效"
+            ),
+        }
+
+    def _wait_lever_capture(self, previous_progress: int) -> Any:
+        deadline = self._clock() + 2.5
+        status = self.session.get_lever_calibration()
+        while (status.flags & 1) and self._clock() < deadline:
+            self._sleep(0.02)
+            status = self.session.get_lever_calibration()
+        if status.flags & 1:
+            raise M6Error("摆杆标定采样超时")
+        if status.state == 7:
+            raise M6Error(f"摆杆标定拒绝：{self._lever_payload(status)['result_name']}")
+        if status.progress < previous_progress:
+            raise M6Error("摆杆标定进度回退")
+        return status
+
+    def lever_calibration_command(
+        self, command: str, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        self._require_link_available()
+        if not self._lever_available():
+            raise ValueError("当前固件未协商摆杆只读标定能力")
+        generation = int(request.get("expected_generation", -1))
+        with self._operation_lock:
+            self._require_link_available()
+            before = self.session.get_lever_calibration()
+            if command == "start":
+                zero = int(request.get("phone_zero_mdeg", 999999))
+                force_full = bool(request.get("force_full", True))
+                result = self.session.start_lever_calibration(
+                    generation=generation, phone_zero_mdeg=zero,
+                    force_full=force_full,
+                )
+                self._lever_evidence = [{
+                    "kind": "phone_zero_check", "angle_mdeg": zero,
+                    "accepted": True,
+                }]
+            elif command == "capture-reference":
+                result = self.session.capture_lever_reference(generation=generation)
+                result = self._wait_lever_capture(before.progress)
+                self._lever_evidence.append({
+                    "kind": "reference", "counts": result.last_capture_counts,
+                    "spread_counts": result.reference_spread_counts,
+                })
+            elif command == "capture-horizontal":
+                angle = int(request.get("angle_mdeg", 999999))
+                result = self.session.capture_lever_horizontal(
+                    generation=generation, angle_mdeg=angle,
+                )
+                result = self._wait_lever_capture(before.progress)
+                self._lever_evidence.append({
+                    "kind": "horizontal", "angle_mdeg": angle,
+                    "counts": result.last_capture_counts,
+                    "spread_counts": result.point_spread_counts,
+                })
+            elif command == "capture-point":
+                point = int(request.get("point", -1))
+                direction = int(request.get("direction", -1))
+                repeat = int(request.get("repeat", -1))
+                angle = int(request.get("angle_mdeg", 999999))
+                result = self.session.capture_lever_point(
+                    generation=generation, point=point, direction=direction,
+                    repeat=repeat, angle_mdeg=angle,
+                )
+                result = self._wait_lever_capture(before.progress)
+                self._lever_evidence.append({
+                    "kind": "point", "point": point, "direction": direction,
+                    "repeat": repeat, "angle_mdeg": angle,
+                    "counts": result.last_capture_counts,
+                    "spread_counts": result.point_spread_counts,
+                })
+            elif command == "review":
+                result = self.session.review_lever_calibration(generation=generation)
+            elif command == "commit":
+                if request.get("confirm") != "WRITE_LEVER_CALIBRATION_TO_FLASH":
+                    raise ValueError("写入 Flash 前需要明确确认完整标定数据")
+                result = self.session.commit_lever_calibration(generation=generation)
+            elif command == "cancel":
+                result = self.session.cancel_lever_calibration(generation=generation)
+            else:
+                raise ValueError("未知摆杆标定操作")
+            self._lever_calibration = result
+            self._status = None
+        return self.lever_calibration_state(force=True)
 
     def parameter_state(self, *, force: bool = False) -> dict[str, Any]:
         self._require_link_available()
@@ -691,18 +851,23 @@ class DashboardController:
         payload["homing_flags"] = [label for bit, label in home_labels if snapshot.homing_status & bit]
         return payload
 
-    def stepper_state(self, *, force: bool = False, refresh: bool = False) -> dict[str, Any]:
+    def stepper_state(
+        self, *, force: bool = False, refresh: bool = False,
+        refresh_mask: int | StepperRefresh = 0,
+    ) -> dict[str, Any]:
         self._require_link_available()
         if not self._stepper_available():
             return {"ok": True, "available": False, "safety_independent": True,
                     "snapshot": None, "error": "当前固件未协商步进电机能力"}
+        mask = StepperRefresh(0x0F if refresh else int(refresh_mask))
+        if int(mask) & ~0x0F:
+            raise ValueError("步进状态刷新掩码超出允许范围")
         error: str | None = None
         with self._operation_lock:
             self._require_link_available()
             now = self._clock()
-            if force or refresh or self._stepper is None or now - self._stepper_at >= 0.2:
+            if force or mask or self._stepper is None or now - self._stepper_at >= 0.2:
                 try:
-                    mask = StepperRefresh(0x0F) if refresh else StepperRefresh(0)
                     self._stepper = self.session.get_stepper(mask)
                     self._stepper_at = now
                 except M6Error as exc:
@@ -715,6 +880,29 @@ class DashboardController:
             "snapshot": self._stepper_payload(snapshot) if snapshot is not None else None,
             "error": error,
         }
+
+    def _wait_for_fresh_stepper_motor_status(self) -> Any:
+        baseline = self.session.get_stepper(StepperRefresh.MOTOR_STATUS)
+        baseline_sequence = int(baseline.response_sequence)
+        deadline = self._clock() + _STEPPER_MOTION_PREFLIGHT_TIMEOUT_S
+        while True:
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                raise M6Error(
+                    "步进运动条件不满足：未在 750 ms 内收到新的电机状态；未发送运动命令"
+                )
+            self._sleep(min(_STEPPER_MOTION_PREFLIGHT_POLL_S, remaining))
+            snapshot = self.session.get_stepper(StepperRefresh(0))
+            self._stepper = snapshot
+            self._stepper_at = self._clock()
+            if (
+                int(snapshot.response_sequence) != baseline_sequence
+                and int(snapshot.last_function) == _STEPPER_MOTOR_STATUS_FUNCTION
+                and int(snapshot.last_response) == _STEPPER_RESPONSE_DATA
+                and int(snapshot.valid_flags) & _STEPPER_MOTOR_STATUS_VALID
+                and int(snapshot.response_age_ms) <= 500
+            ):
+                return snapshot
 
     def _stepper_call(self, method: str, request: Mapping[str, Any]) -> dict[str, Any]:
         self._require_link_available()
@@ -738,14 +926,10 @@ class DashboardController:
                     direction = int(request["direction"])
                     speed = int(request["speed_rpm"])
                     acceleration = int(request["acceleration"])
-                    # Browser timers are throttled in background tabs. Refresh
-                    # the safety-critical 0x3A status inside this serialized
-                    # POST so a newly focused page cannot race the 500 ms
-                    # firmware freshness check.
-                    self.session.get_stepper(StepperRefresh.MOTOR_STATUS)
-                    time.sleep(_STEPPER_MOTION_PREFLIGHT_S)
-                    self._stepper = self.session.get_stepper(StepperRefresh(0))
-                    self._stepper_at = self._clock()
+                    # The firmware schedules UART3 reads asynchronously. Wait
+                    # for the exact new 0x3A data response instead of assuming
+                    # a fixed delay made the cached motor status fresh.
+                    self._wait_for_fresh_stepper_motor_status()
                     if method == "velocity":
                         snapshot = self.session.start_stepper_velocity_test(
                             direction=direction, speed_rpm=speed,

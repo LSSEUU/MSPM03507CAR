@@ -10,6 +10,8 @@
 #include "grayscale_calibration.h"
 #include "gyro.h"
 #include "heading.h"
+#include "lever_actuator.h"
+#include "lever_calibration.h"
 #include "motor.h"
 #include "m6_action_validate.h"
 #include "m6_telemetry.h"
@@ -436,6 +438,88 @@ static M6Result_t grayscale_calibration_result(
     return M6_RESULT_SENSOR_NOT_READY;
 }
 
+static void fill_lever_calibration(uint8_t *out, uint8_t page)
+{
+    LeverCalibrationStatus_t status;
+    LeverActuatorSnapshot_t actuator;
+    const int32_t *table = NULL;
+    uint8_t flags = 0U;
+    uint32_t i;
+    LeverCalibration_GetStatus(&status);
+    LeverActuator_GetSnapshot(&actuator);
+    memset(out, 0, M6_LEVER_CAL_SNAPSHOT_SIZE);
+    if (status.capture_pending) flags |= 1U << 0;
+    if (status.persisted_valid) flags |= 1U << 1;
+    if (status.candidate_valid) flags |= 1U << 2;
+    if (status.session_zero_valid) flags |= 1U << 3;
+    if (status.rearm_only) flags |= 1U << 4;
+    if (actuator.armed) flags |= 1U << 5;
+    if (actuator.moving) flags |= 1U << 6;
+    if (actuator.calibration_valid) flags |= 1U << 7;
+    p32(&out[0], SystemTime_Now());
+    p32(&out[4], s_boot_id);
+    p32(&out[8], status.generation);
+    p32(&out[12], status.expected_generation);
+    p32(&out[16], status.candidate_crc32);
+    p32(&out[20], status.candidate.driver_config_fingerprint);
+    p32(&out[24], status.reject_detail);
+    out[28] = (uint8_t)status.state;
+    out[29] = (uint8_t)status.result;
+    out[30] = flags;
+    out[31] = page;
+    if (page == 0U) {
+        p16(&out[32], status.progress);
+        p16(&out[34], status.required);
+        out[36] = status.expected_point;
+        out[37] = status.expected_direction;
+        out[38] = status.expected_repeat;
+        out[39] = status.sample_count;
+        p16(&out[40], status.candidate.reference_encoder);
+        p16(&out[42], status.candidate.reference_spread_counts);
+        p16(&out[44], status.candidate.point_spread_counts);
+        p16(&out[46], status.candidate.repeatability_mdeg);
+        p16(&out[48], status.candidate.backlash_mdeg);
+        p32(&out[52], (uint32_t)status.candidate.horizontal_offset_counts);
+        p32(&out[56], (uint32_t)status.candidate.soft_min_angle_mdeg);
+        p32(&out[60], (uint32_t)status.candidate.soft_max_angle_mdeg);
+        p32(&out[64], (uint32_t)status.candidate.soft_min_counts);
+        p32(&out[68], (uint32_t)status.candidate.soft_max_counts);
+        p32(&out[72], (uint32_t)actuator.current_counts);
+        p32(&out[76], (uint32_t)actuator.target_counts);
+        p32(&out[80], actuator.fault_latched);
+        p32(&out[84], (uint32_t)status.last_capture_counts);
+    } else {
+        if (page == 1U) table = status.candidate.angle_mdeg;
+        else if (page == 2U) table = status.candidate.increasing_counts;
+        else table = status.candidate.decreasing_counts;
+        for (i = 0U; i < LEVER_CALIBRATION_POINT_COUNT; i++)
+            p32(&out[32U + i * 4U], (uint32_t)table[i]);
+    }
+}
+
+static M6Result_t lever_calibration_result(
+    LeverCalibrationResult_t result, uint32_t *detail)
+{
+    ParameterStoreInfo_t store;
+    if (result == LEVER_CAL_RESULT_OK) return M6_RESULT_OK;
+    if (result == LEVER_CAL_RESULT_BUSY) return M6_RESULT_BUSY;
+    if (result == LEVER_CAL_RESULT_STALE_GENERATION) {
+        ParameterStore_GetInfo(&store);
+        *detail = store.generation;
+        return M6_RESULT_STALE_GENERATION;
+    }
+    if (result == LEVER_CAL_RESULT_STORAGE) return M6_RESULT_STORAGE_IO;
+    if ((result == LEVER_CAL_RESULT_WRONG_OWNER) ||
+        (result == LEVER_CAL_RESULT_WRONG_STATE)) return M6_RESULT_WRONG_STATE;
+    if (result == LEVER_CAL_RESULT_INVALID_REQUEST)
+        return M6_RESULT_INVALID_ARGUMENT;
+    if ((result == LEVER_CAL_RESULT_NON_MONOTONIC) ||
+        (result == LEVER_CAL_RESULT_REPEATABILITY) ||
+        (result == LEVER_CAL_RESULT_BACKLASH) ||
+        (result == LEVER_CAL_RESULT_SLOPE)) return M6_RESULT_INVALID_VALUE;
+    return M6_RESULT_SENSOR_NOT_READY;
+}
+
 static void publish_manual_drive_event(uint32_t now_ms)
 {
     uint8_t body[16];
@@ -541,6 +625,20 @@ static M6Result_t execute_read(uint16_t opcode, const uint8_t *body,
             return M6_RESULT_INVALID_ARGUMENT;
         ZdtStepperTest_RequestRefresh(body[0]);
         fill_zdt_stepper(out); *out_length = M6_ZDT_STEPPER_SNAPSHOT_SIZE;
+        return M6_RESULT_OK;
+    }
+    if (opcode == M6_RPC_LEVER_CALIBRATION_STATUS_GET) {
+        if ((M6Link_EnabledCapabilities() &
+             M6_CAP_LEVER_CALIBRATION) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != M6_LEVER_CAL_STATUS_REQUEST_SIZE)
+            return M6_RESULT_BAD_LENGTH;
+        if ((body[1] | body[2] | body[3]) != 0U)
+            return M6_RESULT_MALFORMED;
+        if (body[0] > M6_LEVER_CAL_STATUS_PAGE_MAX)
+            return M6_RESULT_INVALID_ARGUMENT;
+        fill_lever_calibration(out, body[0]);
+        *out_length = M6_LEVER_CAL_SNAPSHOT_SIZE;
         return M6_RESULT_OK;
     }
     if (opcode == M6_RPC_PING) {
@@ -1190,6 +1288,36 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
         *out_length = 84U;
         return M6_RESULT_OK;
     }
+    if (opcode == M6_RPC_LEVER_CALIBRATION_COMMAND) {
+        LeverCalibrationResult_t result;
+        uint8_t command;
+        if ((M6Link_EnabledCapabilities() &
+             M6_CAP_LEVER_CALIBRATION) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != M6_LEVER_CAL_COMMAND_REQUEST_SIZE)
+            return M6_RESULT_BAD_LENGTH;
+        if (u32(body) != s_boot_id) return M6_RESULT_INVALID_ARGUMENT;
+        if ((body[18] | body[19]) != 0U) return M6_RESULT_MALFORMED;
+        command = body[8];
+        if ((command < LEVER_CAL_COMMAND_START) ||
+            (command > LEVER_CAL_COMMAND_CANCEL))
+            return M6_RESULT_INVALID_ARGUMENT;
+        if ((command != LEVER_CAL_COMMAND_CAPTURE_POINT) &&
+            ((body[9] | body[10] | body[11]) != 0U))
+            return M6_RESULT_INVALID_ARGUMENT;
+        if ((command != LEVER_CAL_COMMAND_START) && (u16(&body[16]) != 0U))
+            return M6_RESULT_INVALID_ARGUMENT;
+        result = LeverCalibration_Command(LEVER_CAL_OWNER_HOST,
+            M6Link_CurrentSession(), (LeverCalibrationCommand_t)command,
+            u32(&body[4]), body[9],
+            (LeverCalibrationDirection_t)body[10], body[11],
+            i32(&body[12]), u16(&body[16]), SystemTime_Now());
+        if (result != LEVER_CAL_RESULT_OK)
+            return lever_calibration_result(result, detail);
+        fill_lever_calibration(out, 0U);
+        *out_length = M6_LEVER_CAL_SNAPSHOT_SIZE;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_ACTION_ARM) {
         uint32_t now = SystemTime_Now();
         uint8_t token_input[40];
@@ -1331,6 +1459,7 @@ void M6Rpc_Service(uint32_t now_ms)
         M6Link_CurrentSession() : 0U;
     if ((session == 0U) && (s_event_session != 0U)) {
         GrayscaleCalibration_CancelHost(s_event_session, now_ms);
+        LeverCalibration_CancelHost(s_event_session, now_ms);
         memset(s_subscriptions, 0, sizeof(s_subscriptions));
         M6VisionUart_SetEnabled(false);
         s_event_session = 0U;

@@ -285,6 +285,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/calibration":
             self._send_calibration_state(parse_qs(parsed.query))
             return
+        if parsed.path == "/api/lever-calibration":
+            self._send_lever_calibration_state(parse_qs(parsed.query))
+            return
         if parsed.path == "/api/recordings":
             manager = self.server.recording_manager
             self._send_json(200, manager.list_sessions() if manager else {"ok": True, "recordings": []})
@@ -325,11 +328,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/control/manual/enable": lambda controller, _body: controller.manual_enable(),
             "/api/control/manual/command": lambda controller, body: controller.manual_command(body),
             "/api/control/manual/disable": lambda controller, body: controller.manual_disable(body),
-            "/api/stepper/enable": lambda controller, body: controller.stepper_enable(body),
             "/api/stepper/stop": lambda controller, body: controller.stepper_stop(body),
             "/api/stepper/disable": lambda controller, body: controller.stepper_disable(body),
-            "/api/stepper/velocity": lambda controller, body: controller.stepper_velocity(body),
-            "/api/stepper/position": lambda controller, body: controller.stepper_position(body),
             "/api/h-mission/stage": lambda controller, body: controller.h_mission_command("stage", body),
             "/api/h-mission/apply": lambda controller, body: controller.h_mission_command("apply", body),
             "/api/h-mission/revert": lambda controller, body: controller.h_mission_command("revert", body),
@@ -347,6 +347,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/calibration/capture-black": lambda controller, body: controller.calibration_command("capture-black", body),
             "/api/calibration/confirm": lambda controller, body: controller.calibration_command("confirm", body),
             "/api/calibration/cancel": lambda controller, body: controller.calibration_command("cancel", body),
+            "/api/lever-calibration/start": lambda controller, body: controller.lever_calibration_command("start", body),
+            "/api/lever-calibration/capture-reference": lambda controller, body: controller.lever_calibration_command("capture-reference", body),
+            "/api/lever-calibration/capture-horizontal": lambda controller, body: controller.lever_calibration_command("capture-horizontal", body),
+            "/api/lever-calibration/capture-point": lambda controller, body: controller.lever_calibration_command("capture-point", body),
+            "/api/lever-calibration/review": lambda controller, body: controller.lever_calibration_command("review", body),
+            "/api/lever-calibration/commit": lambda controller, body: controller.lever_calibration_command("commit", body),
+            "/api/lever-calibration/cancel": lambda controller, body: controller.lever_calibration_command("cancel", body),
         }
         recording_route = recording_routes.get(parsed.path)
         route = routes.get(parsed.path)
@@ -496,9 +503,20 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if controller is None:
             self._send_json(404, {"ok": False, "error": {"message": "步进控制功能未启用"}})
             return
-        refresh = query.get("refresh", ["0"])[0] == "1"
+        refresh_value = query.get("refresh", ["0"])[0]
         try:
-            result = controller.stepper_state(force=refresh, refresh=refresh)
+            # Preserve refresh=1 as the public "refresh all" spelling while
+            # allowing the dashboard to request only motor status with mask 4.
+            refresh_mask = 0x0F if refresh_value == "1" else int(refresh_value, 0)
+            if refresh_mask < 0 or refresh_mask & ~0x0F:
+                raise ValueError
+        except ValueError:
+            self._send_json(400, {"ok": False, "error": {"message": "步进状态刷新掩码无效"}})
+            return
+        try:
+            result = controller.stepper_state(
+                force=refresh_mask != 0, refresh_mask=refresh_mask,
+            )
         except M6Error as exc:
             self._send_json(503, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
             return
@@ -527,6 +545,20 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             result = controller.calibration_state(force=force)
         except M6Error as exc:
             self._send_json(503, {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
+            return
+        self._send_json(200, result)
+
+    def _send_lever_calibration_state(self, query: dict[str, list[str]]) -> None:
+        controller = self.server.dashboard_controller
+        if controller is None:
+            self._send_json(404, {"ok": False, "error": {"message": "摆杆标定功能未启用"}})
+            return
+        force = query.get("refresh", ["0"])[0] == "1"
+        try:
+            result = controller.lever_calibration_state(force=force)
+        except M6Error as exc:
+            self._send_json(503, {"ok": False, "error": {
+                "type": type(exc).__name__, "message": str(exc)}})
             return
         self._send_json(200, result)
 

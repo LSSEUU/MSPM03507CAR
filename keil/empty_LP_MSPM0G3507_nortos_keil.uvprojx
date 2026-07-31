@@ -560,6 +560,16 @@
               <FilePath>../System/grayscale_calibration.c</FilePath>
             </File>
             <File>
+              <FileName>lever_calibration.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/lever_calibration.c</FilePath>
+            </File>
+            <File>
+              <FileName>lever_actuator.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/lever_actuator.c</FilePath>
+            </File>
+            <File>
               <FileName>control_protocol.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/control_protocol.c</FilePath>
