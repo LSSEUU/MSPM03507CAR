@@ -25,9 +25,9 @@ USE_WEBRTC = False
 LENS_CORR_ENABLE = False
 LENS_CORR_STRENGTH = 0.6
 
-# "multi" reuses the current 25-point installation table. Change to "three"
-# to use only the measured -50, O, and +50 mm points.
-CALIBRATION_MODE = "multi"
+# "three" is the current mounted-camera calibration. "multi" retains the
+# legacy 25-point table and is valid only if that earlier camera pose is used.
+CALIBRATION_MODE = "three"
 
 DETECTION_CONFIDENCE = 0.50
 MAX_AXIS_ERROR_PX = 20.0
@@ -236,13 +236,12 @@ while not app.need_exit():
             )
             img.draw_cross(int(raw_x), int(raw_y), box_color, 12, 2)
             img.draw_cross(int(projected_x), int(projected_y), zero_color, 7, 2)
-            label = (
-                "{} {:.2f} raw={:+.1f}mm axis={:.1f}px".format(
-                    detector.labels[ball.class_id],
-                    ball.score,
-                    measured_mm,
-                    axis_error_px,
-                )
+            label = "X={:.1f} Y={:.1f} W={} H={} S={:.2f}".format(
+                raw_x,
+                raw_y,
+                ball.w,
+                ball.h,
+                ball.score,
             )
             img.draw_string(ball.x, ball.y, label, color=image.COLOR_RED)
 

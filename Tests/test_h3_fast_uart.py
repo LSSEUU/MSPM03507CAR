@@ -85,17 +85,19 @@ class H3FastWireTests(unittest.TestCase):
 
 
 class H3FastMeasurementTests(unittest.TestCase):
-    def test_multi_and_three_point_calibrations_use_mm_and_positive_active_end(self):
+    def test_multi_and_current_three_point_calibrations_use_mm(self):
         self.assertEqual(len(MULTIPOINT_CALIBRATION_MM), 25)
         multi = CalibrationTable(MULTIPOINT_CALIBRATION_MM)
         three = CalibrationTable(THREE_POINT_CALIBRATION_MM)
 
         for pixel, expected_mm in ((127, -50.0), (218, 0.0), (331, 50.0)):
             self.assertAlmostEqual(multi.to_mm(pixel), expected_mm)
+        for pixel, expected_mm in ((142, 50.0), (247, 0.0), (345, -50.0)):
             self.assertAlmostEqual(three.to_mm(pixel), expected_mm)
         self.assertLess(multi.to_mm(205), multi.to_mm(248))
-        self.assertAlmostEqual(three.to_mm(172.5), -25.0)
-        self.assertAlmostEqual(three.to_mm(36), -100.0)
+        self.assertGreater(three.to_mm(142), three.to_mm(345))
+        self.assertAlmostEqual(three.to_mm(194.5), 25.0)
+        self.assertAlmostEqual(three.to_mm(37), 100.0)
 
         reversed_installation = CalibrationTable(
             ((100, 50.0), (200, 0.0), (300, -50.0))

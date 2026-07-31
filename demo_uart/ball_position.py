@@ -3,8 +3,8 @@
 import math
 
 
-# Existing measured installation table, converted from centimetres to mm.
-# Pixel increases toward the lever's active end, which is the positive axis.
+# Legacy measured installation table, converted from centimetres to mm.
+# It is retained for the earlier camera pose only.
 MULTIPOINT_CALIBRATION_MM = [
     (16, -120.0),
     (27, -110.0),
@@ -33,11 +33,12 @@ MULTIPOINT_CALIBRATION_MM = [
     (465, 120.0),
 ]
 
-# Minimal H3 calibration option using only -50, O, and +50 mm.
+# Current mounted-camera H3 calibration. The active end is at smaller pixels,
+# so physical position decreases as pixel X increases.
 THREE_POINT_CALIBRATION_MM = [
-    (127, -50.0),
-    (218, 0.0),
-    (331, 50.0),
+    (142, 50.0),
+    (247, 0.0),
+    (345, -50.0),
 ]
 
 

@@ -1,5 +1,5 @@
-id: ball
-name: Ball
+id: balls
+name: Ball3
 name[zh]: 钢珠位置
 version: 1.2.0
 icon: ''
@@ -10,6 +10,8 @@ files:
   - models\yolo26_all_maixcam_yolo26_480_160\yolo26_all_tensor_info.txt
   - models\yolo26_all_maixcam_yolo26_480_160\yolo26_all.cvimodel
   - models\yolo26_all_maixcam_yolo26_480_160\yolo26_all.mud
+  - app.yaml
   - ball_position.py
   - ball_wire.py
   - main.py
+  - replay_serial.py
