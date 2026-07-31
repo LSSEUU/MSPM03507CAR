@@ -9,8 +9,6 @@
 #include <stdint.h>
 #include <string.h>
 
-static uint8_t rx_data[512];
-static size_t rx_length;
 static VisionUartStats_t uart_stats;
 static bool publish_accept = true;
 static unsigned publish_count;
@@ -33,28 +31,8 @@ static uint32_t u32(const uint8_t *p)
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-static void feed(const uint8_t *data, size_t length)
-{
-    assert(rx_length + length <= sizeof(rx_data));
-    memcpy(rx_data + rx_length, data, length);
-    rx_length += length;
-    uart_stats.rx_bytes += (uint32_t)length;
-    uart_stats.rx_queued = (uint16_t)rx_length;
-}
-
-size_t VisionUart_Read(uint8_t *data, size_t capacity)
-{
-    size_t length = rx_length < capacity ? rx_length : capacity;
-    memcpy(data, rx_data, length);
-    memmove(rx_data, rx_data + length, rx_length - length);
-    rx_length -= length;
-    uart_stats.rx_queued = (uint16_t)rx_length;
-    return length;
-}
-
 void VisionUart_GetStats(VisionUartStats_t *stats)
 {
-    uart_stats.rx_queued = (uint16_t)rx_length;
     *stats = uart_stats;
 }
 
@@ -89,12 +67,12 @@ int main(void)
     startup[1] = 0x7DU;
     startup[2] = 0x7EU;
     startup[3] = 0xFFU;
-    uart_stats.rx_overflow = 2U;
-    uart_stats.hardware_errors = 1U;
-    feed(startup, sizeof(startup));
-
     M6VisionUart_Init();
     M6VisionUart_SetEnabled(true);
+    uart_stats.rx_bytes = sizeof(startup);
+    uart_stats.rx_overflow = 2U;
+    uart_stats.hardware_errors = 1U;
+    M6VisionUart_MirrorRx(startup, sizeof(startup));
     M6VisionUart_Service(1234U);
     assert(publish_count == 1U);
     assert(published_priority == M6_TX_P3);
@@ -102,7 +80,7 @@ int main(void)
     assert(published_topic == 2U);
     assert(published_length == 96U);
     assert(published_payload[0] == 2U && published_payload[1] == 1U);
-    assert(u16(&published_payload[2]) == 0x000BU);
+    assert(u16(&published_payload[2]) == 0x000AU);
     assert(u32(&published_payload[4]) == 1234U);
     assert(u32(&published_payload[8]) == 70U);
     assert(u32(&published_payload[16]) == 2U);
@@ -112,13 +90,14 @@ int main(void)
     M6VisionUart_Service(1250U);
     assert(publish_count == 2U);
     assert(published_length == 38U);
-    assert((u16(&published_payload[2]) & 0x0001U) != 0U);
+    assert((u16(&published_payload[2]) & 0x0001U) == 0U);
     assert(memcmp(&published_payload[32], startup + 64U, 6U) == 0);
     M6VisionUart_Service(1260U);
     assert(publish_count == 2U);
 
     for (index = 0U; index < sizeof(flood); index++) flood[index] = (uint8_t)(255U - index);
-    feed(flood, sizeof(flood));
+    uart_stats.rx_bytes += sizeof(flood);
+    M6VisionUart_MirrorRx(flood, sizeof(flood));
     publish_accept = false;
     M6VisionUart_Service(1300U);
     assert(publish_count == 2U);
@@ -126,7 +105,7 @@ int main(void)
     assert(status_length == 32U);
     assert(status[0] == 1U && status[1] == 1U);
     assert(u32(&status[24]) == 72U);
-    assert(u16(&status[28]) == 64U);
+    assert(u16(&status[28]) == 0U);
 
     publish_accept = true;
     M6VisionUart_Service(1320U);
@@ -135,12 +114,12 @@ int main(void)
     assert(published_bridge_dropped[2] == 72U);
     assert((published_flags[3] & 0x0004U) == 0U);
     assert(u32(&published_payload[28]) == 72U);
-    assert(memcmp(&published_payload[32], flood + 136U, 64U) == 0);
+    assert(memcmp(&published_payload[32], flood + 64U, 64U) == 0);
     M6VisionUart_Service(1340U);
     assert(publish_count == 4U);
 
     M6VisionUart_SetEnabled(false);
-    feed(startup, 1U);
+    M6VisionUart_MirrorRx(startup, 1U);
     M6VisionUart_Service(1400U);
     assert(publish_count == 4U);
     M6VisionUart_GetStatus(status, &status_length);

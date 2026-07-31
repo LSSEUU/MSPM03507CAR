@@ -5,7 +5,6 @@
 
 static ZdtStepperSnapshot_t device;
 static unsigned emergency_count;
-static bool emergency_disable;
 static unsigned emergency_disable_count;
 static unsigned query_count[4];
 
@@ -14,7 +13,7 @@ void ZdtStepper_Poll(void) {}
 void ZdtStepper_GetSnapshot(ZdtStepperSnapshot_t *snapshot) { *snapshot = device; }
 ZdtStepperResult_t ZdtStepper_EmergencyStop(bool disable)
 {
-    emergency_count++; emergency_disable = disable; return ZDT_STEPPER_OK;
+    (void)disable; emergency_count++; return ZDT_STEPPER_OK;
 }
 ZdtStepperResult_t ZdtStepper_EmergencyDisable(void)
 { emergency_disable_count++; return ZDT_STEPPER_OK; }
@@ -68,8 +67,8 @@ static void test_startup_and_queries(void)
     memset(query_count, 0, sizeof(query_count)); emergency_count = 0U;
     emergency_disable_count = 0U;
     ZdtStepperTest_Init(0U);
-    assert(emergency_count == 1U && !emergency_disable);
-    ZdtStepperTest_Poll(4U); assert(emergency_disable_count == 0U);
+    assert(emergency_count == 0U && emergency_disable_count == 1U);
+    ZdtStepperTest_Poll(4U); assert(emergency_disable_count == 1U);
     ZdtStepperTest_Poll(5U); assert(emergency_disable_count == 1U);
     ZdtStepperTest_RequestRefresh(ZDT_STEPPER_REFRESH_ALL);
     ZdtStepperTest_RequestRefresh(ZDT_STEPPER_REFRESH_ALL);
@@ -163,10 +162,10 @@ static void test_disable_is_sequenced_after_stop(void)
     emergency_count = 0U; emergency_disable_count = 0U;
     ZdtStepperTest_Init(0U);
     ZdtStepperTest_Poll(5U);
-    assert(emergency_count == 1U && emergency_disable_count == 1U);
+    assert(emergency_count == 0U && emergency_disable_count == 1U);
 
     assert(ZdtStepperTest_Command(&request, 10U) == ZDT_STEPPER_OK);
-    assert(emergency_count == 2U && emergency_disable_count == 1U);
+    assert(emergency_count == 1U && emergency_disable_count == 1U);
     ZdtStepperTest_Poll(14U);
     assert(emergency_disable_count == 1U);
     ZdtStepperTest_Poll(15U);

@@ -22,7 +22,10 @@ typedef enum {
     SAFETY_FAULT_WATCHDOG_RESET      = (1UL << 5),
     SAFETY_FAULT_ENCODER_INVALID     = (1UL << 6),
     SAFETY_FAULT_WHEEL_STALL         = (1UL << 7),
-    SAFETY_FAULT_LINE_LOST           = (1UL << 8)
+    SAFETY_FAULT_LINE_LOST           = (1UL << 8),
+    SAFETY_FAULT_BALL_VISION         = (1UL << 9),
+    SAFETY_FAULT_BALL_EDGE           = (1UL << 10),
+    SAFETY_FAULT_LEVER_ACTUATOR      = (1UL << 11)
 } SafetyFault_t;
 
 typedef struct {

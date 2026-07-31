@@ -51,5 +51,8 @@ from .lever_calibration_registry import (
     LEVER_CALIBRATION_COMMAND,
     LEVER_CALIBRATION_STATUS_GET,
 )
+from .h3_tune_registry import H3TuneCommand, H3TuneParameter
+from .h3_ki_registry import PARAMETER_ID as H3_KI_PARAMETER_ID
+from .h3_maneuver_registry import PARAMETER_IDS as H3_MANEUVER_PARAMETER_IDS
 
 __all__ = [name for name in globals() if not name.startswith("_")]

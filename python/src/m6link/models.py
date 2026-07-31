@@ -453,6 +453,72 @@ class HMissionSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class H3TuneProfile:
+    plus_start_mdeg: int
+    plus_max_mdeg: int
+    minus_start_mdeg: int
+    minus_max_mdeg: int
+    kp_mdeg_per_mm: int
+    kd_mdeg_per_mm_s: int
+    normal_slew_mdeg_per_20ms: int
+    breakaway_slew_mdeg_per_20ms: int
+    brake_slew_mdeg_per_20ms: int
+    tracking_rpm: int
+    plus_launch_rpm: int
+    minus_launch_rpm: int
+    ki_mdeg_per_mm_s: int = 0
+    plus_topup_mdeg: int = 8000
+    plus_brake_mdeg: int = 8000
+    minus_brake_trigger_x10: int = 400
+    minus_brake_mdeg: int = 8000
+    plus_brake_trigger_x10: int = 450
+    plus_topup_brake_trigger_x10: int = 250
+    minus_brake_return_predict_ms: int = 75
+    minus_return_rpm: int = 3
+    plus_topup_max_speed_mm_s: int = 25
+
+
+@dataclass(frozen=True, slots=True)
+class H3TuneSnapshot:
+    time_ms: int
+    boot_id: int
+    active_revision: int
+    stage_revision: int
+    run_id: int
+    auth_token: int
+    auth_expires_ms: int
+    run_deadline_ms: int
+    flags: int
+    remaining_runs: int
+    h3_state: int
+    h3_fault: int
+    stop_reason: int
+    last_result: int
+    active: H3TuneProfile
+    staged: H3TuneProfile
+
+    @property
+    def dirty(self) -> bool:
+        return bool(self.flags & 1)
+
+    @property
+    def authorized(self) -> bool:
+        return bool(self.flags & 2)
+
+    @property
+    def host_run_active(self) -> bool:
+        return bool(self.flags & 4)
+
+    @property
+    def h3_active(self) -> bool:
+        return bool(self.flags & 8)
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.flags & 16)
+
+
+@dataclass(frozen=True, slots=True)
 class LinkEvent:
     code: int
     severity: int

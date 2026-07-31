@@ -3,7 +3,7 @@
 param(
     [string]$ProbeSerial = '4041840e',
     [string]$ExpectedFirmwarePrefix = 'M6',
-    [string]$ExpectedFirmwareId = 'M6-runtime-20260731-r71',
+    [string]$ExpectedFirmwareId = 'M6-runtime-20260801-r158-stop',
     [ValidateRange(1, 65535)]
     [int]$ExpectedSchema = 1,
     [string]$Port,
@@ -361,7 +361,7 @@ function Invoke-M6Flash {
     param(
         [string]$SerialNumber = '4041840e',
         [string]$FirmwarePrefix = 'M6',
-        [string]$FirmwareId = 'M6-runtime-20260731-r71',
+        [string]$FirmwareId = 'M6-runtime-20260801-r158-stop',
         [int]$Schema = 1,
         [string]$SerialPort,
         [switch]$OnlyPreflight

@@ -1,0 +1,31 @@
+{
+  "name": "m6-h3-ki-v1",
+  "version": 1,
+  "base_contract": "m6-v2-wire-v1",
+  "requires": "m6-h3-tune-v1",
+  "capability": {"name": "H3_TUNE_KI", "bit": 32},
+  "rpc_opcodes": {"H3_KI_STATUS_GET": 18},
+  "parameters": {"ki_mdeg_per_mm_s": 13},
+  "layouts": [
+    {
+      "name": "h3_ki_status",
+      "size": 16,
+      "fields": [
+        {"name": "active_revision", "offset": 0, "size": 4, "type": "u32"},
+        {"name": "stage_revision", "offset": 4, "size": 4, "type": "u32"},
+        {"name": "active_ki_mdeg_per_mm_s", "offset": 8, "size": 2, "type": "u16"},
+        {"name": "staged_ki_mdeg_per_mm_s", "offset": 10, "size": 2, "type": "u16"},
+        {"name": "integral_limit_mdeg", "offset": 12, "size": 2, "type": "u16"},
+        {"name": "reserved", "offset": 14, "size": 2, "type": "u16"}
+      ]
+    }
+  ],
+  "semantics": {
+    "ram_only": true,
+    "save_supported": false,
+    "anti_windup": true,
+    "zero_cross_reset": true,
+    "minimum": 0,
+    "maximum": 100
+  }
+}

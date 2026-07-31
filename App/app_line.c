@@ -1,5 +1,6 @@
 #include "app_line.h"
 
+#include "app_h4_ball.h"
 #include "control_config.h"
 #include "h_course_profile.h"
 #include "h2_control_profile.h"
@@ -41,6 +42,16 @@ static float mission_stop_started_distance_mm;
 static bool mission_stop_heading_valid;
 static float mission_stop_heading_deg;
 static bool mission_h4_heading_hold_active;
+
+static uint32_t AppLine_H4BallSafetyFault(void)
+{
+    AppH4BallFault_t fault = AppH4Ball_Fault();
+    if (fault == APP_H4_BALL_FAULT_VISION)
+        return SAFETY_FAULT_BALL_VISION;
+    if (fault == APP_H4_BALL_FAULT_EDGE)
+        return SAFETY_FAULT_BALL_EDGE;
+    return SAFETY_FAULT_LEVER_ACTUATOR;
+}
 
 static void AppLine_ResetYawAssist(void)
 {
@@ -103,6 +114,7 @@ static void AppLine_FaultAbort(uint32_t now_ms,
                                HMissionStopReason_t reason,
                                uint32_t fault_bits)
 {
+    AppH4Ball_Stop(true);
     WheelSpeed_Disable();
     Safety_EndAction();
     (void)SystemState_RequestIdle();
@@ -149,8 +161,21 @@ static void AppLine_CompleteFinish(uint32_t now_ms)
     AppLine_ReturnIdle();
 }
 
-static void AppLine_CompleteMissionStop(void)
+static void AppLine_CompleteMissionStop(uint32_t now_ms)
 {
+    HMissionSnapshot_t mission;
+    HMission_GetSnapshot(&mission);
+    if (mission.running_mode == H_MISSION_MODE_H4) {
+        if (AppH4Ball_IsActive() && !AppH4Ball_Finish()) {
+            AppLine_FaultAbort(now_ms, H_MISSION_STOP_FAULT,
+                               SAFETY_FAULT_LEVER_ACTUATOR);
+            return;
+        }
+        if (!AppH4Ball_IsComplete()) {
+            WheelSpeed_SetTarget(0.0f, 0.0f);
+            return;
+        }
+    }
     WheelSpeed_Disable();
     Safety_EndAction();
     (void)SystemState_RequestIdle();
@@ -171,6 +196,9 @@ static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms,
     if ((SystemState_Get() != SYSTEM_STATE_IDLE) || Safety_HasFault() ||
         !snapshot.calibration.valid || !snapshot.line_valid)
         return false;
+    if (AppH4Ball_IsBusy()) return false;
+    if (h_mission && (mission_mode == H_MISSION_MODE_H4) &&
+        !AppH4Ball_CheckReady(now_ms)) return false;
     if (!SystemState_RequestRun()) return false;
     if (h_mission && (mission_mode == H_MISSION_MODE_H2) &&
         !H2ControlProfile_Activate()) {
@@ -187,6 +215,13 @@ static bool AppLine_StartRunning(uint32_t now_ms, uint32_t duration_ms,
         return false;
     }
     if (!LineFollow_Start(now_ms)) {
+        (void)SystemState_RequestIdle();
+        AppLine_ReturnIdle();
+        return false;
+    }
+    if (h_mission && (mission_mode == H_MISSION_MODE_H4) &&
+        !AppH4Ball_Start(now_ms)) {
+        LineFollow_Stop();
         (void)SystemState_RequestIdle();
         AppLine_ReturnIdle();
         return false;
@@ -315,6 +350,7 @@ bool AppLine_Stop(uint32_t now_ms)
     was_active = (app_line.state != APP_LINE_IDLE) ||
         (control.state != LINE_FOLLOW_IDLE);
     if (app_line.state == APP_LINE_RUNNING) {
+        AppH4Ball_Stop(true);
         WheelSpeed_Disable();
         Safety_EndAction();
         (void)SystemState_RequestIdle();
@@ -388,6 +424,17 @@ void AppLine_Task20ms(uint32_t now_ms)
         return;
     }
     if (app_line.state != APP_LINE_RUNNING) return;
+    HMission_GetSnapshot(&mission);
+    if (HMission_IsActive() &&
+        (mission.running_mode == H_MISSION_MODE_H4) &&
+        (AppH4Ball_HasFault() ||
+         (!AppH4Ball_IsActive() &&
+          !((mission.state == H_MISSION_STOPPING) &&
+            (AppH4Ball_IsBusy() || AppH4Ball_IsComplete()))))) {
+        AppLine_FaultAbort(now_ms, H_MISSION_STOP_FAULT,
+                           AppLine_H4BallSafetyFault());
+        return;
+    }
     if (Safety_HasFault()) {
         AppLine_FaultAbort(now_ms, H_MISSION_STOP_FAULT, 0U);
         return;
@@ -555,7 +602,7 @@ void AppLine_Task20ms(uint32_t now_ms)
              APP_H_MISSION_STOPPED_SPEED_MM_S) &&
             (AppLine_Abs(wheel.filtered_mm_s[WHEEL_SPEED_RIGHT]) <=
              APP_H_MISSION_STOPPED_SPEED_MM_S)) {
-            AppLine_CompleteMissionStop();
+            AppLine_CompleteMissionStop(now_ms);
             return;
         }
     }

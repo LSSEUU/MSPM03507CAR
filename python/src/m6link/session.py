@@ -35,6 +35,8 @@ from .models import (
     GrayscaleCalibrationStatus,
     HMissionConfig,
     HMissionSnapshot,
+    H3TuneProfile,
+    H3TuneSnapshot,
     Identity,
     LinkEvent,
     LinkStats,
@@ -110,6 +112,13 @@ from .lever_calibration_registry import (
 from .h_mission_registry import CAPABILITY_MASK as H_MISSION_CAPABILITY_MASK
 from .h_mission_registry import HMissionCommand, HMissionMode
 from .h_mission_registry import RPC as H_MISSION_RPC
+from .h3_tune_registry import CAPABILITY_MASK as H3_TUNE_CAPABILITY_MASK
+from .h3_tune_registry import H3TuneCommand, H3TuneParameter
+from .h3_tune_registry import RPC as H3_TUNE_RPC
+from .h3_ki_registry import CAPABILITY_MASK as H3_KI_CAPABILITY_MASK
+from .h3_ki_registry import RPC as H3_KI_RPC
+from .h3_maneuver_registry import CAPABILITY_MASK as H3_MANEUVER_CAPABILITY_MASK
+from .h3_maneuver_registry import RPC as H3_MANEUVER_RPC
 
 
 BAUD_RATE = 115200
@@ -565,6 +574,18 @@ class Session:
                 raise OutcomeUnknown(f"serial write failed after starting: {request.error}", frame=data)
             raise TimeoutBeforeSend(f"serial write failed before starting: {request.error}")
 
+    def _queue_write_nowait(self, data: bytes, *, priority: int) -> None:
+        """Queue a write without waiting for the serial worker to run.
+
+        This is intentionally limited to callers that can tolerate an
+        asynchronous transport failure.  In particular, the H3 watchdog must
+        keep being fed even when Windows does not schedule the serial worker
+        within one 50 ms UI/control tick.
+        """
+        self._check_worker()
+        request = _Write(data)
+        self._writes.put((priority, next(self._write_counter), request))
+
     def _allocate_legacy_id(self) -> int:
         request_id = self._next_legacy_id
         self._next_legacy_id = 1 if request_id >= 65535 else request_id + 1
@@ -679,7 +700,10 @@ class Session:
         optional = (int(CAPABILITY_MASKS["HELLO_OPTIONAL"]) |
                     STEPPER_CAPABILITY_MASK |
                     H_MISSION_CAPABILITY_MASK |
-                    LEVER_CALIBRATION_CAPABILITY_MASK) & ~required
+                    LEVER_CALIBRATION_CAPABILITY_MASK |
+                    H3_TUNE_CAPABILITY_MASK |
+                    H3_KI_CAPABILITY_MASK |
+                    H3_MANEUVER_CAPABILITY_MASK) & ~required
         payload = encode_hello(challenge, required, optional)
         frame = encode_frame(Frame(2, int(FrameType.HELLO), 0, 0, 0, payload))
         pending: queue.Queue[Frame] = queue.Queue(maxsize=1)
@@ -795,6 +819,10 @@ class Session:
     def _require_h_mission_capability(self) -> None:
         if int(self.capabilities) & H_MISSION_CAPABILITY_MASK != H_MISSION_CAPABILITY_MASK:
             raise UnsupportedCapability(H_MISSION_CAPABILITY_MASK)
+
+    def _require_h3_tune_capability(self) -> None:
+        if int(self.capabilities) & H3_TUNE_CAPABILITY_MASK != H3_TUNE_CAPABILITY_MASK:
+            raise UnsupportedCapability(H3_TUNE_CAPABILITY_MASK)
 
     def _require_lever_calibration_capability(self) -> None:
         if (int(self.capabilities) & LEVER_CALIBRATION_CAPABILITY_MASK !=
@@ -1106,6 +1134,244 @@ class Session:
         self, *, snapshot: HMissionSnapshot | None = None,
     ) -> HMissionSnapshot:
         return self._h_mission_command(HMissionCommand.START, snapshot=snapshot)
+
+    @staticmethod
+    def _decode_h3_tune(body: bytes) -> H3TuneSnapshot:
+        if len(body) != 88:
+            raise IntegrityError(f"H3 tune snapshot has {len(body)} bytes; expected 88")
+        u16 = lambda offset: struct.unpack_from("<H", body, offset)[0]
+        u32 = lambda offset: struct.unpack_from("<I", body, offset)[0]
+
+        def profile(offset: int) -> H3TuneProfile:
+            return H3TuneProfile(*(u16(offset + index * 2) for index in range(12)))
+
+        return H3TuneSnapshot(
+            time_ms=u32(0), boot_id=u32(4), active_revision=u32(8),
+            stage_revision=u32(12), run_id=u32(16), auth_token=u32(20),
+            auth_expires_ms=u32(24), run_deadline_ms=u32(28), flags=u16(32),
+            remaining_runs=body[34], h3_state=body[35], h3_fault=body[36],
+            stop_reason=body[37], last_result=body[38], active=profile(40),
+            staged=profile(64),
+        )
+
+    def get_h3_tune(self) -> H3TuneSnapshot:
+        self._require_h3_tune_capability()
+        snapshot = self._decode_h3_tune(
+            self._rpc(int(H3_TUNE_RPC["H3_TUNE_STATUS_GET"]), b"")
+        )
+        return self._enrich_h3_maneuver(self._enrich_h3_ki(snapshot))
+
+    def _enrich_h3_ki(self, snapshot: H3TuneSnapshot) -> H3TuneSnapshot:
+        identity = self._require_identity()
+        if (int(identity.enabled_capabilities) & H3_KI_CAPABILITY_MASK) == 0:
+            return snapshot
+        body = self._rpc(int(H3_KI_RPC["H3_KI_STATUS_GET"]), b"")
+        if len(body) != 16 or struct.unpack_from("<H", body, 14)[0] != 0:
+            raise IntegrityError("H3 Ki status layout is invalid")
+        active_revision, stage_revision, active_ki, staged_ki, limit = \
+            struct.unpack_from("<IIHHH", body, 0)
+        if (active_revision != snapshot.active_revision or
+                stage_revision != snapshot.stage_revision):
+            raise IntegrityError("H3 Ki status revisions do not match tune snapshot")
+        if active_ki > 100 or staged_ki > 100 or not 1 <= limit <= 18000:
+            raise IntegrityError("H3 Ki status values are out of range")
+        return replace(
+            snapshot,
+            active=replace(snapshot.active, ki_mdeg_per_mm_s=active_ki),
+            staged=replace(snapshot.staged, ki_mdeg_per_mm_s=staged_ki),
+        )
+
+    def _enrich_h3_maneuver(self, snapshot: H3TuneSnapshot) -> H3TuneSnapshot:
+        identity = self._require_identity()
+        if (int(identity.enabled_capabilities) & H3_MANEUVER_CAPABILITY_MASK) == 0:
+            return snapshot
+        body = self._rpc(int(H3_MANEUVER_RPC["H3_MANEUVER_STATUS_GET"]), b"")
+        if len(body) != 44:
+            raise IntegrityError("H3 maneuver status layout is invalid")
+        values = struct.unpack_from("<II18H", body, 0)
+        active_revision, stage_revision = values[:2]
+        if (active_revision != snapshot.active_revision or
+                stage_revision != snapshot.stage_revision):
+            raise IntegrityError(
+                "H3 maneuver status revisions do not match tune snapshot"
+            )
+        active_topup, staged_topup, active_plus_brake, staged_plus_brake, \
+            active_trigger, staged_trigger, active_minus_brake, \
+            staged_minus_brake, active_plus_trigger, \
+            staged_plus_trigger, active_topup_trigger, \
+            staged_topup_trigger, active_return_predict, \
+            staged_return_predict, active_return_rpm, \
+            staged_return_rpm, active_topup_max_speed, \
+            staged_topup_max_speed = values[2:]
+        return replace(
+            snapshot,
+            active=replace(
+                snapshot.active,
+                plus_topup_mdeg=active_topup,
+                plus_brake_mdeg=active_plus_brake,
+                minus_brake_trigger_x10=active_trigger,
+                minus_brake_mdeg=active_minus_brake,
+                plus_brake_trigger_x10=active_plus_trigger,
+                plus_topup_brake_trigger_x10=active_topup_trigger,
+                minus_brake_return_predict_ms=active_return_predict,
+                minus_return_rpm=active_return_rpm,
+                plus_topup_max_speed_mm_s=active_topup_max_speed,
+            ),
+            staged=replace(
+                snapshot.staged,
+                plus_topup_mdeg=staged_topup,
+                plus_brake_mdeg=staged_plus_brake,
+                minus_brake_trigger_x10=staged_trigger,
+                minus_brake_mdeg=staged_minus_brake,
+                plus_brake_trigger_x10=staged_plus_trigger,
+                plus_topup_brake_trigger_x10=staged_topup_trigger,
+                minus_brake_return_predict_ms=staged_return_predict,
+                minus_return_rpm=staged_return_rpm,
+                plus_topup_max_speed_mm_s=staged_topup_max_speed,
+            ),
+        )
+
+    def _h3_tune_command(
+        self, command: H3TuneCommand, *, snapshot: H3TuneSnapshot | None = None,
+        parameter: int = 0, value: int = 0, arg0: int = 0, arg1: int = 0,
+        timeout: float | None = None,
+    ) -> H3TuneSnapshot:
+        self._require_h3_tune_capability()
+        identity = self._require_identity()
+        current = snapshot
+        if current is None and command not in (
+            H3TuneCommand.STOP, H3TuneCommand.HEARTBEAT, H3TuneCommand.REVOKE
+        ):
+            current = self.get_h3_tune()
+        active_revision = current.active_revision if current is not None else 0
+        stage_revision = current.stage_revision if current is not None else 0
+        body = struct.pack(
+            "<IIIBBHIII", identity.boot_id, active_revision, stage_revision,
+            int(command), int(parameter), 0, int(value), int(arg0), int(arg1),
+        )
+        if timeout is None:
+            response = self._rpc(int(H3_TUNE_RPC["H3_TUNE_COMMAND"]), body)
+        else:
+            response = self._rpc(
+                int(H3_TUNE_RPC["H3_TUNE_COMMAND"]), body, timeout=timeout
+            )
+        decoded = self._decode_h3_tune(response)
+        if command in (
+            H3TuneCommand.STAGE_FIELD, H3TuneCommand.APPLY,
+            H3TuneCommand.REVERT, H3TuneCommand.AUTHORIZE,
+            H3TuneCommand.REVOKE,
+        ):
+            decoded = self._enrich_h3_maneuver(self._enrich_h3_ki(decoded))
+        return decoded
+
+    def stage_h3_tune_field(
+        self, parameter: int | H3TuneParameter, value: int, *,
+        snapshot: H3TuneSnapshot | None = None,
+    ) -> H3TuneSnapshot:
+        return self._h3_tune_command(
+            H3TuneCommand.STAGE_FIELD, snapshot=snapshot,
+            parameter=int(parameter), value=value,
+        )
+
+    def apply_h3_tune(
+        self, *, snapshot: H3TuneSnapshot | None = None,
+    ) -> H3TuneSnapshot:
+        return self._h3_tune_command(H3TuneCommand.APPLY, snapshot=snapshot)
+
+    def revert_h3_tune(
+        self, *, snapshot: H3TuneSnapshot | None = None,
+    ) -> H3TuneSnapshot:
+        return self._h3_tune_command(H3TuneCommand.REVERT, snapshot=snapshot)
+
+    def authorize_h3_tune(
+        self, max_runs: int = 8, *, ttl_ms: int = 1_800_000,
+        run_timeout_ms: int = 12_000, nonce: int | None = None,
+        snapshot: H3TuneSnapshot | None = None,
+    ) -> H3TuneSnapshot:
+        nonce_value = int(nonce if nonce is not None else secrets.randbits(32)) or 1
+        return self._h3_tune_command(
+            H3TuneCommand.AUTHORIZE, snapshot=snapshot, parameter=max_runs,
+            value=ttl_ms, arg0=run_timeout_ms, arg1=nonce_value,
+        )
+
+    def start_h3_tune(
+        self, token: int, *, snapshot: H3TuneSnapshot | None = None,
+    ) -> H3TuneSnapshot:
+        return self._h3_tune_command(
+            H3TuneCommand.START, snapshot=snapshot, value=token
+        )
+
+    def start_h3_center_hold(
+        self, token: int, *, snapshot: H3TuneSnapshot | None = None,
+    ) -> H3TuneSnapshot:
+        return self._h3_tune_command(
+            H3TuneCommand.START_CENTER, snapshot=snapshot, value=token
+        )
+
+    def stop_h3_tune(
+        self, token: int, *, timeout: float | None = None,
+    ) -> H3TuneSnapshot:
+        return self._h3_tune_command(
+            H3TuneCommand.STOP, value=token, timeout=timeout
+        )
+
+    def heartbeat_h3_tune(
+        self, token: int, *, timeout: float | None = None,
+    ) -> H3TuneSnapshot:
+        return self._h3_tune_command(
+            H3TuneCommand.HEARTBEAT, value=token, timeout=timeout
+        )
+
+    def _h3_tune_token_command_nowait(
+        self, command: H3TuneCommand, token: int,
+    ) -> None:
+        """Send a time-critical token command without waiting for its reply.
+
+        H3's 300 ms watchdog is intentionally shorter than an ordinary RPC
+        timeout.  Waiting for a lost heartbeat response would therefore cause
+        the host itself to miss the next heartbeat.  Responses to these
+        monotonic sequence numbers are harmlessly ignored by ``_route_frame``.
+        """
+        if command not in (H3TuneCommand.STOP, H3TuneCommand.HEARTBEAT):
+            raise ValueError("only H3 STOP/HEARTBEAT may be sent without waiting")
+        self._require_h3_tune_capability()
+        identity = self._require_identity()
+        if self.mode != "v2" or not self._session_id:
+            raise IncompatibleFirmware("operation requires an established V2 session")
+        if self._outcome_unknown is not None:
+            raise OutcomeUnknown(
+                "the previous RPC outcome is unknown; reset or explicitly recover the session",
+                sequence=self._outcome_unknown.sequence,
+                frame=self._outcome_unknown.frame,
+            )
+        with self._rpc_lock:
+            sequence = self._next_sequence
+            if sequence > 0xFFFFFFFE:
+                raise IncompatibleFirmware(
+                    "host sequence is exhausted; reconnect before another RPC"
+                )
+            body = struct.pack(
+                "<IIIBBHIII", identity.boot_id, 0, 0, int(command), 0, 0,
+                int(token), 0, 0,
+            )
+            wire = encode_frame(
+                Frame(
+                    2, int(FrameType.RPC_REQUEST), 0, self._session_id,
+                    sequence,
+                    encode_rpc(int(H3_TUNE_RPC["H3_TUNE_COMMAND"]), body),
+                )
+            )
+            self._queue_write_nowait(wire, priority=5)
+            self._next_sequence += 1
+
+    def stop_h3_tune_nowait(self, token: int) -> None:
+        self._h3_tune_token_command_nowait(H3TuneCommand.STOP, token)
+
+    def heartbeat_h3_tune_nowait(self, token: int) -> None:
+        self._h3_tune_token_command_nowait(H3TuneCommand.HEARTBEAT, token)
+
+    def revoke_h3_tune(self, token: int) -> H3TuneSnapshot:
+        return self._h3_tune_command(H3TuneCommand.REVOKE, value=token)
 
     def get_identity(self) -> Identity:
         if self.mode == "legacy":

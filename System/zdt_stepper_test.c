@@ -134,6 +134,7 @@ static void QueueNextQuery(uint32_t now_ms)
 
 void ZdtStepperTest_Init(uint32_t now_ms)
 {
+    (void)now_ms;
     memset(&s_controller, 0, sizeof(s_controller));
     ZdtStepper_Init();
     s_controller.next_test_id = 1U;
@@ -143,9 +144,10 @@ void ZdtStepperTest_Init(uint32_t now_ms)
     s_controller.snapshot.state = ZDT_TEST_STATE_IDLE;
     s_controller.snapshot.kind = ZDT_TEST_KIND_NONE;
     s_controller.snapshot.stop_reason = ZDT_TEST_STOP_STARTUP;
-    (void)ZdtStepper_EmergencyStop(false);
-    s_controller.disable_pending = true;
-    s_controller.deadline_ms = now_ms + EMERGENCY_DISABLE_GAP_MS;
+    /* Startup must be exactly one fail-closed frame.  A stop followed by a
+     * disable after 5 ms lets the two X42S replies overlap intermittently. */
+    (void)ZdtStepper_EmergencyDisable();
+    s_controller.disable_pending = false;
 }
 
 void ZdtStepperTest_RequestRefresh(uint8_t mask)

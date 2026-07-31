@@ -570,6 +570,11 @@
               <FilePath>../System/lever_actuator.c</FilePath>
             </File>
             <File>
+              <FileName>h3_tune.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/h3_tune.c</FilePath>
+            </File>
+            <File>
               <FileName>control_protocol.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/control_protocol.c</FilePath>
@@ -598,6 +603,11 @@
               <FileName>m6_vision_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>../System/m6_vision_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>ball_vision.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../System/ball_vision.c</FilePath>
             </File>
             <File>
               <FileName>m6_action_validate.c</FileName>
@@ -659,6 +669,16 @@
               <FileType>1</FileType>
               <FilePath>../Control/h_course_profile.c</FilePath>
             </File>
+            <File>
+              <FileName>ball_pd.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/ball_pd.c</FilePath>
+            </File>
+            <File>
+              <FileName>ball_cascade.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Control/ball_cascade.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -673,6 +693,16 @@
               <FileName>app_h2_panel.c</FileName>
               <FileType>1</FileType>
               <FilePath>../App/app_h2_panel.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_h3.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/app_h3.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_h4_ball.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/app_h4_ball.c</FilePath>
             </File>
             <File>
               <FileName>h_mission.c</FileName>

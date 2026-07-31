@@ -20,6 +20,7 @@ class AppH2PanelTests(unittest.TestCase):
                 "-Wall",
                 "-Wextra",
                 "-Werror",
+                "-DH3_DEVELOPMENT_ENTRY=0",
                 "-I", str(ROOT / "App"),
                 "-I", str(ROOT / "Config"),
                 "-I", str(ROOT / "Control"),
@@ -39,6 +40,9 @@ class AppH2PanelTests(unittest.TestCase):
         main = (ROOT / "Source" / "main.c").read_text(encoding="utf-8")
         app_line = (ROOT / "App" / "app_line.c").read_text(encoding="utf-8")
         panel = (ROOT / "App" / "app_h2_panel.c").read_text(encoding="utf-8")
+        h3_config = (ROOT / "Config" / "h3_control_config.h").read_text(
+            encoding="utf-8"
+        )
         project = (
             ROOT / "keil" / "empty_LP_MSPM0G3507_nortos_keil.uvprojx"
         ).read_text(encoding="utf-8")
@@ -49,6 +53,8 @@ class AppH2PanelTests(unittest.TestCase):
         self.assertIn("../App/app_h2_panel.c", project)
         self.assertIn("bool AppLine_StartH2", app_line)
         self.assertIn("AppH2StartStatus_t AppH2Panel_CheckStart", panel)
+        self.assertIn("#define H3_DEVELOPMENT_ENTRY                    1U", h3_config)
+        self.assertIn("#define H3_SINGLE_TARGET_ONLY                   0U", h3_config)
         self.assertIn("SAFETY_SENSOR_BIT(SAFETY_SENSOR_GYRO)", app_line)
         self.assertIn("SAFETY_FAULT_GYRO_TIMEOUT", app_line)
         self.assertIn("app_line.elapsed_ms", app_line)

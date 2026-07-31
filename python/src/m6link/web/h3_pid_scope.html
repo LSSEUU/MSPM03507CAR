@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>H3 PID Scope</title>
+  <link rel="stylesheet" href="/h3_pid_scope.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="eyebrow">M6 · H3 / CENTER HOLD</span>
+      <h1>PID 串口示波器</h1>
+    </div>
+    <div class="live-summary" aria-label="实时状态">
+      <span id="connectionChip" class="chip muted"><i></i>连接中</span>
+      <span id="phaseChip" class="chip muted">CONNECTING</span>
+      <span id="visionChip" class="chip muted">VISION —</span>
+      <span id="faultChip" class="chip good">FAULT 0</span>
+      <span class="readout"><small>位置</small><strong id="liveX">—</strong><em>mm</em></span>
+      <span class="readout"><small>速度</small><strong id="liveV">—</strong><em>mm/s</em></span>
+    </div>
+  </header>
+
+  <div id="notice" class="notice" role="status" aria-live="polite">
+    正在核对固件身份与 H3 schema 2 遥测…
+  </div>
+
+  <main class="workspace">
+    <aside class="control-panel" aria-label="PID 与测试控制">
+      <section class="panel-section baseline">
+        <div class="section-title">
+          <div><span class="index">01</span><h2>基线参数</h2></div>
+          <span id="revision" class="mono dim">rev —</span>
+        </div>
+        <p>每次只改一项；Apply 仅更新 RAM，重启恢复编译默认值。</p>
+
+        <label class="parameter-card" for="kpInput">
+          <span><b>Kp</b><small>mdeg / mm</small></span>
+          <input id="kpInput" type="number" min="20" max="300" step="1" value="105">
+        </label>
+        <button id="applyKp" class="button secondary" type="button">单独应用 Kp</button>
+
+        <label class="parameter-card" for="kdInput">
+          <span><b>Kd</b><small>mdeg / (mm/s)</small></span>
+          <input id="kdInput" type="number" min="0" max="120" step="1" value="36">
+        </label>
+        <button id="applyKd" class="button secondary" type="button">单独应用 Kd</button>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-title">
+          <div><span class="index">02</span><h2>手拨测试</h2></div>
+          <span id="runQuota" class="mono dim">0 / 8</span>
+        </div>
+        <p>目标固定为 0 mm。启动后轻拨约 ±10 mm，随后松手，不要持续扶球。</p>
+        <div class="button-row">
+          <button id="startButton" class="button primary" type="button">开始 0 点保持</button>
+          <button id="stopButton" class="button secondary" type="button">正常停止</button>
+        </div>
+        <button id="estopButton" class="button danger" type="button">急停 S</button>
+        <dl class="mini-status">
+          <div><dt>单轮上限</dt><dd id="duration">8.0 s</dd></div>
+          <div><dt>记录目录</dt><dd id="captureDir" title="">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-title">
+          <div><span class="index">03</span><h2>人工标记</h2></div>
+        </div>
+        <label class="sr-only" for="markerInput">标记文字</label>
+        <input id="markerInput" class="text-input" type="text" maxlength="80" placeholder="例如：右拨，手感有回弹">
+        <button id="markerButton" class="button secondary" type="button">写入记录</button>
+      </section>
+
+      <section class="safety-note">
+        <strong>安全边界仍由固件执行</strong>
+        <p>心跳丢失、视觉异常、球边缘或真实故障均会停止。界面不会自动清 fault，也不会写 Flash。</p>
+      </section>
+    </aside>
+
+    <section class="scope-area">
+      <div class="scope-toolbar">
+        <div class="toolbar-group" aria-label="波形时间窗">
+          <button class="tool-button window active" data-window="15" type="button">15 s</button>
+          <button class="tool-button window" data-window="30" type="button">30 s</button>
+          <button class="tool-button window" data-window="60" type="button">60 s</button>
+        </div>
+        <div class="toolbar-group">
+          <button id="pauseButton" class="tool-button" type="button">暂停画面</button>
+          <button id="clearButton" class="tool-button" type="button">清空画面</button>
+          <a class="tool-button link" href="/api/export.csv" download>导出 CSV</a>
+        </div>
+        <span id="cursorReadout" class="cursor-readout mono">移动鼠标读取同一时刻</span>
+      </div>
+
+      <div class="charts">
+        <article class="chart-card wide">
+          <header>
+            <div><span class="chart-number">A</span><h2>球位置 / 目标</h2></div>
+            <div class="legend"><span class="line cyan">位置 x</span><span class="line dashed">目标 0</span><span class="band">稳定 ±3 mm</span></div>
+          </header>
+          <canvas id="positionChart" aria-label="球位置和目标波形"></canvas>
+          <footer><span>单位 mm</span><strong id="positionStat">等待数据</strong></footer>
+        </article>
+
+        <article class="chart-card">
+          <header>
+            <div><span class="chart-number">B</span><h2>球速度</h2></div>
+            <div class="legend"><span class="line amber">vx</span><span class="limit">稳定 ≤5</span></div>
+          </header>
+          <canvas id="velocityChart" aria-label="球速度波形"></canvas>
+          <footer><span>单位 mm/s</span><strong id="velocityStat">等待数据</strong></footer>
+        </article>
+
+        <article class="chart-card">
+          <header>
+            <div><span class="chart-number">C</span><h2>控制倾角</h2></div>
+            <div class="legend"><span class="line violet">PD 原始</span><span class="line cyan">实际</span><span class="line dashed red">强制</span></div>
+          </header>
+          <canvas id="tiltChart" aria-label="PD 请求和倾角波形"></canvas>
+          <footer><span>单位 deg</span><strong id="tiltStat">CENTER 应为 forced 0</strong></footer>
+        </article>
+
+        <article class="chart-card wide">
+          <header>
+            <div><span class="chart-number">D</span><h2>执行器跟随</h2></div>
+            <div class="legend"><span class="line cyan">current count</span><span class="line dashed">target count</span></div>
+          </header>
+          <canvas id="actuatorChart" aria-label="执行器当前和目标 count 波形"></canvas>
+          <footer><span id="actuatorMeta">方向 — · RPM —</span><strong id="actuatorStat">等待数据</strong></footer>
+        </article>
+      </div>
+
+      <section class="metrics-panel" aria-label="本轮响应指标">
+        <header>
+          <div><span class="index">04</span><h2>本轮响应判读</h2></div>
+          <strong id="assessment">等待轻拨</strong>
+        </header>
+        <div class="metric-grid">
+          <div><small>拨动峰值</small><strong id="metricPeak">—</strong><span>mm</span></div>
+          <div><small>反向过冲</small><strong id="metricOvershoot">—</strong><span>mm</span></div>
+          <div><small>稳定时间</small><strong id="metricSettle">—</strong><span>ms</span></div>
+          <div><small>过零次数</small><strong id="metricCrossings">—</strong><span>次</span></div>
+          <div><small>最大倾角</small><strong id="metricTilt">—</strong><span>deg</span></div>
+          <div><small>遥测 gap</small><strong id="metricGap">—</strong><span>次</span></div>
+        </div>
+        <p id="tuningHint" class="tuning-hint">先用 Kp=105、Kd=36 完成左右各一次约 10 mm 的小幅拨动，再比较波形。</p>
+      </section>
+    </section>
+  </main>
+
+  <script src="/h3_pid_scope.js"></script>
+</body>
+</html>

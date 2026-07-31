@@ -4,12 +4,15 @@
 #include "app_remote.h"
 #include "app_line.h"
 #include "app_h2_panel.h"
+#include "app_h3.h"
 #include "control_params.h"
 #include "diagnostics.h"
 #include "grayscale.h"
 #include "grayscale_calibration.h"
 #include "gyro.h"
 #include "heading.h"
+#include "h3_control_config.h"
+#include "h3_tune.h"
 #include "lever_actuator.h"
 #include "lever_calibration.h"
 #include "motor.h"
@@ -30,6 +33,9 @@
 #include <string.h>
 
 #define M6_ACTION_SAFETY_GRACE_MS 250U
+
+_Static_assert(sizeof(CONTROL_PROTOCOL_FIRMWARE_ID) - 1U <= 31U,
+               "firmware identity exceeds frozen wire field");
 
 _Static_assert(ZDT_STEPPER_NOT_READY_NO_STATUS ==
                M6_ZDT_NOT_READY_NO_MOTOR_STATUS, "ZDT ready detail mismatch");
@@ -176,6 +182,118 @@ static void fill_h_mission(uint8_t *out)
     p32(&out[56], s.elapsed_ms);
     p16(&out[60], (uint16_t)round_i16(s.final_left_target_mm_s));
     p16(&out[62], (uint16_t)round_i16(s.final_right_target_mm_s));
+}
+
+static void fill_h3_tune_profile(uint8_t *out,
+                                 const H3TuneProfile_t *profile)
+{
+    p16(&out[0], profile->plus_start_mdeg);
+    p16(&out[2], profile->plus_max_mdeg);
+    p16(&out[4], profile->minus_start_mdeg);
+    p16(&out[6], profile->minus_max_mdeg);
+    p16(&out[8], profile->kp_mdeg_per_mm);
+    p16(&out[10], profile->kd_mdeg_per_mm_s);
+    p16(&out[12], profile->normal_slew_mdeg_per_20ms);
+    p16(&out[14], profile->breakaway_slew_mdeg_per_20ms);
+    p16(&out[16], profile->brake_slew_mdeg_per_20ms);
+    p16(&out[18], profile->tracking_rpm);
+    p16(&out[20], profile->plus_launch_rpm);
+    p16(&out[22], profile->minus_launch_rpm);
+}
+
+static void fill_h3_tune(uint8_t *out)
+{
+    H3TuneSnapshot_t tune;
+    AppH3Snapshot_t h3;
+    LeverActuatorSnapshot_t lever;
+    uint16_t flags = 0U;
+    H3Tune_GetSnapshot(&tune);
+    AppH3_GetSnapshot(&h3);
+    LeverActuator_GetSnapshot(&lever);
+    if (tune.dirty) flags |= 1U;
+    if (tune.authorized) flags |= 2U;
+    if (tune.host_run_active) flags |= 4U;
+    if (h3.active) flags |= 8U;
+    if (h3.ready) flags |= 16U;
+    if (Safety_HasFault()) flags |= 32U;
+    if (lever.boot_homed) flags |= 64U;
+    if (lever.moving) flags |= 128U;
+    if (lever.ball_active) flags |= 256U;
+    memset(out, 0, M6_H3_TUNE_SNAPSHOT_SIZE);
+    p32(&out[0], SystemTime_Now());
+    p32(&out[4], s_boot_id);
+    p32(&out[8], tune.active_revision);
+    p32(&out[12], tune.stage_revision);
+    p32(&out[16], tune.run_id);
+    p32(&out[20], tune.auth_token);
+    p32(&out[24], tune.auth_expires_ms);
+    p32(&out[28], tune.run_deadline_ms);
+    p16(&out[32], flags);
+    out[34] = tune.remaining_runs;
+    out[35] = (uint8_t)h3.state;
+    out[36] = (uint8_t)h3.fault;
+    out[37] = (uint8_t)tune.stop_reason;
+    out[38] = (uint8_t)tune.last_result;
+    fill_h3_tune_profile(&out[40], &tune.active);
+    fill_h3_tune_profile(&out[64], &tune.staged);
+}
+
+static void fill_h3_ki(uint8_t *out)
+{
+    H3TuneSnapshot_t tune;
+    H3Tune_GetSnapshot(&tune);
+    memset(out, 0, M6_H3_KI_STATUS_SIZE);
+    p32(&out[0], tune.active_revision);
+    p32(&out[4], tune.stage_revision);
+    p16(&out[8], tune.active.ki_mdeg_per_mm_s);
+    p16(&out[10], tune.staged.ki_mdeg_per_mm_s);
+    p16(&out[12], H3_INTEGRAL_LIMIT_MDEG);
+}
+
+static void fill_h3_maneuver(uint8_t *out)
+{
+    H3TuneSnapshot_t tune;
+    H3Tune_GetSnapshot(&tune);
+    memset(out, 0, M6_H3_MANEUVER_STATUS_SIZE);
+    p32(&out[0], tune.active_revision);
+    p32(&out[4], tune.stage_revision);
+    p16(&out[8], tune.active.plus_topup_mdeg);
+    p16(&out[10], tune.staged.plus_topup_mdeg);
+    p16(&out[12], tune.active.plus_brake_mdeg);
+    p16(&out[14], tune.staged.plus_brake_mdeg);
+    p16(&out[16], tune.active.minus_brake_trigger_x10);
+    p16(&out[18], tune.staged.minus_brake_trigger_x10);
+    p16(&out[20], tune.active.minus_brake_mdeg);
+    p16(&out[22], tune.staged.minus_brake_mdeg);
+    p16(&out[24], tune.active.plus_brake_trigger_x10);
+    p16(&out[26], tune.staged.plus_brake_trigger_x10);
+    p16(&out[28], tune.active.plus_topup_brake_trigger_x10);
+    p16(&out[30], tune.staged.plus_topup_brake_trigger_x10);
+    p16(&out[32], tune.active.minus_brake_return_predict_ms);
+    p16(&out[34], tune.staged.minus_brake_return_predict_ms);
+    p16(&out[36], tune.active.minus_return_rpm);
+    p16(&out[38], tune.staged.minus_return_rpm);
+    p16(&out[40], tune.active.plus_topup_max_speed_mm_s);
+    p16(&out[42], tune.staged.plus_topup_max_speed_mm_s);
+}
+
+static M6Result_t h3_tune_result(H3TuneResult_t result)
+{
+    M6Result_t wire;
+    switch (result) {
+    case H3_TUNE_OK: wire = M6_RESULT_OK; break;
+    case H3_TUNE_INVALID_ARGUMENT: wire = M6_RESULT_INVALID_ARGUMENT; break;
+    case H3_TUNE_OUT_OF_RANGE: wire = M6_RESULT_OUT_OF_RANGE; break;
+    case H3_TUNE_WRONG_STATE: wire = M6_RESULT_WRONG_STATE; break;
+    case H3_TUNE_STALE_ACTIVE: wire = M6_RESULT_STALE_ACTIVE_REVISION; break;
+    case H3_TUNE_STALE_STAGE: wire = M6_RESULT_STALE_STAGE_REVISION; break;
+    case H3_TUNE_NOT_AUTHORIZED: wire = M6_RESULT_NOT_ARMED; break;
+    case H3_TUNE_AUTH_EXPIRED: wire = M6_RESULT_ARM_EXPIRED; break;
+    case H3_TUNE_AUTH_EXHAUSTED: wire = M6_RESULT_WRONG_STATE; break;
+    case H3_TUNE_START_REJECTED: wire = M6_RESULT_SENSOR_NOT_READY; break;
+    default: wire = M6_RESULT_INTERNAL; break;
+    }
+    return wire;
 }
 
 static int16_t round_i16(float value)
@@ -607,6 +725,30 @@ static M6Result_t execute_read(uint16_t opcode, const uint8_t *body,
                                uint16_t *out_length, uint32_t *detail)
 {
     (void)detail;
+    if (opcode == M6_RPC_H3_TUNE_STATUS_GET) {
+        if ((M6Link_EnabledCapabilities() & M6_CAP_H3_TUNE_CONTROL) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != 0U) return M6_RESULT_BAD_LENGTH;
+        fill_h3_tune(out);
+        *out_length = M6_H3_TUNE_SNAPSHOT_SIZE;
+        return M6_RESULT_OK;
+    }
+    if (opcode == M6_RPC_H3_KI_STATUS_GET) {
+        if ((M6Link_EnabledCapabilities() & M6_CAP_H3_TUNE_KI) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != 0U) return M6_RESULT_BAD_LENGTH;
+        fill_h3_ki(out);
+        *out_length = M6_H3_KI_STATUS_SIZE;
+        return M6_RESULT_OK;
+    }
+    if (opcode == M6_RPC_H3_MANEUVER_STATUS_GET) {
+        if ((M6Link_EnabledCapabilities() & M6_CAP_H3_TUNE_MANEUVER) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != 0U) return M6_RESULT_BAD_LENGTH;
+        fill_h3_maneuver(out);
+        *out_length = M6_H3_MANEUVER_STATUS_SIZE;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_H_MISSION_STATUS_GET) {
         if ((M6Link_EnabledCapabilities() & M6_CAP_H_MISSION_CONTROL) == 0U)
             return M6_RESULT_UNSUPPORTED_CAPABILITY;
@@ -885,6 +1027,93 @@ static M6Result_t execute_mutating(uint16_t opcode, const uint8_t *body,
     ControlParamsResult_t pr;
     *detail = 0U;
     ParameterStore_GetInfo(&store);
+    if (opcode == M6_RPC_H3_TUNE_COMMAND) {
+        H3TuneSnapshot_t snapshot;
+        H3TuneResult_t result;
+        uint32_t now_ms = SystemTime_Now();
+        uint32_t active_revision;
+        uint32_t stage_revision;
+        uint32_t value;
+        uint32_t arg0;
+        uint32_t arg1;
+        uint32_t token;
+        uint8_t command;
+        uint8_t parameter;
+        if ((M6Link_EnabledCapabilities() & M6_CAP_H3_TUNE_CONTROL) == 0U)
+            return M6_RESULT_UNSUPPORTED_CAPABILITY;
+        if (length != M6_H3_TUNE_COMMAND_REQUEST_SIZE)
+            return M6_RESULT_BAD_LENGTH;
+        if (u32(body) != s_boot_id) return M6_RESULT_INVALID_ARGUMENT;
+        if (u16(&body[14]) != 0U) return M6_RESULT_BAD_FLAGS;
+        active_revision = u32(&body[4]);
+        stage_revision = u32(&body[8]);
+        command = body[12];
+        parameter = body[13];
+        value = u32(&body[16]);
+        arg0 = u32(&body[20]);
+        arg1 = u32(&body[24]);
+        H3Tune_GetSnapshot(&snapshot);
+        if ((command != M6_H3_TUNE_COMMAND_STOP) &&
+            (command != M6_H3_TUNE_COMMAND_HEARTBEAT) &&
+            (command != M6_H3_TUNE_COMMAND_REVOKE)) {
+            if (active_revision != snapshot.active_revision) {
+                *detail = snapshot.active_revision;
+                return M6_RESULT_STALE_ACTIVE_REVISION;
+            }
+            if (stage_revision != snapshot.stage_revision) {
+                *detail = snapshot.stage_revision;
+                return M6_RESULT_STALE_STAGE_REVISION;
+            }
+        }
+        if (command == M6_H3_TUNE_COMMAND_STAGE_FIELD) {
+            if (value > 65535U || arg0 != 0U || arg1 != 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            result = H3Tune_StageField((H3TuneParameter_t)parameter,
+                (uint16_t)value, active_revision, stage_revision);
+        } else if (command == M6_H3_TUNE_COMMAND_APPLY) {
+            if (parameter != 0U || value != 0U || arg0 != 0U || arg1 != 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            result = H3Tune_Apply(active_revision, stage_revision);
+        } else if (command == M6_H3_TUNE_COMMAND_REVERT) {
+            if (parameter != 0U || value != 0U || arg0 != 0U || arg1 != 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            result = H3Tune_Revert(active_revision, stage_revision);
+        } else if (command == M6_H3_TUNE_COMMAND_AUTHORIZE) {
+            if (parameter == 0U || parameter > 8U || arg1 == 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            token = s_boot_id ^ now_ms ^ arg1 ^
+                (snapshot.active_revision * UINT32_C(0x9E3779B1));
+            if (token == 0U) token = UINT32_C(0x48335431);
+            result = H3Tune_Authorize(token, parameter, value, arg0, now_ms);
+        } else if ((command == M6_H3_TUNE_COMMAND_START) ||
+                   (command == M6_H3_TUNE_COMMAND_START_CENTER) ||
+                   (command == M6_H3_TUNE_COMMAND_STOP) ||
+                   (command == M6_H3_TUNE_COMMAND_HEARTBEAT) ||
+                   (command == M6_H3_TUNE_COMMAND_REVOKE)) {
+            if (parameter != 0U || arg0 != 0U || arg1 != 0U)
+                return M6_RESULT_INVALID_ARGUMENT;
+            if (command == M6_H3_TUNE_COMMAND_START)
+                result = H3Tune_Start(value, now_ms);
+            else if (command == M6_H3_TUNE_COMMAND_START_CENTER)
+                result = H3Tune_StartCenterHold(value, now_ms);
+            else if (command == M6_H3_TUNE_COMMAND_STOP)
+                result = H3Tune_Stop(value, now_ms);
+            else if (command == M6_H3_TUNE_COMMAND_HEARTBEAT)
+                result = H3Tune_Heartbeat(value, now_ms);
+            else
+                result = H3Tune_Revoke(value, H3_TUNE_STOP_REVOKED);
+        } else {
+            return M6_RESULT_INVALID_ARGUMENT;
+        }
+        H3Tune_RecordResult(result);
+        if (result != H3_TUNE_OK) {
+            *detail = (uint32_t)result;
+            return h3_tune_result(result);
+        }
+        fill_h3_tune(out);
+        *out_length = M6_H3_TUNE_SNAPSHOT_SIZE;
+        return M6_RESULT_OK;
+    }
     if (opcode == M6_RPC_H_MISSION_COMMAND) {
         HMissionSnapshot_t snapshot;
         HMissionConfig_t config;
@@ -1458,6 +1687,7 @@ void M6Rpc_Service(uint32_t now_ms)
     session = M6Link_Mode() == M6_LINK_V2_ESTABLISHED ?
         M6Link_CurrentSession() : 0U;
     if ((session == 0U) && (s_event_session != 0U)) {
+        H3Tune_OnDisconnect(now_ms);
         GrayscaleCalibration_CancelHost(s_event_session, now_ms);
         LeverCalibration_CancelHost(s_event_session, now_ms);
         memset(s_subscriptions, 0, sizeof(s_subscriptions));

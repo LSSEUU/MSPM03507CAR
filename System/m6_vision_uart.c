@@ -8,7 +8,7 @@
 
 #define M6_VISION_BULK_KIND                 2U
 #define M6_VISION_CHUNK_DATA_MAX            64U
-#define M6_VISION_RECENT_BACKLOG_BYTES      128U
+#define M6_VISION_MIRROR_SIZE               128U
 #define M6_VISION_FLAG_STARTUP_BACKLOG      (1U << 0)
 #define M6_VISION_FLAG_RX_OVERFLOW          (1U << 1)
 #define M6_VISION_FLAG_BRIDGE_DROP          (1U << 2)
@@ -17,6 +17,7 @@
 typedef struct {
     bool enabled;
     bool pending;
+    bool raw_paused;
     uint16_t startup_remaining;
     uint8_t pending_payload[M6_MAX_PAYLOAD];
     uint8_t pending_length;
@@ -24,6 +25,10 @@ typedef struct {
     uint32_t last_rx_overflow;
     uint32_t last_hardware_errors;
     uint32_t last_bridge_dropped;
+    uint8_t mirror[M6_VISION_MIRROR_SIZE];
+    uint8_t mirror_read;
+    uint8_t mirror_write;
+    uint8_t mirror_count;
 } M6VisionUartState_t;
 
 static M6VisionUartState_t s_monitor;
@@ -40,25 +45,6 @@ static void p32(uint8_t *p, uint32_t value)
     p[1] = (uint8_t)(value >> 8);
     p[2] = (uint8_t)(value >> 16);
     p[3] = (uint8_t)(value >> 24);
-}
-
-static void discard_old_backlog(void)
-{
-    VisionUartStats_t stats;
-    uint8_t scratch[32];
-    size_t discard;
-
-    if (s_monitor.startup_remaining != 0U) return;
-    VisionUart_GetStats(&stats);
-    if (stats.rx_queued <= M6_VISION_RECENT_BACKLOG_BYTES) return;
-    discard = (size_t)(stats.rx_queued - M6_VISION_RECENT_BACKLOG_BYTES);
-    while (discard != 0U) {
-        size_t request = discard > sizeof(scratch) ? sizeof(scratch) : discard;
-        size_t consumed = VisionUart_Read(scratch, request);
-        if (consumed == 0U) break;
-        discard -= consumed;
-        s_monitor.bridge_dropped += (uint32_t)consumed;
-    }
 }
 
 static bool publish_pending(void)
@@ -84,16 +70,51 @@ void M6VisionUart_SetEnabled(bool enabled)
     if (enabled == s_monitor.enabled) return;
     s_monitor.enabled = enabled;
     s_monitor.pending = false;
+    s_monitor.mirror_read = 0U;
+    s_monitor.mirror_write = 0U;
+    s_monitor.mirror_count = 0U;
     if (!enabled) {
         s_monitor.startup_remaining = 0U;
         return;
     }
     VisionUart_GetStats(&stats);
-    s_monitor.startup_remaining = stats.rx_queued;
-    /* Report startup damage with the backlog instead of treating it as complete. */
+    /* BallVision has already consumed any hardware backlog.  Monitoring starts
+     * at the next copied byte and can never steal data from the controller. */
+    s_monitor.startup_remaining = 0U;
     s_monitor.last_rx_overflow = 0U;
     s_monitor.last_hardware_errors = 0U;
     s_monitor.last_bridge_dropped = s_monitor.bridge_dropped;
+}
+
+bool M6VisionUart_IsEnabled(void)
+{
+    return s_monitor.enabled;
+}
+
+void M6VisionUart_MirrorRx(const uint8_t *data, size_t length)
+{
+    size_t index;
+    if (!s_monitor.enabled || s_monitor.raw_paused || (data == NULL)) return;
+    for (index = 0U; index < length; index++) {
+        if (s_monitor.mirror_count >= M6_VISION_MIRROR_SIZE) {
+            s_monitor.bridge_dropped++;
+            continue;
+        }
+        s_monitor.mirror[s_monitor.mirror_write] = data[index];
+        s_monitor.mirror_write = (uint8_t)(
+            (s_monitor.mirror_write + 1U) % M6_VISION_MIRROR_SIZE);
+        s_monitor.mirror_count++;
+    }
+}
+
+void M6VisionUart_SetRawPaused(bool paused)
+{
+    if (paused == s_monitor.raw_paused) return;
+    s_monitor.raw_paused = paused;
+    s_monitor.pending = false;
+    s_monitor.mirror_read = 0U;
+    s_monitor.mirror_write = 0U;
+    s_monitor.mirror_count = 0U;
 }
 
 void M6VisionUart_GetStatus(uint8_t *payload, uint16_t *payload_length)
@@ -121,18 +142,24 @@ void M6VisionUart_Service(uint32_t now_ms)
     uint16_t flags = 0U;
     size_t length;
 
-    if (!s_monitor.enabled) return;
+    if (!s_monitor.enabled || s_monitor.raw_paused) return;
     if (!publish_pending()) {
-        discard_old_backlog();
         return;
     }
-    discard_old_backlog();
     VisionUart_GetStats(&stats);
-    if (stats.rx_queued == 0U) return;
+    if (s_monitor.mirror_count == 0U) return;
 
     memset(s_monitor.pending_payload, 0, sizeof(s_monitor.pending_payload));
-    length = VisionUart_Read(&s_monitor.pending_payload[32],
-                             M6_VISION_CHUNK_DATA_MAX);
+    length = 0U;
+    while ((length < M6_VISION_CHUNK_DATA_MAX) &&
+           (s_monitor.mirror_count != 0U)) {
+        s_monitor.pending_payload[32U + length] =
+            s_monitor.mirror[s_monitor.mirror_read];
+        s_monitor.mirror_read = (uint8_t)(
+            (s_monitor.mirror_read + 1U) % M6_VISION_MIRROR_SIZE);
+        s_monitor.mirror_count--;
+        length++;
+    }
     if (length == 0U) return;
     if (s_monitor.startup_remaining != 0U) {
         flags |= M6_VISION_FLAG_STARTUP_BACKLOG;

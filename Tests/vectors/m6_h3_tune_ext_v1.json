@@ -1,0 +1,84 @@
+{
+  "name": "m6-h3-tune-v1",
+  "version": 1,
+  "base_contract": "m6-v2-wire-v1",
+  "capability": {"name": "H3_TUNE_CONTROL", "bit": 31},
+  "rpc_opcodes": {
+    "H3_TUNE_STATUS_GET": 17,
+    "H3_TUNE_COMMAND": 33547
+  },
+  "commands": {
+    "STAGE_FIELD": 1,
+    "APPLY": 2,
+    "REVERT": 3,
+    "AUTHORIZE": 4,
+    "START": 5,
+    "STOP": 6,
+    "HEARTBEAT": 7,
+    "REVOKE": 8,
+    "START_CENTER": 9
+  },
+  "parameters": {
+    "plus_start_mdeg": 1,
+    "plus_max_mdeg": 2,
+    "minus_start_mdeg": 3,
+    "minus_max_mdeg": 4,
+    "kp_mdeg_per_mm": 5,
+    "kd_mdeg_per_mm_s": 6,
+    "normal_slew_mdeg_per_20ms": 7,
+    "breakaway_slew_mdeg_per_20ms": 8,
+    "brake_slew_mdeg_per_20ms": 9,
+    "tracking_rpm": 10,
+    "plus_launch_rpm": 11,
+    "minus_launch_rpm": 12
+  },
+  "layouts": [
+    {
+      "name": "h3_tune_command_request",
+      "size": 28,
+      "fields": [
+        {"name": "boot_id", "offset": 0, "size": 4, "type": "u32"},
+        {"name": "expected_active_revision", "offset": 4, "size": 4, "type": "u32"},
+        {"name": "expected_stage_revision", "offset": 8, "size": 4, "type": "u32"},
+        {"name": "command", "offset": 12, "size": 1, "type": "u8"},
+        {"name": "parameter_id", "offset": 13, "size": 1, "type": "u8"},
+        {"name": "flags", "offset": 14, "size": 2, "type": "u16"},
+        {"name": "value", "offset": 16, "size": 4, "type": "u32"},
+        {"name": "arg0", "offset": 20, "size": 4, "type": "u32"},
+        {"name": "arg1", "offset": 24, "size": 4, "type": "u32"}
+      ]
+    },
+    {
+      "name": "h3_tune_snapshot",
+      "size": 88,
+      "fields": [
+        {"name": "time_ms", "offset": 0, "size": 4, "type": "u32"},
+        {"name": "boot_id", "offset": 4, "size": 4, "type": "u32"},
+        {"name": "active_revision", "offset": 8, "size": 4, "type": "u32"},
+        {"name": "stage_revision", "offset": 12, "size": 4, "type": "u32"},
+        {"name": "run_id", "offset": 16, "size": 4, "type": "u32"},
+        {"name": "auth_token", "offset": 20, "size": 4, "type": "u32"},
+        {"name": "auth_expires_ms", "offset": 24, "size": 4, "type": "u32"},
+        {"name": "run_deadline_ms", "offset": 28, "size": 4, "type": "u32"},
+        {"name": "flags", "offset": 32, "size": 2, "type": "u16"},
+        {"name": "remaining_runs", "offset": 34, "size": 1, "type": "u8"},
+        {"name": "h3_state", "offset": 35, "size": 1, "type": "u8"},
+        {"name": "h3_fault", "offset": 36, "size": 1, "type": "u8"},
+        {"name": "stop_reason", "offset": 37, "size": 1, "type": "u8"},
+        {"name": "last_result", "offset": 38, "size": 1, "type": "u8"},
+        {"name": "reserved", "offset": 39, "size": 1, "type": "u8"},
+        {"name": "active_profile", "offset": 40, "size": 24, "type": "u16[12]"},
+        {"name": "staged_profile", "offset": 64, "size": 24, "type": "u16[12]"}
+      ]
+    }
+  ],
+  "semantics": {
+    "ram_only": true,
+    "save_supported": false,
+    "single_field_stage": true,
+    "max_runs_per_authorization": 8,
+    "max_authorization_ms": 1800000,
+    "max_run_ms": 12000,
+    "heartbeat_timeout_ms": 300
+  }
+}

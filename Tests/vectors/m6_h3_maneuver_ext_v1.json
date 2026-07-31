@@ -1,0 +1,60 @@
+{
+  "name": "m6-h3-maneuver-v1",
+  "version": 1,
+  "base_contract": "m6-v2-wire-v1",
+  "requires": "m6-h3-tune-v1",
+  "capability": {"name": "H3_TUNE_MANEUVER", "bit": 33},
+  "rpc_opcodes": {"H3_MANEUVER_STATUS_GET": 19},
+  "parameters": {
+    "plus_topup_mdeg": 14,
+    "plus_brake_mdeg": 15,
+    "minus_brake_trigger_x10": 16,
+    "minus_brake_mdeg": 17,
+    "plus_brake_trigger_x10": 18,
+    "plus_topup_brake_trigger_x10": 19,
+    "minus_brake_return_predict_ms": 20,
+    "minus_return_rpm": 21,
+    "plus_topup_max_speed_mm_s": 22
+  },
+  "layouts": [
+    {
+      "name": "h3_maneuver_status",
+      "size": 44,
+      "fields": [
+        {"name": "active_revision", "offset": 0, "size": 4, "type": "u32"},
+        {"name": "stage_revision", "offset": 4, "size": 4, "type": "u32"},
+        {"name": "active_plus_topup_mdeg", "offset": 8, "size": 2, "type": "u16"},
+        {"name": "staged_plus_topup_mdeg", "offset": 10, "size": 2, "type": "u16"},
+        {"name": "active_plus_brake_mdeg", "offset": 12, "size": 2, "type": "u16"},
+        {"name": "staged_plus_brake_mdeg", "offset": 14, "size": 2, "type": "u16"},
+        {"name": "active_minus_brake_trigger_x10", "offset": 16, "size": 2, "type": "u16"},
+        {"name": "staged_minus_brake_trigger_x10", "offset": 18, "size": 2, "type": "u16"},
+        {"name": "active_minus_brake_mdeg", "offset": 20, "size": 2, "type": "u16"},
+        {"name": "staged_minus_brake_mdeg", "offset": 22, "size": 2, "type": "u16"},
+        {"name": "active_plus_brake_trigger_x10", "offset": 24, "size": 2, "type": "u16"},
+        {"name": "staged_plus_brake_trigger_x10", "offset": 26, "size": 2, "type": "u16"},
+        {"name": "active_plus_topup_brake_trigger_x10", "offset": 28, "size": 2, "type": "u16"},
+        {"name": "staged_plus_topup_brake_trigger_x10", "offset": 30, "size": 2, "type": "u16"},
+        {"name": "active_minus_brake_return_predict_ms", "offset": 32, "size": 2, "type": "u16"},
+        {"name": "staged_minus_brake_return_predict_ms", "offset": 34, "size": 2, "type": "u16"},
+        {"name": "active_minus_return_rpm", "offset": 36, "size": 2, "type": "u16"},
+        {"name": "staged_minus_return_rpm", "offset": 38, "size": 2, "type": "u16"},
+        {"name": "active_plus_topup_max_speed_mm_s", "offset": 40, "size": 2, "type": "u16"},
+        {"name": "staged_plus_topup_max_speed_mm_s", "offset": 42, "size": 2, "type": "u16"}
+      ]
+    }
+  ],
+  "semantics": {
+    "ram_only": true,
+    "save_supported": false,
+    "plus_topup_mdeg": {"minimum": 6500, "maximum": 12000},
+    "plus_brake_mdeg": {"minimum": 3000, "maximum": 12000},
+    "minus_brake_trigger_x10": {"minimum": 0, "maximum": 400},
+    "minus_brake_mdeg": {"minimum": 3000, "maximum": 12000},
+    "plus_brake_trigger_x10": {"minimum": 400, "maximum": 600},
+    "plus_topup_brake_trigger_x10": {"minimum": 200, "maximum": 390},
+    "minus_brake_return_predict_ms": {"minimum": 0, "maximum": 250},
+    "minus_return_rpm": {"minimum": 1, "maximum": 8},
+    "plus_topup_max_speed_mm_s": {"minimum": 0, "maximum": 30}
+  }
+}

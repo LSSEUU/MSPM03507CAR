@@ -7,6 +7,9 @@
 
 #include "m6_zdt_stepper_ext.h"
 #include "m6_h_mission_ext.h"
+#include "m6_h3_tune_ext.h"
+#include "m6_h3_ki_ext.h"
+#include "m6_h3_maneuver_ext.h"
 #include "m6_lever_calibration_ext.h"
 
 /* Generated contract constants: Tests/vectors/m6_v2_wire_v1.json
@@ -66,7 +69,8 @@
     M6_CAP_HEADING_RATE_ACTION | M6_CAP_MANUAL_DRIVE | \
     M6_CAP_VISION_UART_MONITOR | M6_CAP_GRAYSCALE_CALIBRATION | \
     M6_CAP_ZDT_STEPPER_CONTROL | M6_CAP_H_MISSION_CONTROL | \
-    M6_CAP_LEVER_CALIBRATION)
+    M6_CAP_LEVER_CALIBRATION | M6_CAP_H3_TUNE_CONTROL | \
+    M6_CAP_H3_TUNE_KI | M6_CAP_H3_TUNE_MANEUVER)
 
 typedef enum {
     M6_FRAME_HELLO = 0x01,

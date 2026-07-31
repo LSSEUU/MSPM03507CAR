@@ -2,9 +2,12 @@
 
 #include "app_line.h"
 #include "app_h2_panel.h"
+#include "app_h3.h"
+#include "app_h4_ball.h"
 #include "app_remote.h"
 #include "app_manual_drive.h"
 #include "buzzer.h"
+#include "ball_vision.h"
 #include "control_params.h"
 #include "control_protocol.h"
 #include "control_runtime.h"
@@ -14,6 +17,7 @@
 #include "grayscale_calibration.h"
 #include "gyro.h"
 #include "heading.h"
+#include "h3_tune.h"
 #include "key.h"
 #include "led.h"
 #include "lever_actuator.h"
@@ -37,6 +41,8 @@
 
 static void Main_EmergencyStopCallback(void)
 {
+    AppH3_EmergencyStop();
+    AppH4Ball_EmergencyStop();
     M6Telemetry_StopFromISR();
     Safety_EmergencyStop(SystemTime_Now());
     ResetDiag_Checkpoint(RESET_DIAG_CHECKPOINT_EMERGENCY);
@@ -122,6 +128,7 @@ int main(void)
 
     debug_init();
     VisionUart_Init();
+    BallVision_Init(SystemTime_Now());
     ZdtStepperTest_Init(SystemTime_Now());
     debug_set_emergency_callback(Main_EmergencyStopCallback);
     Encoder_Init();
@@ -132,6 +139,9 @@ int main(void)
     Gyro_Init();
     LED_Init();
     OLED_Init();
+    H3Tune_Init(SystemTime_Now());
+    AppH3_Init(SystemTime_Now());
+    AppH4Ball_Init(SystemTime_Now());
     AppH2Panel_Init(SystemTime_Now());
 
     if (Watchdog_WasResetCause(reset_cause)) {
@@ -169,6 +179,7 @@ int main(void)
         }
 
         AppRemote_Poll();
+        BallVision_Service(SystemTime_Now());
         ZdtStepperTest_Poll(SystemTime_Now());
         LeverCalibration_Task(SystemTime_Now());
         LeverActuator_Task(SystemTime_Now());
@@ -262,6 +273,9 @@ int main(void)
                 gyro.sample.yaw_rate_deg_s, gyro.rate_frames,
                 gyro.last_rate_update_ms, started);
             AppH2Panel_Task20ms(started);
+            H3Tune_Task20ms(started);
+            AppH3_Task20ms(started);
+            AppH4Ball_Task20ms(started);
             Heading_GetSnapshot(&heading);
             if (heading.mode != HEADING_MODE_IDLE) {
                 WheelSpeed_SetTarget(heading.left_target_mm_s,

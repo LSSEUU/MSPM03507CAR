@@ -40,7 +40,9 @@
 ;   <o> Stack Size (in Bytes) <0x0-0xFFFFFFFF:8>
 ; </h>
 
-Stack_Size      EQU     0x00004000
+; Bare-metal main loop has no recursion or dynamic allocation.  The prior H3
+; build used 12 KiB and this restores that verified reservation.
+Stack_Size      EQU     0x00003000
 
                 AREA    STACK, NOINIT, READWRITE, ALIGN=3
 Stack_Mem       SPACE   Stack_Size

@@ -22,9 +22,15 @@ packages = ["src/m6link"]
 "../Tests/vectors/m6_zdt_stepper_ext.schema.json" = "m6link/data/m6_zdt_stepper_ext.schema.json"
 "../Tests/vectors/m6_h_mission_ext_v1.json" = "m6link/data/m6_h_mission_ext_v1.json"
 "../Tests/vectors/m6_lever_calibration_ext_v1.json" = "m6link/data/m6_lever_calibration_ext_v1.json"
+"../Tests/vectors/m6_h3_tune_ext_v1.json" = "m6link/data/m6_h3_tune_ext_v1.json"
+"../Tests/vectors/m6_h3_ki_ext_v1.json" = "m6link/data/m6_h3_ki_ext_v1.json"
+"../Tests/vectors/m6_h3_maneuver_ext_v1.json" = "m6link/data/m6_h3_maneuver_ext_v1.json"
 "src/m6link/web/dashboard.html" = "m6link/web/dashboard.html"
 "src/m6link/web/dashboard.css" = "m6link/web/dashboard.css"
 "src/m6link/web/dashboard.js" = "m6link/web/dashboard.js"
+"src/m6link/web/h3_pid_scope.html" = "m6link/web/h3_pid_scope.html"
+"src/m6link/web/h3_pid_scope.css" = "m6link/web/h3_pid_scope.css"
+"src/m6link/web/h3_pid_scope.js" = "m6link/web/h3_pid_scope.js"
 
 [tool.pytest.ini_options]
 testpaths = ["../Tests"]

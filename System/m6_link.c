@@ -1010,9 +1010,12 @@ void M6Link_Service(uint32_t now_ms, uint32_t emergency_epoch,
         s_link.p2_tokens = (uint16_t)((s_link.p2_tokens + generated / 1000U) >
             448U ? 448U : s_link.p2_tokens + generated / 1000U);
         s_link.p2_token_remainder = (uint16_t)(generated % 1000U);
-        generated = elapsed * 1000U + s_link.p3_token_remainder;
+        /* H3 Ki telemetry publishes a 50-byte schema-3 record at 20 Hz.
+         * Include framing/escaping headroom while keeping P3 far below the
+         * 115200-baud link capacity and lower than control/telemetry P2. */
+        generated = elapsed * 1600U + s_link.p3_token_remainder;
         s_link.p3_tokens = (uint16_t)((s_link.p3_tokens + generated / 1000U) >
-            224U ? 224U : s_link.p3_tokens + generated / 1000U);
+            336U ? 336U : s_link.p3_tokens + generated / 1000U);
         s_link.p3_token_remainder = (uint16_t)(generated % 1000U);
         s_link.token_updated_ms = now_ms;
     }

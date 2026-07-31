@@ -1,9 +1,11 @@
 #include "app_h2_panel.h"
 
+#include "app_h3.h"
 #include "app_line.h"
 #include "control_config.h"
 #include "grayscale_calibration.h"
 #include "heading.h"
+#include "h3_control_config.h"
 #include "key.h"
 #include "oled.h"
 #include "safety.h"
@@ -258,6 +260,20 @@ void AppH2Panel_Task20ms(uint32_t now_ms)
         &panel.snapshot.release_armed);
     if (!key1_edge) return;
     panel.snapshot.key_presses++;
+#if H3_DEVELOPMENT_ENTRY
+    if (HMission_SelectedMode() == H_MISSION_MODE_H2) {
+        if (AppH3_IsActive()) {
+            AppH3_RequestStop(now_ms);
+            panel.snapshot.starts++;
+        } else if (AppH3_Start(now_ms)) {
+            panel.snapshot.starts++;
+        } else {
+            panel.snapshot.rejects++;
+        }
+        panel.display_dirty = true;
+        return;
+    }
+#endif
     status = AppH2Panel_CheckStart(now_ms);
     panel.snapshot.selected_mode = HMission_SelectedMode();
     if ((status == APP_H2_START_READY) &&
@@ -286,6 +302,13 @@ void AppH2Panel_Task100ms(uint32_t now_ms)
     uint32_t elapsed_centiseconds;
     uint32_t displayed_centiseconds;
     bool active_calibration = GrayscaleCalibration_IsActive();
+
+#if H3_DEVELOPMENT_ENTRY
+    if (HMission_SelectedMode() == H_MISSION_MODE_H2) {
+        AppH3_Task100ms(now_ms);
+        return;
+    }
+#endif
 
     if (active_calibration) {
         panel.calibration_was_active = true;

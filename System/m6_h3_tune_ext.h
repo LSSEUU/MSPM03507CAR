@@ -1,0 +1,22 @@
+#ifndef M6_H3_TUNE_EXT_H
+#define M6_H3_TUNE_EXT_H
+
+/* Generated from Tests/vectors/m6_h3_tune_ext_v1.json.
+ * registry-sha256: 90b82a9ca6a9e48744ea62d41aeb0164341fd6475389f9244305049c45579068 */
+#define M6_CAP_H3_TUNE_CONTROL           (UINT64_C(1) << 31)
+#define M6_RPC_H3_TUNE_STATUS_GET        0x0011U
+#define M6_RPC_H3_TUNE_COMMAND           0x830BU
+#define M6_H3_TUNE_COMMAND_REQUEST_SIZE  28U
+#define M6_H3_TUNE_SNAPSHOT_SIZE         88U
+
+#define M6_H3_TUNE_COMMAND_STAGE_FIELD   1U
+#define M6_H3_TUNE_COMMAND_APPLY         2U
+#define M6_H3_TUNE_COMMAND_REVERT        3U
+#define M6_H3_TUNE_COMMAND_AUTHORIZE     4U
+#define M6_H3_TUNE_COMMAND_START         5U
+#define M6_H3_TUNE_COMMAND_STOP          6U
+#define M6_H3_TUNE_COMMAND_HEARTBEAT     7U
+#define M6_H3_TUNE_COMMAND_REVOKE        8U
+#define M6_H3_TUNE_COMMAND_START_CENTER  9U
+
+#endif
