@@ -1,11 +1,11 @@
 id: balls
 name: Ball3
 name[zh]: 钢珠位置
-version: 1.2.0
+version: 1.3.0
 icon: ''
 author: liuargo
-desc: Detect and display the calibrated position of a steel ball.
-desc[zh]: 检测并显示钢珠在摆杆上的标定位置。
+desc: Hybrid steel-ball tracking with calibrated binary UART output.
+desc[zh]: 混合识别钢珠并通过标定后的二进制串口输出位置。
 files:
   - models\yolo26_all_maixcam_yolo26_480_160\yolo26_all_tensor_info.txt
   - models\yolo26_all_maixcam_yolo26_480_160\yolo26_all.cvimodel
@@ -13,5 +13,6 @@ files:
   - app.yaml
   - ball_position.py
   - ball_wire.py
+  - hybrid_tracker.py
   - main.py
   - replay_serial.py
